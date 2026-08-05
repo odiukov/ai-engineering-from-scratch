@@ -17,6 +17,10 @@ Usage:
 Provider is pluggable via --provider. Default is "nllb" (the free open model that
 runs locally). Optional upgrades: anthropic|openai|deepl. "echo" makes no network
 calls and returns the source unchanged, for wiring/tests.
+
+A translation that was written by hand opts out of the bot entirely: if the output
+file already carries the marker below near its top, this script never rewrites it
+(pass --overwrite-manual to override). See docs/i18n.md.
 """
 
 import argparse
@@ -229,6 +233,23 @@ def nllb_translate_doc(src, tgt, translate_fn=None):
     return "\n".join(out_lines)
 
 
+MANUAL_MARK = "<!-- i18n:manual -->"
+
+
+def is_manual(path):
+    """True if this output file is hand-authored and must not be machine-rewritten.
+
+    The claim lives in the file itself rather than in a side manifest, so it
+    travels with the translation and cannot drift out of sync with it. Only the
+    head of the file is read: the marker belongs at the top, and a stray mention
+    of it deep in a lesson's prose must not silently freeze that lesson.
+    """
+    if not path.is_file():
+        return False
+    with path.open(encoding="utf-8") as fh:
+        return MANUAL_MARK in fh.read(512)
+
+
 def source_hash(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -280,6 +301,8 @@ def main():
     ap.add_argument("--phase", help="limit to one phase dir name")
     ap.add_argument("--only", help="limit to one lesson path (phases/.../lesson)")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--overwrite-manual", action="store_true",
+                    help=f"rewrite outputs marked {MANUAL_MARK} (default: never touch them)")
     args = ap.parse_args()
 
     cpath = cache_path(args.lang, args.phase)
@@ -291,7 +314,7 @@ def main():
         cpath.parent.mkdir(parents=True, exist_ok=True)
         cpath.write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    translated = skipped = 0
+    translated = skipped = manual = 0
     for doc in targets():
         rel = str(doc.relative_to(ROOT))
         if args.phase and f"/{args.phase}/" not in f"/{rel}":
@@ -302,6 +325,12 @@ def main():
         src = doc.read_text(encoding="utf-8")
         h = source_hash(src)
         dst = out_path(doc, args.lang)
+        # checked before the hash cache, so a hand-authored translation stays put
+        # even when its English source changes; the human owns that file now
+        if is_manual(dst) and not args.overwrite_manual:
+            manual += 1
+            print(f"manual (kept) {dst.relative_to(ROOT)}")
+            continue
         # key is the lesson path; the cache file is already per-language
         if cache.get(rel) == h and dst.is_file():
             skipped += 1
@@ -329,7 +358,8 @@ def main():
 
     if not args.dry_run:
         save_cache()
-    print(f"{args.lang}: {translated} translated, {skipped} unchanged (cache hit)")
+    print(f"{args.lang}: {translated} translated, {skipped} unchanged (cache hit), "
+          f"{manual} hand-authored (kept)")
 
 
 if __name__ == "__main__":
