@@ -23,7 +23,7 @@ Prefer local files when the repo is cloned (a `phases/` directory exists in
 or above the current directory). Otherwise fetch from:
 
 ```text
-https://raw.githubusercontent.com/rohitg00/ai-engineering-from-scratch/main/<path>
+https://raw.githubusercontent.com/odiukov/ai-engineering-from-scratch/main/<path>
 ```
 
 - Lesson text: `phases/<phase-dir>/<lesson-dir>/docs/en.md`
@@ -31,9 +31,29 @@ https://raw.githubusercontent.com/rohitg00/ai-engineering-from-scratch/main/<pat
 - Lesson list for a phase: the Contents section of `README.md` (each phase's
   table lists every lesson with its directory path and title)
 
+### Language
+
+`LEARNING.md` carries a `Language:` code from `languages.json` (`en` unless
+the learner asked otherwise). When it is not `en`, read the translated
+lesson instead of `en.md`:
+
+- Cloned: `i18n/<lang>/phases/<phase-dir>/<lesson-dir>/docs/<lang>.md`
+- Otherwise, from the `translations` branch:
+  `https://raw.githubusercontent.com/odiukov/ai-engineering-from-scratch/translations/i18n/<lang>/<path>/docs/<lang>.md`
+
+Fall back to `en.md` without comment when a translation is missing —
+coverage grows language by language, and a hand-authored translation may
+carry extra worked examples the English source does not have. Teach in the
+learner's language whenever `Language:` is not `en`.
+
+Quizzes are never translated: `quiz.json` is always the English file. Ask
+its questions in the learner's language, keeping code, identifiers, and
+technical terms verbatim.
+
 ## Step 0 — Locate state
 
-Read `LEARNING.md` from the current directory.
+Read `LEARNING.md` from the current directory. Note its `Language:` code —
+it governs both the lesson file you fetch and the language you teach in.
 
 - **Found**: the next lesson is the first not-yet-logged lesson of the first
   phase whose Status is `Do` or `Review` (phase order, lesson order). If the
@@ -59,7 +79,8 @@ lesson instead of advancing, but let them choose.
 
 ## Step 2 — Teach the lesson
 
-Fetch the lesson's `en.md`. The lessons share a fixed skeleton — problem,
+Fetch the lesson text (the translated file when `Language:` is not `en`,
+otherwise `en.md`). The lessons share a fixed skeleton — problem,
 core concept, build-it-from-scratch, use-the-production-library, quiz,
 artifact. Teach it in that order, interactively:
 
