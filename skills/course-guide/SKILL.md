@@ -25,7 +25,7 @@ README: every phase has a table listing each lesson's number, title, type
 repo is cloned; otherwise fetch:
 
 ```text
-https://raw.githubusercontent.com/rohitg00/ai-engineering-from-scratch/main/README.md
+https://raw.githubusercontent.com/odiukov/ai-engineering-from-scratch/main/README.md
 ```
 
 For term definitions, the glossary lives at `glossary/terms.md` (same rule:
@@ -48,7 +48,9 @@ local first, raw fallback).
    theme. Prefer precision: 1-3 lessons, not a phase dump. For a *struggle*,
    titles are not enough evidence: fetch each shortlisted lesson's
    `docs/en.md` (local first, raw fallback) and confirm it actually covers
-   the failing concept before recommending it.
+   the failing concept before recommending it. Read English here — it is the
+   canonical source and translations may lag it. Answer in the language the
+   learner wrote in.
 
 3. **Answer in this shape**, and keep it under ~12 lines:
    - The 1-3 lessons: phase, number, title, one line on why this one, and

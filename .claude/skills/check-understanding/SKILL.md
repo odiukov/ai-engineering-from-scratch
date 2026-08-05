@@ -57,7 +57,9 @@ Parse the argument. If it is a number, validate it is between 0 and 19 inclusive
 
 ### Step 2: Read the Phase Content
 
-If the repo is cloned (a `phases/` directory exists in or above the current directory), find all lesson directories under `phases/<phase-dir>/` and read each lesson's `docs/en.md`. If it is not cloned, get the phase's lesson list from the Contents section of the README (fetch `https://raw.githubusercontent.com/rohitg00/ai-engineering-from-scratch/main/README.md`), then fetch each lesson's `docs/en.md` from the same raw base URL. These documents contain the teaching material you will generate questions from.
+If the repo is cloned (a `phases/` directory exists in or above the current directory), find all lesson directories under `phases/<phase-dir>/` and read each lesson's `docs/en.md`. If it is not cloned, get the phase's lesson list from the Contents section of the README (fetch `https://raw.githubusercontent.com/odiukov/ai-engineering-from-scratch/main/README.md`), then fetch each lesson's `docs/en.md` from the same raw base URL. These documents contain the teaching material you will generate questions from.
+
+Always read the English docs — they are canonical, and a translation may lag them or add material the quiz should not assume. The **questions**, however, follow the learner: if `LEARNING.md` exists in the current directory and its `Language:` is not `en`, or the user is writing in another language, ask and explain in that language. Keep code, identifiers, and technical terms verbatim.
 
 Read as many lesson docs as needed to cover the full breadth of the phase. If a phase has many lessons (15+), prioritize reading a representative spread: first few, middle, and last few.
 
@@ -135,7 +137,7 @@ Question N: [question text, abbreviated]
 Your answer: B
 Correct answer: C -- [the correct option text]
 Why: [1-2 sentence explanation of why C is correct]
-Review: Lesson NN -- [lesson name] (phases/<phase-dir>/NN-<lesson-slug>/docs/en.md)
+Review: Lesson NN -- [lesson name] (phases/<phase-dir>/NN-<lesson-slug>/, docs/en.md or the learner's i18n/<lang>/ translation)
 ```
 
 ### Step 8: What Next?
