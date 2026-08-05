@@ -169,16 +169,19 @@ Loss = -(1/n) * sum(sum(y_k * log(p_k)))
 | Actually Negative | False Positive (FP) | True Negative (TN) |
 
 **Precision**: Из всех предсказанных положительных сколько действительно положительные?
+
 ```
 Precision = TP / (TP + FP)
 ```
 
 **Recall** (Sensitivity): Из всех реально положительных сколько мы поймали?
+
 ```
 Recall = TP / (TP + FN)
 ```
 
 **F1 Score**: Гармоническое среднее precision и recall. Балансирует обе метрики.
+
 ```
 F1 = 2 * (Precision * Recall) / (Precision + Recall)
 ```
