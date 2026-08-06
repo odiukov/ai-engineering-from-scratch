@@ -51,6 +51,10 @@ Use the same 4×4 GridWorld from Lesson 01. We add a stochastic variant: with pr
 ```python
 SLIP = 0.1
 
+def action_probs(action):
+    perp = ("left", "right") if action in ("up", "down") else ("up", "down")
+    return [(action, 1.0 - SLIP)] + [(d, SLIP / 2.0) for d in perp]
+
 def transitions(state, action):
     if state == TERMINAL:
         return [(state, 0.0, 1.0)]
@@ -111,7 +115,7 @@ def policy_iteration(gamma=0.99):
         policy = new_policy
 ```
 
-Typical convergence on 4×4: 4–6 outer iterations. Outputs `V*(0,0) ≈ -6` and a policy that strictly decreases the step count.
+Typical convergence on 4×4: 4–6 outer iterations (`code/main.py` takes 5). It outputs `V*(0,0) = -6.43` on this *slippery* grid — a bit worse than the `-5.85` of the deterministic grid from Lesson 01, because slips cost extra steps — and a policy that strictly decreases the expected step count.
 
 ### Step 5: value iteration (the one-loop version)
 
