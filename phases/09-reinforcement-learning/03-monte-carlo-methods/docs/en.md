@@ -21,7 +21,7 @@ The shift from DP to MC is philosophically important: we move from *known model 
 
 **The core idea, in one line:** `V^π(s) = E_π[G_t | s_t = s] ≈ (1/N) Σ_i G^{(i)}(s)` where `G^{(i)}(s)` are observed returns following visits to `s` under policy `π`.
 
-**First-visit vs every-visit MC.** Given an episode that visits state `s` multiple times, first-visit MC only counts the return from the first visit; every-visit MC counts all visits. Both are unbiased in the limit. First-visit is simpler to analyze (iid samples). Every-visit uses more data per episode and typically converges faster in practice.
+**First-visit vs every-visit MC.** Given an episode that visits state `s` multiple times, first-visit MC only counts the return from the first visit; every-visit MC counts all visits. First-visit MC is unbiased at any episode count (its samples are iid, one per episode). Every-visit MC is biased at any finite episode count — returns from repeat visits within one episode are correlated — but the bias shrinks to zero as episodes → ∞, so both converge to `V^π`. First-visit is simpler to analyze. Every-visit uses more data per episode and typically converges faster in practice.
 
 **Incremental mean.** Instead of storing all returns, update the running average:
 
@@ -92,7 +92,7 @@ def mc_policy_evaluation(env, policy, episodes, gamma=0.99):
         trajectory = rollout(env, policy)
         returns = returns_from(trajectory, gamma)
         seen = set()
-        for t, ((s, _, _), G) in enumerate(zip(trajectory, returns)):
+        for (s, _, _), G in zip(trajectory, returns):
             if s in seen:
                 continue
             seen.add(s)
@@ -130,7 +130,7 @@ def mc_control(env, episodes, gamma=0.99, epsilon=0.1):
 
 ### Step 5: compare to DP gold standard
 
-Your MC estimate of `V^π` should agree with the DP result from Lesson 02 as episodes → ∞. In practice: 50,000 episodes on 4×4 GridWorld gets you within `~0.1` of the DP answer.
+Your MC estimate of `V^π` should agree with the exact DP answer for the *same* policy on the *same* environment as episodes → ∞. Careful with the comparison: Lesson 02's `value_iteration` prints `V*` on the *slippery* grid, which is a different number. The matching reference here is iterative policy evaluation of the uniform policy on this deterministic grid — Lesson 01's `policy_evaluation`, which gives `V^π(0,0) = -39.41` at `γ = 0.99`. In practice: 50,000 episodes on 4×4 GridWorld gets you within `~0.2` of it.
 
 ## Pitfalls
 
@@ -193,7 +193,7 @@ Refuse to run MC on non-episodic tasks without a finite horizon cap. Refuse to r
 | Monte Carlo | "Random sampling" | Estimate expectations by averaging over iid samples from the distribution. |
 | Return `G_t` | "Future reward" | Sum of discounted rewards from step `t` to episode end: `Σ_{k≥0} γ^k r_{t+k+1}`. |
 | First-visit MC | "Count each state once" | Only the first visit in an episode contributes to the value estimate. |
-| Every-visit MC | "Use all visits" | Every visit contributes; slightly biased but more sample-efficient. |
+| Every-visit MC | "Use all visits" | Every visit contributes; biased at finite sample size, consistent in the limit, more sample-efficient. |
 | ε-greedy | "Exploration noise" | Pick greedy action with prob `1-ε`; random action with prob `ε`. |
 | Importance sampling | "Correcting for sampling from the wrong distribution" | Reweight returns by `π(a\|s)/μ(a\|s)` products to estimate `V^π` from `μ` data. |
 | On-policy | "Learn from my own data" | Target policy = behavior policy. Vanilla MC, PPO, SARSA. |

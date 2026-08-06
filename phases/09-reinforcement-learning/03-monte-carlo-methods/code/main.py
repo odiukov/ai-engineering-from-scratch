@@ -122,7 +122,9 @@ def main():
     print_V(V, "V^pi(s)")
     print()
     print(f"V(0,0) MC estimate     = {V[(0,0)]:.2f}")
-    print(f"V(0,0) DP  reference   = -39.41   (from lesson 02 of this phase)")
+    print(f"V^pi(0,0) DP reference = -39.41   (iterative policy evaluation of the same")
+    print(f"                                   uniform policy on this deterministic grid,")
+    print(f"                                   lesson 01 of this phase)")
     print(f"visit counts at (0,0)  = {counts[(0,0)]}")
     print()
 
@@ -135,7 +137,8 @@ def main():
     if tail:
         mean_tail = sum(tail) / len(tail)
         print(f"mean return over last 5000 episodes = {mean_tail:.2f}")
-        print("(optimal return on this 4x4 GridWorld = -6.0)")
+        print("(these are discounted returns; the optimal discounted return on this")
+        print(" 4x4 GridWorld is -5.85 = sum of -0.99^i for i in 0..5, i.e. -6.0 undiscounted)")
 
 
 if __name__ == "__main__":
