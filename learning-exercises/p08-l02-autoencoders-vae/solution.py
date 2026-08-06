@@ -1,0 +1,179 @@
+"""
+Автоэнкодеры и вариационные автоэнкодеры (VAE) — эталон.
+
+Открывай ПОСЛЕ своих зелёных тестов.
+"""
+
+import math
+
+
+def dense(W, x, b):
+    """Один линейный слой: матрица на вектор плюс сдвиг.
+
+    dense([[1.0, 0.0], [0.0, 2.0]], [3.0, 4.0], [0.0, 1.0])  ->  [3.0, 9.0]
+
+    W — список строк, длина каждой строки равна длине x. Результат длиной
+    len(W). Каждая строка W скалярно умножается на x.
+
+    В torch это одна строка `nn.Linear(in, out)(x)`. Здесь собираем руками,
+    чтобы было видно, где именно в VAE появляются mu и log_sigma2.
+
+    Ловушка: zip молча обрежет более длинный аргумент и посчитает
+    правдоподобную ерунду. Несовпадение размеров — ValueError.
+    """
+    if len(W) != len(b):
+        raise ValueError(f"W has {len(W)} rows but b has {len(b)} items")
+    for row in W:
+        if len(row) != len(x):
+            raise ValueError(f"row of length {len(row)} does not match x of length {len(x)}")
+    return [sum(w * xi for w, xi in zip(row, x)) + bi for row, bi in zip(W, b)]
+
+
+def encode(x, enc):
+    """Энкодер VAE: из x получить mu и log_sigma2. Вернуть кортеж (mu, log_sigma2).
+
+    enc — словарь с ключами W1, b1, W_mu, b_mu, W_sig, b_sig.
+      h          = tanh поэлементно от dense(W1, x, b1)
+      mu         = dense(W_mu, h, b_mu)
+      log_sigma2 = dense(W_sig, h, b_sig)
+
+    encode([1.0], {"W1": [[0.0]], "b1": [0.0],
+                   "W_mu": [[1.0]], "b_mu": [2.0],
+                   "W_sig": [[1.0]], "b_sig": [-1.0]})   ->  ([2.0], [-1.0])
+
+    Обрати внимание: энкодер выдаёт не код, а РАСПРЕДЕЛЕНИЕ q(z|x). Это и
+    есть вся разница между автоэнкодером и вариационным автоэнкодером.
+
+    Сеть выдаёт log(sigma^2), а не sigma: логарифм ничем не ограничен, а
+    sigma обязана быть положительной. Заставлять сеть саму держать знак —
+    лишняя работа и мёртвые градиенты около нуля.
+    """
+    h = [math.tanh(v) for v in dense(enc["W1"], x, enc["b1"])]
+    mu = dense(enc["W_mu"], h, enc["b_mu"])
+    log_sigma2 = dense(enc["W_sig"], h, enc["b_sig"])
+    return mu, log_sigma2
+
+
+def reparameterize(mu, log_sigma2, eps):
+    """Reparameterization trick: z = mu + sigma * eps, sigma = exp(0.5 * log_sigma2).
+
+    reparameterize([0.0, 1.0], [0.0, 0.0], [1.0, -1.0])  ->  [1.0, 0.0]
+    reparameterize([5.0], [2.0], [0.0])                  ->  [5.0]
+
+    eps приходит АРГУМЕНТОМ, а не берётся внутри. В этом весь трюк: шум
+    становится входом графа, а не случайным узлом внутри него, и
+    производные по mu и по log_sigma2 существуют. Прямое сэмплирование из
+    q(z|x) дало бы ту же выборочную статистику, но градиент бы не прошёл.
+
+    sigma получается как exp(0.5 * lv), а не exp(lv): под логарифмом сидит
+    дисперсия, а не стандартное отклонение.
+    """
+    if not (len(mu) == len(log_sigma2) == len(eps)):
+        raise ValueError("mu, log_sigma2 and eps must have the same length")
+    return [m + math.exp(0.5 * lv) * e for m, lv, e in zip(mu, log_sigma2, eps)]
+
+
+def decode(z, dec):
+    """Декодер VAE: из латентного z собрать реконструкцию x_hat.
+
+    dec — словарь с ключами W1, b1, W_out, b_out.
+      h     = tanh поэлементно от dense(W1, z, b1)
+      x_hat = dense(W_out, h, b_out)
+
+    decode([1.0], {"W1": [[0.0]], "b1": [0.0],
+                   "W_out": [[3.0]], "b_out": [7.0]})  ->  [7.0]
+
+    На выходе активации нет специально: реконструкция сравнивается с x по
+    MSE, а tanh на выходе зажал бы её в (-1, 1) и сделал бы точную
+    реконструкцию невозможной для данных вне этого диапазона.
+    """
+    h = [math.tanh(v) for v in dense(dec["W1"], z, dec["b1"])]
+    return dense(dec["W_out"], h, dec["b_out"])
+
+
+def kl_divergence_gaussian(mu, log_sigma2):
+    """KL(q(z|x) || N(0, I)) в закрытой форме.
+
+    kl_divergence_gaussian([0.0, 0.0], [0.0, 0.0])  ->  0.0
+    kl_divergence_gaussian([1.0], [0.0])            ->  0.5
+    kl_divergence_gaussian([0.0], [1.0])            ->  0.3591...
+
+    Формула: 0.5 * sum_i (exp(lv_i) + mu_i^2 - lv_i - 1).
+
+    Два свойства, которые надо помнить: величина неотрицательна и равна
+    нулю РОВНО тогда, когда q совпадает с приором, то есть при mu = 0 и
+    lv = 0. Ноль KL в логах — это не успех, а posterior collapse: латент
+    перестал нести информацию о x.
+
+    Оценивать это Монте-Карло не надо — обе стороны гауссовы, ответ точный.
+    """
+    if len(mu) != len(log_sigma2):
+        raise ValueError("mu and log_sigma2 must have the same length")
+    return 0.5 * sum(
+        math.exp(lv) + m * m - lv - 1 for m, lv in zip(mu, log_sigma2)
+    )
+
+
+def kl_grad(mu, log_sigma2):
+    """Аналитические градиенты KL. Вернуть кортеж (dKL/dmu, dKL/dlog_sigma2).
+
+    kl_grad([2.0], [0.0])  ->  ([2.0], [0.0])
+    kl_grad([0.0], [1.0])  ->  ([0.0], [0.8591...])
+
+    dKL/dmu_i = mu_i
+    dKL/dlv_i = 0.5 * (exp(lv_i) - 1)
+
+    Проверь себя центральной разностью по kl_divergence_gaussian — обязана
+    совпасть. При lv = 0 градиент по lv равен нулю: это минимум по
+    дисперсии, sigma уже равна единице, как у приора.
+
+    Именно этот градиент тянет q(z|x) к N(0, I) и структурирует латент.
+    """
+    if len(mu) != len(log_sigma2):
+        raise ValueError("mu and log_sigma2 must have the same length")
+    d_mu = list(mu)
+    d_lv = [0.5 * (math.exp(lv) - 1) for lv in log_sigma2]
+    return d_mu, d_lv
+
+
+def elbo_loss(x, x_hat, mu, log_sigma2, beta=1.0):
+    """Лосс VAE. Вернуть кортеж (total, recon, kl).
+
+      recon = sum_i (x_i - x_hat_i)^2
+      kl    = kl_divergence_gaussian(mu, log_sigma2)
+      total = recon + beta * kl
+
+    elbo_loss([1.0], [1.0], [0.0], [0.0])            ->  (0.0, 0.0, 0.0)
+    elbo_loss([1.0], [0.0], [1.0], [0.0], beta=2.0)  ->  (2.0, 1.0, 0.5)
+
+    beta — тот самый knob из beta-VAE. beta = 0 превращает VAE обратно в
+    обычный автоэнкодер: KL перестаёт влиять, латент перестаёт быть
+    гауссовым, сэмплировать из приора больше нельзя. Большой beta слишком
+    рано — posterior collapse. Практика: начинать с 0.01 и наращивать.
+    """
+    if beta < 0:
+        raise ValueError("beta must be non-negative")
+    if len(x) != len(x_hat):
+        raise ValueError("x and x_hat must have the same length")
+    recon = sum((a - b) ** 2 for a, b in zip(x, x_hat))
+    kl = kl_divergence_gaussian(mu, log_sigma2)
+    return recon + beta * kl, recon, kl
+
+
+def sample_from_prior(dec, z_dim, rng):
+    """Сэмпл из обученного VAE: взять z ~ N(0, I) и прогнать через decode.
+
+    rng = random.Random(0)
+    sample_from_prior(dec, 2, rng)  ->  вектор x_hat длиной как выход декодера
+
+    Энкодер здесь не участвует вообще — в этом и смысл всей конструкции.
+    KL приучил q(z|x) быть похожим на N(0, I), поэтому генерировать можно
+    прямо из приора. Один forward, без итераций как у диффузии.
+
+    rng — обязательный параметр (random.Random). Глобальный random
+    использовать нельзя: сэмплы должны быть воспроизводимы по сиду.
+    """
+    if z_dim <= 0:
+        raise ValueError("z_dim must be positive")
+    z = [rng.gauss(0.0, 1.0) for _ in range(z_dim)]
+    return decode(z, dec)
