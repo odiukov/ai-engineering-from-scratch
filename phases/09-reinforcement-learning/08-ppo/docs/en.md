@@ -34,7 +34,7 @@ This is the likelihood ratio of the new policy vs the policy that collected the 
 Two terms:
 
 - If the advantage `A_t > 0` and the ratio tries to grow past `1 + ε`, the clip flattens the gradient — don't push a good action further than `+ε` above old probability.
-- If the advantage `A_t < 0` and the ratio tries to grow past `1 - ε` (meaning we would make a bad action more likely compared to its clipped reduction), the clip caps the gradient — don't push a bad action below `-ε`.
+- If the advantage `A_t < 0` and the ratio tries to fall below `1 - ε`, the clip flattens the gradient — don't push a bad action's probability more than `ε` below its old probability.
 
 The `min` handles the other direction: if the ratio has moved in the *beneficial* direction, you still get the gradient (no clipping on the side that would hurt you).
 
