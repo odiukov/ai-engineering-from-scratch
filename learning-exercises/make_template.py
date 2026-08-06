@@ -68,6 +68,17 @@ def build(sol_path: Path) -> str:
     if imports:
         out.append("\n".join(imports) + "\n")
 
+    # Константы уровня модуля переносим целиком, одним блоком: тесты импортируют
+    # их из exercise, и без переноса заготовка падает на коллекции с NameError,
+    # а не на NotImplementedError — проверка "N failed == N passed" врёт.
+    consts = [
+        "\n".join(lines[n.lineno - 1 : n.end_lineno])
+        for n in tree.body
+        if isinstance(n, (ast.Assign, ast.AnnAssign))
+    ]
+    if consts:
+        out.append("\n".join(consts) + "\n")
+
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
             out.append("\n" + stub(node, lines, 4))
