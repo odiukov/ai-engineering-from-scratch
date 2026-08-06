@@ -162,6 +162,11 @@ Run locally before pushing:
 
 ```bash
 python3 scripts/audit_lessons.py
+python3 scripts/audit_lessons.py --phase NN --strict   # lessons you touched: also
+                                              # fails on a missing quiz.json or
+                                              # code/tests (advisory by default,
+                                              # since most of the curriculum
+                                              # predates both requirements)
 python3 scripts/check_readme_counts.py        # advisory — CI fixes on merge
 
 # For each lesson touched:

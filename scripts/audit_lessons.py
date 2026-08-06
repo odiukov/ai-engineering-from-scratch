@@ -2,11 +2,17 @@
 """Invariant checks across every lesson directory.
 
 Usage:
-    python scripts/audit_lessons.py [--phase N] [--json] [--strict]
+    python scripts/audit_lessons.py [--phase N] [--json] [--strict] [--list-advisories]
+
+Two severities. Issues are hard breakage — a missing docs/en.md, a quiz.json the
+site renderer would choke on — and always fail. Advisories are lesson-contract
+gaps that predate the check (no quiz.json, no code/tests); hundreds of lessons
+carry them, so they are reported but fail only under --strict. Gate a phase you
+have brought up to contract with `--phase N --strict`.
 
 Exit codes:
     0 — clean
-    1 — issues found
+    1 — issues found, or advisories found under --strict
 """
 
 from __future__ import annotations
@@ -55,11 +61,25 @@ class Issue:
 class Audit:
     lessons_checked: int = 0
     issues: list[Issue] = field(default_factory=list)
+    advisories: list[Issue] = field(default_factory=list)
 
-    def add(self, rule: str, lesson: Path, file: Path | None, message: str) -> None:
+    def _issue(self, rule: str, lesson: Path, file: Path | None, message: str) -> Issue:
         rel_lesson = lesson.relative_to(ROOT).as_posix()
         rel_file = file.relative_to(ROOT).as_posix() if file else rel_lesson
-        self.issues.append(Issue(rule, rel_lesson, rel_file, message))
+        return Issue(rule, rel_lesson, rel_file, message)
+
+    def add(self, rule: str, lesson: Path, file: Path | None, message: str) -> None:
+        self.issues.append(self._issue(rule, lesson, file, message))
+
+    def add_advisory(self, rule: str, lesson: Path, file: Path | None, message: str) -> None:
+        """Contract gap that predates the check — reported always, fails only --strict.
+
+        Most of the curriculum was written before quiz.json and code/tests were
+        required, so making these blocking today would fail CI on hundreds of
+        lessons at once. Counting them separately keeps the backlog visible and
+        lets a phase that has been brought up to contract be gated with --strict.
+        """
+        self.advisories.append(self._issue(rule, lesson, file, message))
 
 
 def iter_lesson_dirs(phase_filter: int | None) -> Iterable[Path]:
@@ -124,6 +144,15 @@ def check_code_main(audit: Audit, lesson: Path) -> None:
         if path.is_file() and path.name not in CODE_IGNORED_NAMES:
             return
     audit.add("L005", lesson, code_dir, "code/ is empty (no source or config files)")
+
+
+def check_lesson_contract(audit: Audit, lesson: Path) -> None:
+    """quiz.json and code/tests/ are required by AGENTS.md but widely missing."""
+    if not (lesson / "quiz.json").is_file():
+        audit.add_advisory("L011", lesson, None, "missing quiz.json")
+    code_dir = lesson / "code"
+    if code_dir.is_dir() and not any((code_dir / "tests").glob("test_*")):
+        audit.add_advisory("L012", lesson, code_dir, "code/tests/ has no test_* files")
 
 
 def check_quiz(audit: Audit, lesson: Path) -> None:
@@ -217,18 +246,19 @@ def audit_lesson(audit: Audit, lesson: Path) -> None:
         return
     text = check_docs_en_md(audit, lesson)
     check_code_main(audit, lesson)
+    check_lesson_contract(audit, lesson)
     check_quiz(audit, lesson)
     if text is not None:
         check_internal_links(audit, lesson, text)
 
 
-def render_report(audit: Audit) -> str:
+def render_report(audit: Audit, verbose_advisories: bool = False) -> str:
     by_rule: dict[str, int] = {}
     for issue in audit.issues:
         by_rule[issue.rule] = by_rule.get(issue.rule, 0) + 1
     lines = [
         f"audit_lessons.py — {audit.lessons_checked} lesson(s) checked, "
-        f"{len(audit.issues)} issue(s)",
+        f"{len(audit.issues)} issue(s), {len(audit.advisories)} advisory(ies)",
     ]
     if audit.issues:
         lines.append("")
@@ -238,6 +268,19 @@ def render_report(audit: Audit) -> str:
         lines.append("Summary by rule:")
         for rule in sorted(by_rule):
             lines.append(f"  {rule}: {by_rule[rule]}")
+    if audit.advisories:
+        by_advisory: dict[str, int] = {}
+        for issue in audit.advisories:
+            by_advisory[issue.rule] = by_advisory.get(issue.rule, 0) + 1
+        lines.append("")
+        # Hundreds of lessons predate these rules, so the default listing is a
+        # per-rule count. --list-advisories names them when you are closing them.
+        lines.append("Advisories (lesson contract, fail only under --strict):")
+        if verbose_advisories:
+            for issue in audit.advisories:
+                lines.append(f"  [{issue.rule}] {issue.file}: {issue.message}")
+        for rule in sorted(by_advisory):
+            lines.append(f"  {rule}: {by_advisory[rule]}")
     return "\n".join(lines)
 
 
@@ -248,7 +291,12 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="treat warnings as errors (currently equivalent to default; reserved)",
+        help="also fail on lesson-contract advisories (missing quiz.json, code/tests)",
+    )
+    parser.add_argument(
+        "--list-advisories",
+        action="store_true",
+        help="name every advisory instead of only counting them per rule",
     )
     args = parser.parse_args(argv)
 
@@ -261,15 +309,18 @@ def main(argv: list[str]) -> int:
             {
                 "lessons_checked": audit.lessons_checked,
                 "issues": [issue.to_dict() for issue in audit.issues],
+                "advisories": [issue.to_dict() for issue in audit.advisories],
             },
             sys.stdout,
             indent=2,
         )
         sys.stdout.write("\n")
     else:
-        sys.stdout.write(render_report(audit) + "\n")
+        sys.stdout.write(render_report(audit, args.list_advisories) + "\n")
 
-    return 1 if audit.issues else 0
+    if audit.issues:
+        return 1
+    return 1 if args.strict and audit.advisories else 0
 
 
 if __name__ == "__main__":
