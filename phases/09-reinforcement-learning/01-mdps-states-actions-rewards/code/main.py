@@ -24,7 +24,7 @@ def uniform_policy(_state):
     return {a: 1.0 / len(ACTIONS) for a in ACTIONS}
 
 
-def greedy_policy(_state):
+def down_right_policy(_state):
     return {"down": 0.5, "right": 0.5, "up": 0.0, "left": 0.0}
 
 
@@ -88,12 +88,12 @@ def main():
     mean_random = sum(returns_random) / len(returns_random)
 
     rng2 = random.Random(42)
-    returns_greedy = [rollout(greedy_policy, rng2)[0] for _ in range(5000)]
-    mean_greedy = sum(returns_greedy) / len(returns_greedy)
+    returns_down_right = [rollout(down_right_policy, rng2)[0] for _ in range(5000)]
+    mean_down_right = sum(returns_down_right) / len(returns_down_right)
 
     print("=== 4x4 GridWorld, 5000 rollouts ===")
-    print(f"random policy:  mean return = {mean_random:.2f}   (optimal = -6.00)")
-    print(f"greedy  policy: mean return = {mean_greedy:.2f}")
+    print(f"random policy:     mean return = {mean_random:.2f}   (optimal = -6.00)")
+    print(f"down+right policy: mean return = {mean_down_right:.2f}")
 
     print()
     print("=== Policy evaluation V^pi(s) for uniform-random policy ===")
@@ -102,11 +102,12 @@ def main():
         print_value_grid(values, f"gamma = {gamma}")
         print()
 
-    print("=== Policy evaluation V^pi(s) for greedy down+right policy (gamma=0.99) ===")
-    values = policy_evaluation(greedy_policy, gamma=0.99)
-    print_value_grid(values, "greedy policy")
+    print("=== Policy evaluation V^pi(s) for the fixed 50/50 down+right policy (gamma=0.99) ===")
+    values = policy_evaluation(down_right_policy, gamma=0.99)
+    print_value_grid(values, "down+right policy")
     print()
-    print("note: greedy values at (0,0) track the true optimal return far closer than random.")
+    print("note: this policy is NOT greedy w.r.t. any value function - it is a fixed 50/50 mix.")
+    print("      V(0,0) = -7.59 vs the optimal V*(0,0) = -5.85 (gamma=0.99, 6 steps).")
 
 
 if __name__ == "__main__":

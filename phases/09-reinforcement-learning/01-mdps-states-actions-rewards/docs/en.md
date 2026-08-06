@@ -85,7 +85,7 @@ def rollout(policy, max_steps=200):
     return total, steps
 ```
 
-Run the random policy 1000 times. Average return is around -60 to -80 for this 4×4 board. The optimal return is -6 (straight-line path down-right). Closing that gap is everything in Phase 9.
+Run the random policy 1000 times. Average return is around -58 for this 4×4 board with the 200-step cap above; without the cap the exact expected return is -59.4 (the expected hitting time of the terminal cell under a uniform random walk). The optimal return is -6 (straight-line path down-right). Closing that gap is everything in Phase 9.
 
 ### Step 3: compute `V^π` exactly via the Bellman equation
 
