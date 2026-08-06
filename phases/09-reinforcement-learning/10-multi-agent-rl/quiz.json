@@ -1,0 +1,78 @@
+{
+  "lesson": "10-multi-agent-rl",
+  "title": "Multi-Agent RL",
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "Q-learning is proved to converge on an MDP. Why does that proof stop applying once a second learning agent shares the world?",
+      "options": [
+        "The shared reward becomes unbounded once two agents can both collect it from the same terminal state",
+        "The other agent's changing policy is part of your transition and reward, so nothing is stationary",
+        "The joint state space becomes continuous once both agents' positions are tracked together",
+        "Two agents optimizing separate returns cannot share a single discount factor"
+      ],
+      "correct": 1,
+      "explanation": "The convergence argument leans on fixed P and R. When the other agent learns, the effective dynamics move underneath you every update, so there is no fixed point for the Bellman operator to contract to."
+    },
+    {
+      "stage": "check",
+      "question": "In centralized training with decentralized execution, what exactly is centralized?",
+      "options": [
+        "Every agent shares one policy network during training, but each keeps a private critic fitted to its own reward stream",
+        "The critic sees the global state and the joint action during training, while each policy conditions only on its own observation at execution time",
+        "Both the policy and the critic condition on the full global state and the joint action at training time and at execution time; only the reward stays per-agent",
+        "The replay buffer is shared, and every stored transition is relabelled with the opponents' current policies before it is reused"
+      ],
+      "correct": 1,
+      "explanation": "The critic is a training-time object you can throw away, so it is allowed to cheat with global information. The actor is what gets deployed, so it must live on local observations alone."
+    },
+    {
+      "stage": "check",
+      "question": "On the 5×5 cooperative GridWorld the joint-Q table stores 16 entries per state instead of two tables of 4. What is the trade you just made?",
+      "options": [
+        "A correct global view, paid for with an action space exponential in the agent count",
+        "You gained sample efficiency, since 16 finer-grained entries generalize better than 4 coarse ones",
+        "You removed the need for ε-greedy exploration, because the joint argmax already covers every pair",
+        "You made execution decentralized, since each agent can read the shared table and pick its own component"
+      ],
+      "correct": 0,
+      "explanation": "|A|ⁿ entries per state is the whole problem with the joint approach: correct here with 2 agents and 4 actions, hopeless at n = 10. It is also the least decentralized option, since an agent needs the other's choice to pick the argmax."
+    },
+    {
+      "stage": "check",
+      "question": "COMA's counterfactual baseline computes an advantage how?",
+      "options": [
+        "My return on the episode minus the average return the other agents collected over that same episode",
+        "The joint Q minus the sum of the per-agent Qs, which is the monotonic value decomposition QMIX uses to keep the argmax decentralized",
+        "My Q minus the expectation of Q over my own action choices, holding the other agents' actions fixed",
+        "The TD residual computed on each agent's local observation only"
+      ],
+      "correct": 2,
+      "explanation": "Marginalizing over my action while freezing everyone else's isolates what my choice contributed to the shared reward. That is the credit-assignment question a single shared reward otherwise leaves unanswerable."
+    },
+    {
+      "stage": "post",
+      "question": "You change the task so the goal only counts when both agents step onto it on the same turn. Independent Q-learning, which solved the original task, now stalls. Why?",
+      "options": [
+        "The reward is now sparse, so the discount factor must be lowered to keep the bootstrap targets from washing out over the longer episodes the coordination task produces",
+        "The state space grew, so the two Q-tables no longer fit the reachable joint positions",
+        "The task became tightly coupled: my best action depends on the other's simultaneous choice, which independent learners cannot represent",
+        "ε-greedy exploration stops being valid once the goal requires two synchronized arrivals"
+      ],
+      "correct": 2,
+      "explanation": "Independent learners each treat the other as noise, so a payoff that exists only for one specific action pair looks like a rare accident. Coupling — not sparsity or table size — is the thing that broke."
+    },
+    {
+      "stage": "post",
+      "question": "When is pure self-play not enough, so you need a league of past policies and exploiters?",
+      "options": [
+        "Whenever there are more than two agents, since self-play only ever pits one policy against a single copy of itself",
+        "When the game admits rock-paper-scissors strategy cycles, so beating the current best does not mean being globally strong",
+        "When the reward is shared rather than zero-sum, because a cooperative task gives self-play no adversarial pressure to keep improving",
+        "When the policy is too large to snapshot cheaply, so a league of past checkpoints costs more memory than the run can afford"
+      ],
+      "correct": 1,
+      "explanation": "Self-play only ever asks 'can I beat my recent self', which a dominance cycle satisfies forever without progress. A diverse opponent pool plus exploiters keeps the training signal from collapsing onto one branch of the cycle."
+    }
+  ]
+}
