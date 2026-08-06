@@ -32,6 +32,18 @@ HEADER = '''"""
 '''
 
 
+def stub(node, lines, indent: int) -> str:
+    """Сигнатура + docstring функции/метода, тело — raise NotImplementedError."""
+    sig = "\n".join(lines[node.lineno - 1 : node.body[0].lineno - 1])
+    doc = node.body[0]
+    has_doc = isinstance(doc, ast.Expr) and isinstance(doc.value, ast.Constant)
+    body = "\n".join(lines[doc.lineno - 1 : doc.end_lineno]) if has_doc else ""
+    chunk = sig
+    if body:
+        chunk += "\n" + body
+    return chunk + "\n" + " " * indent + "raise NotImplementedError\n"
+
+
 def build(sol_path: Path) -> str:
     src = sol_path.read_text()
     tree = ast.parse(src)
@@ -57,17 +69,20 @@ def build(sol_path: Path) -> str:
         out.append("\n".join(imports) + "\n")
 
     for node in tree.body:
-        if not isinstance(node, ast.FunctionDef):
-            continue
-        sig = "\n".join(lines[node.lineno - 1 : node.body[0].lineno - 1])
-        doc = node.body[0]
-        has_doc = isinstance(doc, ast.Expr) and isinstance(doc.value, ast.Constant)
-        body = "\n".join(lines[doc.lineno - 1 : doc.end_lineno]) if has_doc else ""
-        chunk = sig
-        if body:
-            chunk += "\n" + body
-        chunk += "\n    raise NotImplementedError\n"
-        out.append("\n" + chunk)
+        if isinstance(node, ast.FunctionDef):
+            out.append("\n" + stub(node, lines, 4))
+        elif isinstance(node, ast.ClassDef):
+            # заголовок класса + его docstring, дальше заглушки методов
+            parts = ["\n".join(lines[node.lineno - 1 : node.body[0].lineno - 1])]
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                parts.append("\n".join(lines[first.lineno - 1 : first.end_lineno]))
+            methods = [n for n in node.body if isinstance(n, ast.FunctionDef)]
+            for m in methods:
+                parts.append("\n" + stub(m, lines, 8).rstrip())
+            if not methods:
+                parts.append("    pass")
+            out.append("\n" + "\n".join(parts) + "\n")
 
     return "\n".join(out)
 
