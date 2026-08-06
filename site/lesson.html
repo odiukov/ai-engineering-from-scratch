@@ -2155,6 +2155,7 @@
 
       function renderLesson(md) {
         var el = document.getElementById('lessonContent');
+        md = stripHtmlComments(md);
         var html = parseMd(md);
         html += '<div class="ai-panels" id="aiPanels"></div>';
         html = addBottomNav(html);
@@ -2376,6 +2377,42 @@
       function extractTitle(md) {
         var m = md.match(/^# (.+)/m);
         return m ? m[1] : 'Lesson';
+      }
+
+      // Translated docs carry provenance markers like <!-- i18n:manual -->.
+      // parseMd has no notion of HTML comments, so they would render as a
+      // literal paragraph above the title. Drop them outside code fences.
+      function stripHtmlComments(md) {
+        var lines = md.split(/\r?\n/);
+        var out = [];
+        var inFence = false;
+        var inComment = false;
+        for (var i = 0; i < lines.length; i++) {
+          var raw = lines[i];
+          if (!inComment && /^\s*(```|~~~)/.test(raw)) {
+            inFence = !inFence;
+            out.push(raw);
+            continue;
+          }
+          if (inFence) { out.push(raw); continue; }
+
+          var line = raw;
+          if (inComment) {
+            var end = line.indexOf('-->');
+            if (end < 0) continue;
+            inComment = false;
+            line = line.slice(end + 3);
+          }
+          line = line.replace(/<!--[\s\S]*?-->/g, '');
+          var open = line.indexOf('<!--');
+          if (open >= 0) { inComment = true; line = line.slice(0, open); }
+
+          // A line that existed only to hold a comment leaves no blank behind,
+          // otherwise it would split the paragraph that follows it.
+          if (raw.trim() !== '' && line.trim() === '') continue;
+          out.push(line);
+        }
+        return out.join('\n');
       }
 
       function parseMd(md) {
