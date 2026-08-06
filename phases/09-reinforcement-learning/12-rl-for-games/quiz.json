@@ -1,0 +1,78 @@
+{
+  "lesson": "12-rl-for-games",
+  "title": "RL for Games — AlphaZero, MuZero, and the LLM-Reasoning Era",
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "GRPO drops PPO's critic. What plays the role of the baseline instead?",
+      "options": [
+        "A running average of all rewards seen so far in training",
+        "The reward model's score for the reference policy's completion",
+        "The mean reward over the G completions sampled for that prompt, normalized by the group std",
+        "The value estimate at the previous token position, bootstrapped one step at a time as in TD learning"
+      ],
+      "correct": 2,
+      "explanation": "Sampling a group per prompt gives you an unbiased, on-the-spot estimate of that prompt's expected reward, which is precisely what a critic was approximating. Being per-prompt also makes it robust to prompts of wildly different difficulty."
+    },
+    {
+      "stage": "check",
+      "question": "How does the quality of the group baseline scale with group size G?",
+      "options": [
+        "The variance of the group mean falls like 1/G, so its standard error falls like 1/√G",
+        "The variance of the group mean falls like 1/√G, so its standard error falls like 1/G, which is why doubling G halves the advantage noise",
+        "Both the variance of the group mean and its standard error fall like 1/√G, so the two rates are the same",
+        "Neither depends on G — raising G changes only the bias of the group baseline, never its spread"
+      ],
+      "correct": 0,
+      "explanation": "Var(mean of G iid samples) = σ²/G, and standard error is its square root. Mixing the two rates up is why people over-estimate the gain from doubling G — going 8 → 64 cuts the error by about 2.8×, not 8×."
+    },
+    {
+      "stage": "check",
+      "question": "What is MuZero's advance over AlphaZero?",
+      "options": [
+        "It replaces MCTS with a policy-gradient update on a group-relative advantage, so search disappears from both training and inference",
+        "It learns a latent dynamics model and searches inside it, so the environment's rules need not be known",
+        "It adds a learned reward model so the same loop can be trained from human preferences instead of from game outcomes",
+        "It drops the value head and trains only on the MCTS visit distribution, which is what lets it plan without knowing the rules"
+      ],
+      "correct": 1,
+      "explanation": "AlphaZero's MCTS calls a real simulator, which is only available when the rules are given. Learning h/g/f lets the same loop plan in latent space, which is how one algorithm covers Go, chess and Atari."
+    },
+    {
+      "stage": "check",
+      "question": "The KL penalty's gradient with respect to softmax logits is d KL/dz_i = p_i·(log(p_i/q_i) − KL). Why is KL subtracted inside the parentheses?",
+      "options": [
+        "To keep every component non-negative, since the KL itself is non-negative by Jensen's inequality and a negative component would reward drift",
+        "To cancel the 1/G factor that the group-relative term introduces",
+        "Because softmax normalization means every valid logit gradient must sum to zero, and the −KL term is what makes Σ_i vanish",
+        "To make the penalty invariant to the group size G"
+      ],
+      "correct": 2,
+      "explanation": "Σ_i p_i·log(p_i/q_i) is the KL itself, so Σ_i p_i·(log(p_i/q_i) − KL) = KL − KL = 0. Dropping the −KL leaves a term that shifts all logits by the same amount — a no-op for the distribution that still corrupts the update's scale."
+    },
+    {
+      "stage": "post",
+      "question": "DeepSeekMath argues GRPO suits reasoning better than PPO. Which of these is NOT one of its reasons?",
+      "options": [
+        "No value network to train, which roughly halves optimizer memory",
+        "The group baseline handles a single reward delivered only at the end of the trajectory",
+        "Per-prompt normalization makes advantages comparable across problems of very different difficulty",
+        "The group samples can be reused for many epochs, unlike PPO's rollouts"
+      ],
+      "correct": 3,
+      "explanation": "Multi-epoch reuse is PPO's contribution via the clipped ratio, not GRPO's; GRPO still needs fresh on-policy groups. The other three are exactly the arguments in the paper."
+    },
+    {
+      "stage": "post",
+      "question": "What distinguishes R1-Zero from R1?",
+      "options": [
+        "R1-Zero applies GRPO to the base model with rule-based rewards: strong reasoning, unreadable language-mixed CoT. R1 adds cold-start SFT and rejection sampling for readability",
+        "R1-Zero is one of the six distilled dense models released in the paper, spanning Qwen-1.5B to Llama-70B; R1 is the mixture-of-experts teacher whose reasoning traces they were fine-tuned on",
+        "R1-Zero scores completions with a learned reward model; R1 replaces it with a rule-based verifier that checks the final answer and the <think> formatting",
+        "R1-Zero runs MCTS over reasoning steps with a process reward model; R1 drops the search and trains on full rollouts instead"
+      ],
+      "correct": 0,
+      "explanation": "R1-Zero is the ablation proving reasoning emerges from RL alone, with no SFT anywhere in the pipeline. Its cost is presentation quality, which is what R1's four-stage pipeline exists to repair."
+    }
+  ]
+}
