@@ -87,10 +87,16 @@ Eight lines. The *only* difference from Q-learning is the target line.
 ```python
 def q_learning(env, episodes, alpha=0.1, gamma=0.99, epsilon=0.1):
     Q = defaultdict(lambda: {a: 0.0 for a in ACTIONS})
+
+    def choose(s):
+        if random() < epsilon:
+            return choice(ACTIONS)
+        return max(Q[s], key=Q[s].get)
+
     for _ in range(episodes):
         s = env.reset()
         while True:
-            a = choose(s, Q, epsilon)
+            a = choose(s)
             s_next, r, done = env.step(s, a)
             target = r + (gamma * max(Q[s_next].values()) if not done else 0.0)
             Q[s][a] += alpha * (target - Q[s][a])
@@ -104,11 +110,11 @@ The `max` decouples target from behavior. That one symbol is the difference betw
 
 ### Step 3: learning curves
 
-Track mean return per 100 episodes. Q-learning converges faster on simple deterministic GridWorld; SARSA is more conservative on cliff-walking. On the 4×4 GridWorld in `code/main.py`, both are near-optimal after ~2,000 episodes with `α=0.1, ε=0.1`.
+Track mean return per 100 episodes. Q-learning converges faster on simple deterministic GridWorld; SARSA is more conservative on cliff-walking. On the 4×4 GridWorld in `code/main.py`, both are near-optimal (mean return ≈ -6.6 vs the optimal -6.0) after ~1,000 episodes with `α=0.1, ε=0.1`.
 
 ### Step 4: compare to DP truth
 
-Run value iteration (Lesson 02) to get `Q*`. Check `max_{s,a} |Q_learned(s,a) - Q*(s,a)|`. A healthy tabular TD agent lands within `~0.5` on the 4×4 GridWorld after 10,000 episodes.
+Run value iteration (Lesson 02's `value_iteration`, but with `SLIP = 0` so the model matches this lesson's deterministic env) to get `Q*`. Check `max_{s,a} |Q_learned(s,a) - Q*(s,a)|`. A healthy Q-learning agent lands within `~1.0` on the 4×4 GridWorld after 10,000 episodes, with the residual concentrated in the rarely-visited far corners. Expect the number itself to move with the seed — 0.59 to 1.02 across six of them — because the gap is set by whichever corner the ε-greedy walk starved, so treat a single run as a sanity check, not a benchmark. Do not expect SARSA to close that gap — with `ε` pinned at 0.1 it converges to `Q^π` for the ε-greedy policy, not to `Q*`.
 
 ## Pitfalls
 
