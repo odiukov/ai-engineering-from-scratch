@@ -100,8 +100,8 @@ class Linear(Layer):
         """Все веса и смещения как тройки (values, index, grads)."""
         params = []
         for i in range(self.out_features):
-            for j in range(self.in_features):
-                params.append((self.weights[i], j, self.weight_grads[i]))
+            row, grad_row = self.weights[i], self.weight_grads[i]
+            params.extend((row, j, grad_row) for j in range(self.in_features))
             params.append((self.biases, i, self.bias_grads))
         return params
 
@@ -231,7 +231,7 @@ def zero_grads(params):
     градиенты от прошлых батчей продолжают складываться, шаг получается
     в разы больше задуманного, и лосс начинает болтаться.
     """
-    for values, index, grads in params:
+    for _values, index, grads in params:
         grads[index] = 0.0
 
 

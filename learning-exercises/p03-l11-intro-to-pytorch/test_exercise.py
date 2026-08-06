@@ -134,8 +134,14 @@ def test_backward_walks_a_chain_of_three_operations():
 
 # ------------------------------------------------------------------ Module
 def test_module_forward_is_not_implemented():
+    """Контраст: база отказывается считать, рабочий подкласс — считает.
+
+    Одной первой половины мало — она проходит и на пустой заготовке, где
+    ещё ничего не написано.
+    """
     with pytest.raises(NotImplementedError):
         Module().forward(Tensor([[1.0]]))
+    assert len(Linear(2, 3, seed=0).parameters()) == 2
 
 
 def test_linear_registers_weight_and_bias_automatically():

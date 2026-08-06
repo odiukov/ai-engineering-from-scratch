@@ -193,7 +193,7 @@ def test_zero_init_kills_the_signal_on_the_very_first_layer():
 def test_every_layer_gets_its_own_weights():
     """Если бы seed не сдвигался по слоям, слои были бы копиями друг друга."""
     mags = forward_magnitudes(kaiming_init, RELU, n_layers=6, seed=0)
-    assert len(set(round(m, 9) for m in mags)) == 6
+    assert len({round(m, 9) for m in mags}) == 6
 
 
 # ------------------------------------------------------------ recommend_init
