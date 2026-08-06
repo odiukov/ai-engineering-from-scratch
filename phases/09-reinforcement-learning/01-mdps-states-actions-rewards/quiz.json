@@ -1,0 +1,78 @@
+{
+  "lesson": "01-mdps-states-actions-rewards",
+  "title": "MDPs, States, Actions & Rewards",
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "You have a stream of observations, the actions you took, and a scalar reward — no labels anywhere. What has to be added before you can reason about it mathematically?",
+      "options": [
+        "A labeled dataset pairing each observation with the correct action to take",
+        "A tuple of states, actions, transitions, rewards, and a discount",
+        "A loss function comparing predicted reward to actual reward",
+        "A larger network, so the reward signal has capacity to fit"
+      ],
+      "correct": 1,
+      "explanation": "Reinforcement learning is handed no supervision, so the structure has to come from the problem itself. The five-object MDP tuple is what turns \"what I saw / did / got\" into objects you can take expectations over."
+    },
+    {
+      "stage": "check",
+      "question": "Your agent needs the last three camera frames to decide what to do next. What does the lesson say this tells you?",
+      "options": [
+        "The discount is set too low for the task's horizon",
+        "The Markov property genuinely fails here, so an MDP cannot model the task",
+        "The state representation is incomplete, not the method",
+        "The reward function has become non-stationary"
+      ],
+      "correct": 2,
+      "explanation": "Markov is a property of the state you chose, not of the world. Stacking frames or carrying a recurrent state restores it without changing the algorithm."
+    },
+    {
+      "stage": "check",
+      "question": "The lesson ties the discount to an effective horizon of roughly 1/(1-γ). What does γ = 0.999 buy?",
+      "options": [
+        "About 10 steps",
+        "About 100 steps",
+        "An unbounded horizon — only γ = 1 exactly is myopic",
+        "About 1000 steps"
+      ],
+      "correct": 3,
+      "explanation": "Each extra nine multiplies 1/(1-γ) by ten. That is why control tasks sit at 0.95–0.99 and long-horizon strategy games reach 0.999."
+    },
+    {
+      "stage": "check",
+      "question": "What do the Bellman equations do to the expected return?",
+      "options": [
+        "Replace it with the undiscounted sum so γ can be dropped",
+        "Split it into this step's reward plus the discounted successor value",
+        "Bound it above by the largest single-step reward in the MDP",
+        "Approximate it with a function approximator so large state spaces stay tractable"
+      ],
+      "correct": 1,
+      "explanation": "That recursive split is what makes the return computable one step at a time. Every method in the phase either iterates it, samples it, or bootstraps one step of it."
+    },
+    {
+      "stage": "post",
+      "question": "You want to compare two candidate opening moves from the same board position, assuming the same policy is followed afterwards. Which object answers that directly?",
+      "options": [
+        "V^π(s), the state value",
+        "The transition function P(s' | s, a)",
+        "Q^π(s, a), the action value",
+        "The discount γ and the resulting horizon"
+      ],
+      "correct": 2,
+      "explanation": "Q conditions on a specific first action and only then follows π, which is exactly the comparison being asked for. V has already averaged the first action away."
+    },
+    {
+      "stage": "post",
+      "question": "A boat-racing agent circles forever collecting powerups and never finishes the race. Which diagnosis does the lesson give?",
+      "options": [
+        "The reward was written against a proxy, not the target outcome",
+        "γ was set too close to 1 for an infinite-horizon task",
+        "The state is non-Markovian, so credit assignment cannot work at all",
+        "The reward range is too wide and the gradients exploded"
+      ],
+      "correct": 0,
+      "explanation": "The agent optimized exactly what it was given; the specification was wrong, not the optimizer. The fix lives in the reward definition, not in the algorithm."
+    }
+  ]
+}
