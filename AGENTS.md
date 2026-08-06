@@ -44,6 +44,7 @@ scripts/                      # automation
 5. **Original implementations only.** Don't cite external curriculum repos in docs, code comments, or commit text. Cite RFCs, official specs, and academic papers when they are the canonical source.
 6. **Dependency allowlist** (see `Dependencies` below). Stdlib-first.
 7. **Never commit generated files**: `catalog.json` is gitignored, `site/data.js` is rebuilt by CI, `package-lock.json` is never tracked.
+8. **Fixing a lesson means fixing its translations too.** A correction to `docs/en.md` or `code/` that changes a number, formula, snippet, or claim is not done until the same correction lands in every hand-authored translation of that lesson. See `Translations` below.
 
 ---
 
@@ -112,6 +113,49 @@ Exactly 6 questions: 1 pre + 3 check + 2 post. `correct` is zero-indexed. The si
 
 ---
 
+## Translations
+
+Translated lessons live on the **`translations`** branch, never on `main`.
+`.gitignore` excludes `i18n/*/phases/`, so in a `main`-line worktree they are
+invisible to `git status` — editing them there produces changes that no commit
+will ever pick up. The authoritative copies are the tracked ones on
+`translations`, normally checked out as a second worktree:
+
+```bash
+git worktree list                          # is a translations worktree already up?
+git worktree add ~/aiefs-translations translations   # if not
+```
+
+A file starting with `<!-- i18n:manual -->` is hand-authored: it is **not**
+regenerated from `en.md`, so a correction has to be carried over by hand.
+Files without that marker come from the translation pipeline and will be
+re-derived.
+
+**When you correct a lesson:**
+
+1. Fix `docs/en.md` / `code/` on your working branch. Commit there.
+2. Mirror the same correction into `i18n/<lang>/phases/.../docs/<lang>.md` in
+   the `translations` worktree. Commit on `translations`, separately.
+3. Reference the English commit in the translation commit body so the pair
+   stays traceable.
+
+**Re-derive, don't copy-translate.** Translations carry beginner blocks
+(«На пальцах» in Russian) that work the numbers independently. Those blocks
+are exactly where a wrong number gets quietly rationalized — one had noticed
+that `3 + 6 + 1 + 48 = 58` did not reach the promised 59 and papered over the
+gap with "plus odds and ends"; another endorsed a wrong frame count with
+"that is, about a hundred, as promised in the exercises". Recompute every
+number in the block you touch, and treat a block that disagrees with its own
+section as a bug in the section, not in the block.
+
+Check for drift before shipping lesson edits:
+
+```bash
+python3 scripts/check_translation_drift.py --phase 07
+```
+
+---
+
 ## Per-PR validation
 
 Run locally before pushing:
@@ -153,6 +197,7 @@ CI gates (`.github/workflows/curriculum.yml`):
 | `README.md` lesson-link rows  | when adding a new lesson — link `[Title](phases/NN-phase/MM-lesson/)` |
 | `ROADMAP.md` status           | when marking a lesson complete or WIP                            |
 | `glossary/terms.md`           | when introducing a term used by more than one lesson             |
+| `i18n/<lang>/phases/.../<lang>.md` on `translations` | whenever a fix changes a number, formula, snippet, or claim in `en.md` or `code/` — see `Translations` |
 
 **Common bug**: if `grep -c 'tree/main/phases/NN-' site/data.js` is 0 after merge, the Phase NN README rows are plain text and missing the `[Title](phases/NN-...)` markdown link. `site/build.js` derives the URL from that link.
 
