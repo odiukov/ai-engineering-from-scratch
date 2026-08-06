@@ -1,6 +1,6 @@
 # RL for Games — AlphaZero, MuZero, and the LLM-Reasoning Era
 
-> 1992: TD-Gammon beat human champions at backgammon with pure TD. 2016: AlphaGo beat Lee Sedol. 2017: AlphaZero dominated chess, shogi, and Go from scratch. 2024: DeepSeek-R1 proved the same recipe, with GRPO replacing PPO, works on reasoning. Games are the benchmark that drives every breakthrough in this phase.
+> 1992: TD-Gammon beat human champions at backgammon with pure TD. 2016: AlphaGo beat Lee Sedol. 2017: AlphaZero dominated chess, shogi, and Go from scratch. 2025: DeepSeek-R1 proved the same recipe, with GRPO replacing PPO, works on reasoning. Games are the benchmark that drives every breakthrough in this phase.
 
 **Type:** Build
 **Languages:** Python
@@ -48,7 +48,7 @@ Zero human knowledge. Zero handcrafted heuristics. A single recipe that mastered
 
 **Stochastic MuZero (2022).** Adds stochastic dynamics and chance nodes; extends to backgammon-class games.
 
-**Muesli, Gumbel MuZero (2022-2024).** Improvements on sample efficiency and deterministic search.
+**Muesli (2021), Gumbel MuZero (2022).** Improvements on sample efficiency and deterministic search.
 
 **GRPO (2024-2025).** DeepSeek-R1 recipe. Same AlphaZero-shaped loop, applied to language-model reasoning:
 
@@ -86,14 +86,15 @@ f3-selfplay-ladder
 
 ## Build It
 
-The code in `code/main.py` implements **GRPO in miniature** — a bandit with multiple groups of samples. The algorithm is the same as on an LLM; only the policy and environment are simpler. It teaches the *loss* and the *group-relative advantage*, which is the 2025 innovation.
+The code in `code/main.py` implements **GRPO in miniature** — a bandit with multiple groups of samples. The algorithm is the same as on an LLM; only the policy and environment are simpler. It teaches the *loss* and the *group-relative advantage*, which is the 2024 DeepSeekMath innovation.
 
 ### Step 1: a tiny verifier environment
 
 ```python
 QUESTIONS = [
-    {"prompt": "q1", "correct": 3},
-    {"prompt": "q2", "correct": 1},
+    {"prompt": "what is 1+2",       "correct": 2},
+    {"prompt": "what is 3*3",       "correct": 0},
+    {"prompt": "capital of France", "correct": 3},
 ]
 
 def verify(prompt_idx, answer_token):
@@ -125,10 +126,13 @@ def grpo_step(theta, p_idx, G=8, beta=0.01, lr=0.1, rng=None):
     for a, A in zip(samples, advs):
         grad = onehot(a) - probs
         for i in range(len(probs)):
-            theta[p_idx][i] += lr * A * grad[i]
-    # KL penalty: pull theta toward reference
+            theta[p_idx][i] += (lr / G) * A * grad[i]   # the 1/G of L_GRPO
+    # KL penalty: descend beta * KL(pi_theta || pi_ref).
+    # d KL / d z_i = p_i * (log(p_i / q_i) - KL)
+    probs_ref = policy_probs(reference, p_idx)
+    kl = sum(p * (log(p) - log(q)) for p, q in zip(probs, probs_ref))
     for i in range(len(probs)):
-        theta[p_idx][i] -= beta * (theta[p_idx][i] - reference[p_idx][i])
+        theta[p_idx][i] -= beta * probs[i] * (log(probs[i]) - log(probs_ref[i]) - kl)
 ```
 
 The group-relative advantage is the 2024 DeepSeek trick. No critic needed. The "baseline" is the group mean, and normalization uses group std.
@@ -144,7 +148,7 @@ Same diagnostics as RLHF: mean KL to reference, policy entropy, reward-over-time
 ## Pitfalls
 
 - **Reward hacking via verifier gaming.** GRPO inherits RLHF's risk: if the verifier is wrong or exploitable, the LLM will find the exploit. Robust verifiers (multiple test cases, formal proofs) matter.
-- **Group size too small.** Variance of the group baseline goes like `1/√G`. Below `G = 4`, the advantage signal is noisy; standard choice is `G = 8` to `64`.
+- **Group size too small.** Variance of the group baseline falls like `1/G` — its *standard error* is what falls like `1/√G`. Below `G = 4`, the advantage signal is noisy; standard choice is `G = 8` to `64`.
 - **Length bias.** LLM completions of different lengths have different log-probabilities. Normalize by token count, or use sequence-level log-prob, or truncate to max length.
 - **Pure self-play cycles.** AlphaZero-style training can get stuck in dominance loops on general-sum games. Mitigated by diverse opponent pools (league play, Lesson 10).
 - **Search-policy mismatch.** AlphaZero trains the policy to mimic search output. If the policy net is too small to represent the search's distribution, training stalls.
@@ -195,7 +199,7 @@ Refuse AlphaZero on imperfect-info games (route to CFR). Refuse GRPO without a t
 
 ## Exercises
 
-1. **Easy.** Implement the GRPO bandit in `code/main.py`. Train on 2 prompts × 4 answer tokens each. Converge in < 1,000 updates with `G=8`.
+1. **Easy.** Implement the GRPO bandit in `code/main.py`. Train on 3 prompts × 4 answer tokens each. Converge in < 1,000 updates with `G=8`.
 2. **Medium.** Plug in PPO (clipped) and vanilla REINFORCE. Compare sample efficiency and reward variance to GRPO on the same bandit.
 3. **Hard.** Extend to a length-2 "reasoning chain": the agent emits two tokens and the verifier rewards the pair. Measure how GRPO handles the credit assignment across two-step sequences. (Hint: compute group advantage per *full sequence*, propagate to both token positions.)
 

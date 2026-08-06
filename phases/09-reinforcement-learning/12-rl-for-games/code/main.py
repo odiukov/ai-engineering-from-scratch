@@ -3,9 +3,9 @@ import random
 
 
 QUESTIONS = (
-    {"prompt": "what is 1+2",      "correct": 2, "n_answers": 4},
-    {"prompt": "what is 3*3",      "correct": 0, "n_answers": 4},
-    {"prompt": "capital of France", "correct": 3, "n_answers": 4},
+    {"prompt": "what is 1+2",       "correct": 2},
+    {"prompt": "what is 3*3",       "correct": 0},
+    {"prompt": "capital of France", "correct": 3},
 )
 N_PROMPTS = len(QUESTIONS)
 N_ANSWERS = 4
@@ -54,8 +54,12 @@ def grpo_step(theta, reference, rng, G=8, beta=0.01, lr=0.1):
             grad_logpi = (1.0 if i == a else 0.0) - probs[i]
             theta[p_idx][i] += (lr / G) * A * grad_logpi
 
+    # Descend beta * KL(pi_theta || pi_ref). For softmax logits z the gradient is
+    # d KL / d z_i = p_i * (log(p_i / q_i) - KL); the KL subtraction is what makes
+    # the components sum to zero, as any softmax-logit gradient must.
     for i in range(N_ANSWERS):
-        theta[p_idx][i] -= beta * (probs[i] - probs_ref[i])
+        log_ratio = math.log(max(probs[i], 1e-12)) - math.log(max(probs_ref[i], 1e-12))
+        theta[p_idx][i] -= beta * probs[i] * (log_ratio - kl)
 
     return mean_r, kl
 
