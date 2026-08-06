@@ -55,60 +55,79 @@ multihead-split
 
 ### Step 1: split heads from the single-head attention we already have
 
-Берём `SelfAttention` из урока 02 и оборачиваем его парой split/concat. Реализация на numpy лежит в `code/main.py`, а логика такая:
+Одноголовый attention из урока 02 лежит в `02-self-attention-from-scratch/code/self_attention.py` и написан на numpy. Импортировать его сюда не надо: `code/main.py` этого урока — чистая стандартная библиотека, без numpy и без torch, поэтому тот же scaled dot-product attention выведен здесь заново на крошечном классе `Matrix` (построчное хранение, методы `get`, `set`, `row`) и запускается на голом Python. Математика та же, один файл, ноль зависимостей.
+
+Так что возьмите attention из урока 02 как уже знакомую *формулу* и оберните его парой split/concat. Разделение на головы — это просто нарезка непрерывной полосы столбцов на каждую голову:
 
 ```python
-def split_heads(X, n_heads):
-    n, d = X.shape
-    d_head = d // n_heads
-    return X.reshape(n, n_heads, d_head).transpose(1, 0, 2)  # (heads, n, d_head)
+def split_heads(X: Matrix, n_heads: int) -> List[Matrix]:
+    assert X.cols % n_heads == 0, "d_model not divisible by n_heads"
+    d_head = X.cols // n_heads
+    heads = []
+    for h in range(n_heads):
+        H = Matrix(X.rows, d_head)
+        for i in range(X.rows):
+            for j in range(d_head):
+                H.set(i, j, X.get(i, h * d_head + j))
+        heads.append(H)
+    return heads
 
-def combine_heads(H):
-    h, n, d_head = H.shape
-    return H.transpose(1, 0, 2).reshape(n, h * d_head)
+def combine_heads(heads: List[Matrix]) -> Matrix:
+    n, d_head = heads[0].rows, heads[0].cols
+    out = Matrix(n, d_head * len(heads))
+    for h, H in enumerate(heads):
+        for i in range(n):
+            for j in range(d_head):
+                out.set(i, h * d_head + j, H.get(i, j))
+    return out
 ```
 
-Один reshape и один transpose. Никаких циклов. Ровно это делает PyTorch внутри `nn.MultiheadAttention`.
+На numpy или torch это один `reshape` плюс один `transpose` и вообще без питоновских циклов — ось голов там получается представлением, а не копией. Ровно это делает `nn.MultiheadAttention` внутри; здесь мы расписываем индексы руками, чтобы было видно, какие столбцы к какой голове относятся.
 
-> 🎒 **На пальцах.** Reshape ничего не считает — он только по-другому расставляет скобки. Строка из 512 чисел `[x0, x1, ..., x511]` становится восемью строками по 64: первая голова забирает числа 0–63, вторая 64–127 и так далее. Ни одно число не изменилось и не переехало в памяти. Transpose потом просто меняет местами оси, чтобы первой шла ось голов и все восемь можно было прогнать одной операцией.
+> 🎒 **На пальцах.** Разделение на головы ничего не считает — оно только по-другому расставляет скобки. Строка из 512 чисел `[x0, x1, ..., x511]` становится восемью строками по 64: первая голова забирает числа 0–63, вторая 64–127 и так далее. Именно это и делает `X.get(i, h * d_head + j)` — сдвиг `h * d_head` и есть «полка» головы `h`. Ни одно число не изменилось; на numpy оно бы даже не переехало в памяти, а у нас переезжает только потому, что мы копируем вручную.
 
 ### Step 2: run scaled-dot-product attention per head
 
-Каждая голова получает свой срез Q, K, V. Attention превращается в батчевый matmul:
+Каждая голова получает свой срез Q, K, V. На стандартной библиотеке это цикл по головам:
 
 ```python
-def mha_forward(X, W_q, W_k, W_v, W_o, n_heads):
-    Q = X @ W_q
-    K = X @ W_k
-    V = X @ W_v
-    Qh = split_heads(Q, n_heads)         # (heads, n, d_head)
+def multi_head_attention(X: Matrix, Wq, Wk, Wv, Wo, n_heads: int):
+    Q, K, V = matmul(X, Wq), matmul(X, Wk), matmul(X, Wv)
+    Qh = split_heads(Q, n_heads)          # список матриц (n, d_head)
     Kh = split_heads(K, n_heads)
     Vh = split_heads(V, n_heads)
-    scores = Qh @ Kh.transpose(0, 2, 1) / np.sqrt(Qh.shape[-1])
-    weights = softmax(scores, axis=-1)
-    out = weights @ Vh                    # (heads, n, d_head)
-    concat = combine_heads(out)
-    return concat @ W_o, weights
+    head_outs = []
+    per_head_weights = []
+    for q, k, v in zip(Qh, Kh, Vh):
+        o, w = scaled_dot_product_attention(q, k, v)   # математика урока 02, на Matrix
+        head_outs.append(o)
+        per_head_weights.append(w)
+    concat = combine_heads(head_outs)
+    return matmul(concat, Wo), per_head_weights
 ```
 
-На реальном железе `Qh @ Kh.transpose(...)` — это один `bmm`. GPU видит единственный батчевый matmul формы `(heads, N, d_head) × (heads, d_head, N) -> (heads, N, N)`. Добавлять головы бесплатно.
+`scaled_dot_product_attention` — это функция из урока 02, где numpy заменён на операции `Matrix`: `softmax_rows(matmul(q, transpose(k)) * (1/math.sqrt(q.cols)))`, а потом `matmul(weights, v)`. Определена она в `code/main.py` этого урока, а не импортирована.
 
-> 🎒 **На пальцах.** «Бесплатно» здесь — про арифметику, и это можно проверить. Одна голова при `d_model = 512`: матрица `512 x N`, умноженная на `N x 512`. Восемь голов: восемь умножений `64 x N` на `N x 64`. Число операций одинаковое — просто вместо одного большого умножения GPU делает восемь маленьких, и делает он их одновременно. Растёт только количество матриц attention, которые надо хранить: было `N x N`, стало восемь штук `N x N`.
+Наш питоновский цикл по головам — учебный приём. На реальном железе та же математика укладывается в один `bmm`: GPU видит единственный батчевый matmul формы `(heads, N, d_head) × (heads, d_head, N) -> (heads, N, N)`. Добавлять головы бесплатно.
+
+> 🎒 **На пальцах.** «Бесплатно» здесь — про арифметику, и это можно проверить. Одна голова при `d_model = 512`: матрица `N x 512`, умноженная на `512 x N`. Восемь голов: восемь умножений `N x 64` на `64 x N`. Число операций одинаковое — просто вместо одного большого умножения GPU делает восемь маленьких, и делает он их одновременно. Растёт только количество матриц attention, которые надо хранить: было `N x N`, стало восемь штук `N x N`.
 
 ### Step 3: Grouped-Query Attention variant
 
 Меняются только проекции ключей и значений. Q получает `n_heads` групп; K и V получают `n_kv_heads < n_heads` групп и повторяются, чтобы совпасть по числу:
 
 ```python
-def gqa_project(X, W, n_kv_heads, n_heads):
-    kv = split_heads(X @ W, n_kv_heads)       # (kv_heads, n, d_head)
+def gqa_project(X: Matrix, W, n_kv_heads: int, n_heads: int) -> List[Matrix]:
+    kv_small = split_heads(matmul(X, W), n_kv_heads)   # n_kv_heads матриц
     repeat = n_heads // n_kv_heads
-    return np.repeat(kv, repeat, axis=0)      # (n_heads, n, d_head)
+    return [kv_small[i // repeat] for i in range(n_heads)]
 ```
+
+Обратите внимание: в возвращённом списке лежат *ссылки*, а не копии — при `repeat = 2` элементы `Kh[0]` и `Kh[1]` это один и тот же объект. В этом весь смысл: одна сохранённая KV-голова обслуживает несколько query-голов.
 
 На инференсе это экономит память, потому что в KV-кэше живёт только `n_kv_heads` копий, а не `n_heads`. Llama 3 70B использует 64 головы query и 8 голов KV — кэш ужимается в 8 раз.
 
-> 🎒 **На пальцах.** `np.repeat(kv, repeat, axis=0)` при 8 KV-головах и 64 query-головах даёт `repeat = 8`: каждая KV-голова копируется восемь раз подряд. Математически счёт идёт как в обычном MHA с 64 головами — восемь query-голов просто смотрят на один и тот же набор ключей. Но копия в памяти временная, а в кэше между шагами генерации лежат только исходные восемь. Отсюда и восьмикратная экономия.
+> 🎒 **На пальцах.** При 8 KV-головах и 64 query-головах получается `repeat = 8`, и выражение `kv_small[i // repeat]` выдаёт каждую KV-голову восемь раз подряд. Математически счёт идёт как в обычном MHA с 64 головами — восемь query-голов просто смотрят на один и тот же набор ключей. Но в списке это восемь ссылок на один объект, а не восемь копий, и в кэше между шагами генерации лежат только исходные восемь голов. Отсюда и восьмикратная экономия.
 
 ### Step 4: probe what each head learned
 
@@ -139,7 +158,7 @@ from torch.nn.functional import scaled_dot_product_attention
 out = scaled_dot_product_attention(q, k, v, is_causal=True, enable_gqa=True)
 ```
 
-> 🎒 **На пальцах.** `enable_gqa=True` избавляет вас от `np.repeat` из шага 3 — PyTorch сам поймёт, что у `k` голов меньше, чем у `q`, и размножит их внутри ядра, не создавая копию в памяти. `is_causal=True` — это причинная маска: токен номер 5 не имеет права смотреть на токены 6 и дальше. Обе опции ничего не считают заново, они просто говорят ядру, какой уже написанный быстрый путь выбрать.
+> 🎒 **На пальцах.** `enable_gqa=True` избавляет вас от размножения KV-голов из шага 3 — PyTorch сам поймёт, что у `k` голов меньше, чем у `q`, и размножит их внутри ядра, не создавая копию в памяти. `is_causal=True` — это причинная маска: токен номер 5 не имеет права смотреть на токены 6 и дальше. Обе опции ничего не считают заново, они просто говорят ядру, какой уже написанный быстрый путь выбрать.
 
 **How many heads?** Практические ориентиры от продакшн-моделей 2026 года:
 

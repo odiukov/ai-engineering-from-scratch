@@ -5,7 +5,7 @@
 
 **Type:** Build
 **Languages:** Python
-**Prerequisites:** Phase 3 (Deep Learning Core), Phase 5 Lesson 10 (Sequence-to-Sequence)
+**Prerequisites:** Phase 3 (Deep Learning Core), Phase 5 · 09 (Sequence-to-Sequence), Phase 5 · 10 (Attention Mechanism)
 **Time:** ~90 minutes
 
 ## Learning Objectives

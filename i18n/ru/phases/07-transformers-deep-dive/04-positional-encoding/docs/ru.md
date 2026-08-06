@@ -18,7 +18,7 @@ Scaled dot-product attention слеп к порядку. Матрица attentio
 
 1. **Absolute sinusoidal** (Vaswani 2017). Прибавить к эмбеддингу `sin/cos` от позиции. Просто, без обучаемых параметров, плохо экстраполируется за пределы обученных длин.
 2. **RoPE — Rotary Position Embeddings** (Su 2021). Повернуть векторы Q и K на угол, пропорциональный позиции. Кодирует *относительную* позицию прямо внутри скалярного произведения. Доминирует в 2026 году.
-3. **ALiBi — Attention with Linear Biases** (Press 2022). Никаких эмбеддингов вообще; к оценкам attention добавляется линейный штраф за расстояние, свой у каждой головы. Отлично экстраполируется по длине.
+3. **ALiBi — Attention with Linear Biases** (Press 2021). Никаких эмбеддингов вообще; к оценкам attention добавляется линейный штраф за расстояние, свой у каждой головы. Отлично экстраполируется по длине.
 
 На 2026 год RoPE стоит практически в каждой передовой открытой модели: Llama 2/3/4, Qwen 2/3, Mistral, Mixtral, DeepSeek-V3, Kimi. Горстка моделей с длинным контекстом использует ALiBi или его современные варианты. Абсолютные синусоиды — история.
 
@@ -136,7 +136,8 @@ def apply_rope(x, pos, base=10000):
 
 ```python
 def alibi_bias(n_heads, seq_len):
-    # slope_h = 2 ** (-8 * h / n_heads) for h = 1..n_heads
+    # голова h нумеруется с нуля, поэтому её наклон 2 ** (-8 * (h + 1) / n_heads):
+    # геометрическая последовательность 2^(-8/H), 2^(-16/H), ..., 2^-8
     slopes = [2 ** (-8 * (h + 1) / n_heads) for h in range(n_heads)]
     bias = []
     for m in slopes:
@@ -157,7 +158,7 @@ def alibi_bias(n_heads, seq_len):
 
 ## Use It
 
-В PyTorch 2.5+ есть утилиты для RoPE в `torch.nn.functional`. Большая часть продакшн-кода использует `flash_attn` или `xformers`, где RoPE применяется прямо внутри ядра attention.
+Операции RoPE в `torch.nn.functional` нет — ядро PyTorch её никогда и не поставляло. RoPE живёт уровнем выше: в коде каждой конкретной модели (в HF `transformers` все схемы масштабирования собраны в `modeling_rope_utils.py`), в `torchtune.modules.RotaryPositionalEmbeddings` или вообще вплавленной в ядро attention, если вы берёте `flash_attn` либо `xformers`. Продакшн-код почти всегда берёт один из этих вариантов, а не пишет своё руками.
 
 ```python
 from transformers import AutoModel
