@@ -51,7 +51,7 @@ f3-dqn-stability
 
 ## Build It
 
-The code here is stdlib-only numpy-free — we use a hand-rolled single-hidden-layer MLP on a tiny continuous GridWorld, so every training step runs in microseconds. The algorithm is identical to Atari DQN at scale.
+The code here is stdlib-only, no numpy — we use a hand-rolled single-hidden-layer MLP on a tiny continuous GridWorld, so every training step runs in microseconds. The algorithm is identical to Atari DQN at scale.
 
 ### Step 1: replay buffer
 
@@ -68,7 +68,7 @@ class ReplayBuffer:
         return rng.sample(self.buf, batch)
 ```
 
-~50,000 capacity for Atari; 5,000 suffices for our toy env.
+`10⁶` capacity for Nature-DQN on Atari; `2,000` suffices for our toy env (see `code/main.py`).
 
 ### Step 2: a tiny Q-network (manual MLP)
 
@@ -99,8 +99,9 @@ def train_step(online, target, batch, gamma, lr):
         else:
             q_next, _ = target.forward(s_next)
             y = r + gamma * max(q_next)
-        td_error = q[a] - y
-        accumulate_grads(grads, online, s, h, a, td_error)
+        # dL/dq[a] for L = 0.5 (q[a] - y)^2 — the negated TD error
+        dloss_dq = q[a] - y
+        accumulate_grads(grads, online, s, h, a, dloss_dq)
     apply_sgd(online, grads, lr / len(batch))
 ```
 
@@ -124,7 +125,7 @@ for episode in range(N):
         s = s_next
 ```
 
-On our tiny GridWorld with a 16-dim one-hot state, the agent learns a near-optimal policy in ~500 episodes. On Atari, scale this to 200M frames and add a CNN feature extractor.
+On our tiny GridWorld with a 16-dim one-hot state, the agent learns a near-optimal policy in ~200 episodes — mean return reaches ≈ -6.3 against the optimal -6.0, right as the ε schedule bottoms out. On Atari, scale this to 200M frames and add a CNN feature extractor.
 
 ## Pitfalls
 

@@ -22,6 +22,25 @@ def step(state, action):
     return (nr, nc), -1.0, (nr, nc) == TERMINAL
 
 
+class ReplayBuffer:
+    """Ring buffer of transitions, sampled uniformly to decorrelate gradient steps."""
+
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.buf = []
+
+    def push(self, s, a, r, s_next, done):
+        self.buf.append((s, a, r, s_next, done))
+        if len(self.buf) > self.capacity:
+            self.buf.pop(0)
+
+    def sample(self, batch, rng):
+        return rng.sample(self.buf, batch)
+
+    def __len__(self):
+        return len(self.buf)
+
+
 def state_features(state):
     feat = [0.0] * (GRID * GRID)
     r, c = state
@@ -84,17 +103,19 @@ def train_step(online, target, batch, gamma, lr):
         else:
             q_next, _ = forward(target, state_features(s_next))
             y = r + gamma * max(q_next)
-        td_error = q[a] - y
-        total_loss += 0.5 * td_error * td_error
+        # dL/dq[a] for L = 0.5 * (q[a] - y)^2; this is the negated TD error,
+        # which is exactly the sign the gradient-descent step below needs.
+        dloss_dq = q[a] - y
+        total_loss += 0.5 * dloss_dq * dloss_dq
 
-        db2[a] += td_error
+        db2[a] += dloss_dq
         for j in range(n_hidden):
-            dW2[a][j] += td_error * h[j]
+            dW2[a][j] += dloss_dq * h[j]
 
         grad_h = [0.0] * n_hidden
         for j in range(n_hidden):
             if h[j] > 0:
-                grad_h[j] = td_error * online["W2"][a][j]
+                grad_h[j] = dloss_dq * online["W2"][a][j]
 
         for j in range(n_hidden):
             db1[j] += grad_h[j]
@@ -119,7 +140,6 @@ def main():
     online = init_net(n_in, 32, len(ACTIONS), rng)
     target = clone(online)
 
-    buffer = []
     capacity = 2000
     batch = 32
     gamma = 0.99
@@ -127,6 +147,7 @@ def main():
     sync_every = 200
     episodes = 400
     step_count = 0
+    buffer = ReplayBuffer(capacity)
 
     returns_log = []
     for ep in range(episodes):
@@ -137,11 +158,9 @@ def main():
             a = epsilon_greedy(online, s, rng, epsilon)
             s_next, r, done = step(s, ACTIONS[a])
             total += r
-            buffer.append((s, a, r, s_next, done))
-            if len(buffer) > capacity:
-                buffer.pop(0)
+            buffer.push(s, a, r, s_next, done)
             if len(buffer) >= batch:
-                mb = rng.sample(buffer, batch)
+                mb = buffer.sample(batch, rng)
                 train_step(online, target, mb, gamma, lr)
             step_count += 1
             if step_count % sync_every == 0:
