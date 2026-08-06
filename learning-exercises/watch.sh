@@ -2,7 +2,7 @@
 # Автоперезапуск тестов при сохранении файла.
 #
 #   ./learning-exercises/watch.sh              # последний урок
-#   ./learning-exercises/watch.sh lesson-01    # конкретный урок
+#   ./learning-exercises/watch.sh p01-l01-linear-algebra-intuition    # конкретный урок
 #
 # Работает без установки чего-либо: uvx тянет pytest-watcher на лету.
 # Если uv нет — падает на простой polling-цикл.
@@ -10,11 +10,11 @@
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
 
-LESSON="${1:-$(ls -d lesson-* 2>/dev/null | sort | tail -1)}"
+LESSON="${1:-$(ls -d p*-l* 2>/dev/null | sort | tail -1)}"
 
 if [[ -z "$LESSON" || ! -d "$LESSON" ]]; then
   echo "нет такого урока: ${1:-<пусто>}"
-  echo "доступны:"; ls -d lesson-* 2>/dev/null | sed 's/^/  /'
+  echo "доступны:"; ls -d p*-l* 2>/dev/null | sed 's/^/  /'
   exit 1
 fi
 

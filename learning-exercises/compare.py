@@ -149,7 +149,7 @@ def main():
     lesson = sys.argv[1] if len(sys.argv) > 1 else None
     root = Path(__file__).parent
     if lesson is None:
-        candidates = sorted(root.glob("lesson-*"))
+        candidates = sorted(root.glob("p*-l*"))
         if not candidates:
             sys.exit("нет ни одного lesson-* каталога")
         lesson_dir = candidates[-1]
