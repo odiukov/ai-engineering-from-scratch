@@ -1,0 +1,78 @@
+{
+  "lesson": "03-monte-carlo-methods",
+  "title": "Monte Carlo Methods — Learning from Complete Episodes",
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "You cannot query the dynamics of your robot, but you can run it and record what happened. What is the simplest estimator of V^π(s)?",
+      "options": [
+        "Fit a model of the dynamics first, then run value iteration on it",
+        "Take the max over actions of the rewards observed at s",
+        "Average the observed returns that followed visits to s",
+        "Regress reward on state features with supervised learning"
+      ],
+      "correct": 2,
+      "explanation": "V^π is defined as an expected return, and a sample mean is the plainest estimator of an expectation. The only capability required is the ability to sample episodes."
+    },
+    {
+      "stage": "check",
+      "question": "How do first-visit and every-visit Monte Carlo differ statistically?",
+      "options": [
+        "First-visit is biased at finite sample size; every-visit is unbiased throughout",
+        "First-visit is unbiased at any episode count; every-visit is biased but consistent",
+        "Both are unbiased estimators and differ only in the variance they carry",
+        "Every-visit estimates Q* while first-visit estimates V^π for whatever policy generated the data"
+      ],
+      "correct": 1,
+      "explanation": "One sample per episode keeps first-visit returns iid. Repeat visits inside a single episode are correlated, which is exactly where every-visit's finite-sample bias comes from."
+    },
+    {
+      "stage": "check",
+      "question": "The incremental mean is V_n = V_{n-1} + (1/n)[G_n − V_{n-1}]. What happens if you swap 1/n for a constant α?",
+      "options": [
+        "You get an exponentially-weighted estimate that tracks changes in π",
+        "The estimate stops converging at all, since 1/n is required by Robbins-Monro",
+        "It silently becomes an every-visit estimator",
+        "It silently becomes a first-visit estimator"
+      ],
+      "correct": 0,
+      "explanation": "A constant step size forgets old returns geometrically, which is what you want once π keeps changing. That single substitution is the step from MC to TD to every modern RL update."
+    },
+    {
+      "stage": "check",
+      "question": "Why compute returns with the backward recurrence G_t = r_{t+1} + γ G_{t+1} instead of summing each suffix directly?",
+      "options": [
+        "It removes the discount from the estimate",
+        "It lets the method handle episodes that never terminate",
+        "It produces all T returns in a single O(T) pass",
+        "It is what makes the resulting estimator unbiased"
+      ],
+      "correct": 2,
+      "explanation": "It is a pure computational reorganization of the same discounted sum. Summing each suffix independently costs O(T²) and gives identical numbers."
+    },
+    {
+      "stage": "post",
+      "question": "Your MC control agent acts greedily on a freshly zeroed Q and never improves. What is the diagnosis?",
+      "options": [
+        "γ is too high, so credit assignment across the episode is too noisy to learn from",
+        "Ties in Q pin it to one action, so the rest go unsampled",
+        "First-visit MC is biased at low episode counts",
+        "The returns need to be normalized before the update"
+      ],
+      "correct": 1,
+      "explanation": "MC only ever sees the state-action pairs the policy visits. Without ε-greedy or exploring starts, whole regions keep their initial estimates permanently."
+    },
+    {
+      "stage": "post",
+      "question": "Your MC estimate of V^π(0,0) for the uniform policy on the deterministic 4×4 grid sits near -39, but the previous lesson's value iteration printed -6.43. What is the right read?",
+      "options": [
+        "MC has not converged and simply needs a far larger episode budget",
+        "MC is biased upward by the importance-sampling weights",
+        "They describe a different policy on a different grid",
+        "The two runs must be using different discount factors"
+      ],
+      "correct": 2,
+      "explanation": "-6.43 is V* on the slippery grid. The matching reference for this estimate is iterative policy evaluation of the same uniform policy on the same deterministic grid, about -39.4."
+    }
+  ]
+}
