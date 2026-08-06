@@ -1,0 +1,78 @@
+{
+  "lesson": "06-policy-gradients-reinforce",
+  "title": "Policy Gradient — REINFORCE from Scratch",
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "Your action is a 10-dimensional torque vector. What breaks if you try to act by argmax over Q(s, a)?",
+      "options": [
+        "The Q values become unbounded above",
+        "There is no tractable argmax over a continuous action space",
+        "The Bellman equation stops holding for continuous actions",
+        "The discount has to be raised to exactly 1"
+      ],
+      "correct": 1,
+      "explanation": "Value-based control has to enumerate actions to pick the best one. Parameterizing the policy directly replaces that search with a sample from a distribution."
+    },
+    {
+      "stage": "check",
+      "question": "What does the policy gradient theorem say ∇J(θ) equals?",
+      "options": [
+        "The gradient of the squared TD error, averaged over transitions",
+        "The expected return multiplied by the gradient of the value function",
+        "The expectation of G_t times ∇_θ log π_θ(a_t | s_t)",
+        "The gradient of the policy's entropy, scaled by the return"
+      ],
+      "correct": 2,
+      "explanation": "The log-derivative trick converts the gradient of an expectation into an expectation of a gradient. That is what makes it estimable from sampled trajectories at all."
+    },
+    {
+      "stage": "check",
+      "question": "For a softmax policy, ∇_θ log π_θ(a | s) with respect to the logits equals what?",
+      "options": [
+        "onehot(a) minus π(· | s)",
+        "π(· | s) minus onehot(a)",
+        "onehot(a) scaled by π(a | s)",
+        "The logits minus their mean"
+      ],
+      "correct": 0,
+      "explanation": "It is the score of the action you took minus its expected score under the policy. Note that it sums to zero across actions, which is why a state-only baseline drops out in expectation."
+    },
+    {
+      "stage": "check",
+      "question": "Why weight step t by the reward-to-go G_t rather than by the whole trajectory's return G_0?",
+      "options": [
+        "G_0 is a biased estimator while G_t is unbiased",
+        "Only G_t keeps the estimator on-policy",
+        "G_0 folds in rewards collected before a_t, which a_t cannot have caused",
+        "The log-derivative trick only applies to reward-to-go"
+      ],
+      "correct": 2,
+      "explanation": "Both estimators are unbiased; the earlier rewards are just zero-mean noise attached to every gradient term. Dropping them is variance reduction that costs nothing."
+    },
+    {
+      "stage": "post",
+      "question": "You subtract a learned V̂(s_t) from G_t before multiplying by the score. Why is the gradient still unbiased?",
+      "options": [
+        "Because V̂ was trained by regression onto the same G_t values",
+        "Because E[b(s_t) · ∇ log π(a_t | s_t)] = 0 whenever b ignores a_t",
+        "Because the same number is subtracted from every action at that state",
+        "Because the resulting advantages are renormalized to zero mean"
+      ],
+      "correct": 1,
+      "explanation": "The score function has zero mean under π, so anything constant across actions at that state multiplies out to zero. That freedom is what lets a critic cut variance without shifting the optimum."
+    },
+    {
+      "stage": "post",
+      "question": "You read `loss = -advantage * log_prob` in a 2026 training script. What are you looking at?",
+      "options": [
+        "A TD(0) value-regression loss",
+        "A cross-entropy loss for behavior cloning",
+        "A Q-learning bootstrap target",
+        "REINFORCE with a baseline"
+      ],
+      "correct": 3,
+      "explanation": "The minus sign turns gradient ascent on J into descent on a loss, and the advantage is the baseline-subtracted return. PPO, GRPO, RLOO and DPO are all variance-reduction machinery bolted onto this one line."
+    }
+  ]
+}
