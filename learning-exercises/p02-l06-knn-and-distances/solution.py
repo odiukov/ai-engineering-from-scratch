@@ -163,3 +163,92 @@ def standardize(X):
         for row in X
     ]
     return scaled, means, stds
+
+
+def build_kdtree(points, depth=0, indices=None):
+    """KD-дерево: рекурсивно резать пространство по одной оси за раз.
+
+    Вернуть узел-словарь или None для пустого набора:
+      {"point": p, "index": i, "axis": a, "left": узел|None, "right": узел|None}
+
+    `index` — позиция точки в ИСХОДНОМ списке points, чтобы по результату
+    поиска можно было достать метку из y_train.
+
+    Алгоритм: ось = depth % число_измерений, точки сортируются по этой оси,
+    медиана становится узлом, левая половина уходит влево, правая вправо.
+
+    build_kdtree([[1.0, 1.0]])
+        ->  {"point": [1.0, 1.0], "index": 0, "axis": 0,
+             "left": None, "right": None}
+
+    Ловушка: `indices` — служебный параметр рекурсии. Снаружи его не
+    передают; на верхнем уровне он None и заполняется как range(len(points)).
+    Без него после первого же деления номера точек потеряются.
+
+    Зачем всё это: линейный перебор в k_nearest считает расстояние до
+    КАЖДОЙ точки. KD-дерево позволяет отсечь целые ветви, не заглядывая
+    внутрь. Работает до ~20 измерений; дальше проклятие размерности съедает
+    выигрыш, и линейный перебор снова побеждает.
+    """
+    if indices is None:
+        indices = list(range(len(points)))
+    if not indices:
+        return None
+
+    axis = depth % len(points[indices[0]])
+    indices = sorted(indices, key=lambda i: points[i][axis])
+    mid = len(indices) // 2
+
+    return {
+        "point": points[indices[mid]],
+        "index": indices[mid],
+        "axis": axis,
+        "left": build_kdtree(points, depth + 1, indices[:mid]),
+        "right": build_kdtree(points, depth + 1, indices[mid + 1:]),
+    }
+
+
+def kdtree_nearest(tree, query):
+    """Ближайшая точка через KD-дерево. Вернуть (index, distance, visited).
+
+    `visited` — сколько узлов пришлось осмотреть. Это и есть доказательство,
+    что дерево работает: у линейного перебора visited был бы равен числу
+    точек.
+
+    Алгоритм:
+      1. спуститься в ту половину, где лежит query — там кандидат вероятнее;
+      2. поднимаясь обратно, проверить сам узел;
+      3. заглянуть во вторую половину ТОЛЬКО если плоскость раздела ближе,
+         чем текущий лучший кандидат: abs(query[axis] - node[axis]) < best.
+
+    Шаг 3 — вся суть. Если разделяющая плоскость дальше найденного
+    расстояния, за ней ничего лучше быть не может, и половина дерева
+    отбрасывается без единого вычисления.
+
+    kdtree_nearest(build_kdtree([[0.0, 0.0], [5.0, 5.0]]), [0.1, 0.1])
+        ->  (0, 0.1414..., ...)
+
+    Ловушка: отсекать ветку по строгому < и забыть, что расстояние до
+    плоскости считается ТОЛЬКО по оси этого узла, а не по всем координатам.
+    """
+    best = {"index": None, "dist": float("inf"), "visited": 0}
+
+    def search(node):
+        if node is None:
+            return
+        best["visited"] += 1
+        d = l2_distance(node["point"], query)
+        if d < best["dist"]:
+            best["dist"], best["index"] = d, node["index"]
+
+        axis = node["axis"]
+        diff = query[axis] - node["point"][axis]
+        near, far = (node["left"], node["right"]) if diff < 0 else (node["right"], node["left"])
+        search(near)
+        # вторая половина нужна, только если плоскость раздела ближе
+        # найденного кандидата — иначе за ней заведомо ничего лучше нет
+        if abs(diff) < best["dist"]:
+            search(far)
+
+    search(tree)
+    return best["index"], best["dist"], best["visited"]

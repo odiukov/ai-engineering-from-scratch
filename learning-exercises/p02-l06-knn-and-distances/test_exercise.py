@@ -6,8 +6,10 @@ import random
 import pytest
 
 from exercise import (
+    build_kdtree,
     cosine_distance,
     k_nearest,
+    kdtree_nearest,
     knn_classify,
     knn_regress,
     l1_distance,
@@ -280,3 +282,96 @@ def test_scaling_stops_the_big_column_from_deciding_everything():
     scaled_query = [(query[j] - means[j]) / stds[j] for j in range(2)]
     fixed = [l2_distance(x, scaled_query) for x in scaled]
     assert abs(fixed[0] - fixed[2]) > 1.0
+
+
+# ------------------------------------------------------------- KD-дерево
+def _grid(n=8):
+    """Регулярная сетка n x n — 64 точки при n=8."""
+    return [[float(i), float(j)] for i in range(n) for j in range(n)]
+
+
+def test_kdtree_root_splits_on_the_first_axis():
+    tree = build_kdtree([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]])
+    assert tree["axis"] == 0
+
+
+def test_kdtree_alternates_axes_by_depth():
+    tree = build_kdtree([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]])
+    assert tree["left"]["axis"] == 1
+
+
+def test_kdtree_of_a_single_point_has_no_children():
+    tree = build_kdtree([[1.0, 1.0]])
+    assert tree["left"] is None and tree["right"] is None
+
+
+def test_kdtree_of_nothing_is_none():
+    assert build_kdtree([]) is None
+
+
+def test_kdtree_keeps_every_point():
+    points = _grid(4)
+    seen = []
+
+    def walk(node):
+        if node is None:
+            return
+        seen.append(node["index"])
+        walk(node["left"])
+        walk(node["right"])
+
+    walk(build_kdtree(points))
+    assert sorted(seen) == list(range(len(points)))
+
+
+def test_kdtree_indices_point_back_at_the_original_list():
+    """Индексы должны пережить рекурсивную сортировку, иначе метку не достать."""
+    points = _grid(4)
+    tree = build_kdtree(points)
+
+    def walk(node):
+        if node is None:
+            return
+        assert points[node["index"]] == node["point"]
+        walk(node["left"])
+        walk(node["right"])
+
+    walk(tree)
+
+
+def test_kdtree_finds_the_same_point_as_brute_force():
+    points = _grid()
+    tree = build_kdtree(points)
+    for query in ([0.2, 0.3], [7.4, 7.1], [3.5, 4.5], [-5.0, 20.0]):
+        _, dist, _ = kdtree_nearest(tree, query)
+        brute = min(range(len(points)), key=lambda i: l2_distance(points[i], query))
+        assert dist == pytest.approx(l2_distance(points[brute], query))
+
+
+def test_kdtree_visits_fewer_nodes_than_a_linear_scan():
+    """Ради этого дерево и строится: половины отсекаются целиком."""
+    points = _grid()
+    _, _, visited = kdtree_nearest(build_kdtree(points), [0.2, 0.3])
+    assert visited < len(points)
+
+
+def test_kdtree_returns_exact_hit_at_zero_distance():
+    points = _grid(4)
+    idx, dist, _ = kdtree_nearest(build_kdtree(points), points[5])
+    assert dist == pytest.approx(0.0)
+    assert points[idx] == points[5]
+
+
+def test_kdtree_must_search_both_halves_near_the_boundary():
+    """Точка ровно на плоскости раздела: отсечь вторую ветку нельзя."""
+    points = [[0.0, 0.0], [10.0, 0.0]]
+    _, dist, _ = kdtree_nearest(build_kdtree(points), [5.0, 0.0])
+    assert dist == pytest.approx(5.0)
+
+
+def test_kdtree_works_in_three_dimensions():
+    points = [[float(i), float(j), float(k)]
+              for i in range(3) for j in range(3) for k in range(3)]
+    tree = build_kdtree(points)
+    idx, _, _ = kdtree_nearest(tree, [0.1, 0.1, 0.1])
+    assert points[idx] == [0.0, 0.0, 0.0]

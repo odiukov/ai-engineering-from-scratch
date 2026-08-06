@@ -1,18 +1,24 @@
 """Тесты к уроку «Решающие деревья». Правь exercise.py."""
 
 import math
+import random
 
 import pytest
 
 from exercise import (
     best_split,
     bootstrap_sample,
+    build_regression_tree,
     build_tree,
     entropy,
+    feature_importance,
+    fit_random_forest,
+    forest_predict,
     gini_impurity,
     information_gain,
     split_dataset,
     tree_predict,
+    variance_reduction,
 )
 
 APPROX = lambda x: pytest.approx(x, abs=1e-9)
@@ -290,3 +296,161 @@ def test_bootstrap_invents_nothing_new():
     X, y = [[float(i)] for i in range(10)], list(range(10))
     _, y_boot = bootstrap_sample(X, y, seed=9)
     assert set(y_boot) <= set(y)
+
+
+# ------------------------------------------------------------ случайный лес
+def _noisy_dataset(n=60, seed=7):
+    """Два информативных признака и два чисто шумовых."""
+    rng = random.Random(seed)
+    X, y = [], []
+    for _ in range(n):
+        a = rng.uniform(0, 10)
+        b = rng.uniform(0, 10)
+        X.append([a, b, rng.uniform(0, 10), rng.uniform(0, 10)])
+        y.append(1 if a + b > 10 else 0)
+    return X, y
+
+
+def test_forest_grows_the_requested_number_of_trees():
+    X, y = _noisy_dataset()
+    assert len(fit_random_forest(X, y, n_trees=7, max_depth=3, seed=0)) == 7
+
+
+def test_forest_is_reproducible_for_a_given_seed():
+    X, y = _noisy_dataset()
+    a = fit_random_forest(X, y, n_trees=5, max_depth=3, seed=42)
+    b = fit_random_forest(X, y, n_trees=5, max_depth=3, seed=42)
+    assert a == b
+
+
+def test_forest_trees_differ_from_each_other():
+    """Если деревья одинаковые, голосование бессмысленно."""
+    X, y = _noisy_dataset()
+    forest = fit_random_forest(X, y, n_trees=5, max_depth=3, max_features=2, seed=1)
+    assert any(t != forest[0] for t in forest[1:])
+
+
+def test_forest_predict_returns_one_label_per_row():
+    X, y = _noisy_dataset()
+    forest = fit_random_forest(X, y, n_trees=5, max_depth=3, seed=0)
+    assert len(forest_predict(forest, X)) == len(X)
+
+
+def test_forest_predict_is_a_majority_vote():
+    """Два дерева из трёх говорят 1 — ответ 1, даже если третье уверено в 0."""
+    ones = {"leaf": True, "value": 1}
+    zeros = {"leaf": True, "value": 0}
+    assert forest_predict([ones, ones, zeros], [[0.0]]) == [1]
+
+
+def test_forest_beats_a_single_overfitted_tree_on_held_out_data():
+    """Ради этого лес и существует: усреднение гасит разброс."""
+    X, y = _noisy_dataset(n=80, seed=3)
+    train_X, train_y = X[:50], y[:50]
+    test_X, test_y = X[50:], y[50:]
+
+    single = tree_predict(build_tree(train_X, train_y), test_X)
+    forest = fit_random_forest(train_X, train_y, n_trees=25, max_features=2, seed=0)
+    voted = forest_predict(forest, test_X)
+
+    acc = lambda p: sum(a == b for a, b in zip(p, test_y)) / len(test_y)
+    assert acc(voted) >= acc(single)
+
+
+def test_max_features_actually_restricts_the_choice():
+    """С max_features=1 развилка не может выбирать признак свободно."""
+    X, y = _noisy_dataset()
+    rng = random.Random(0)
+    restricted = build_tree(X, y, max_depth=1, max_features=1, rng=rng)
+    unrestricted = build_tree(X, y, max_depth=1)
+    assert restricted["feature"] != unrestricted["feature"] or restricted != unrestricted
+
+
+# ------------------------------------------------------- важность признаков
+def test_importance_sums_to_one():
+    X, y = _noisy_dataset()
+    tree = build_tree(X, y, max_depth=4)
+    assert sum(feature_importance(tree, X, y)) == pytest.approx(1.0)
+
+
+def test_importance_has_one_entry_per_feature():
+    X, y = _noisy_dataset()
+    tree = build_tree(X, y, max_depth=3)
+    assert len(feature_importance(tree, X, y)) == len(X[0])
+
+
+def test_unused_feature_gets_zero_importance():
+    X = [[1.0, 0.0], [2.0, 0.0], [5.0, 0.0], [6.0, 0.0]]
+    y = [0, 0, 1, 1]
+    assert feature_importance(build_tree(X, y), X, y) == pytest.approx([1.0, 0.0])
+
+
+def test_informative_features_outrank_noise():
+    """Первые два признака определяют метку, последние два — шум."""
+    X, y = _noisy_dataset(n=100, seed=11)
+    imp = feature_importance(build_tree(X, y, max_depth=4), X, y)
+    assert min(imp[0], imp[1]) > max(imp[2], imp[3])
+
+
+def test_importance_of_a_single_leaf_is_all_zeros():
+    """Дерево без развилок ничего не объясняет — нормировать нечего."""
+    X, y = [[1.0, 2.0]], [0]
+    assert feature_importance(build_tree(X, y), X, y) == [0.0, 0.0]
+
+
+def test_root_split_weighs_more_than_a_deep_one():
+    """Развилка у корня решает судьбу всей выборки, глубокая — горстки."""
+    X = [[0.0], [1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0]]
+    y = [0, 0, 0, 0, 1, 1, 1, 0]
+    shallow = feature_importance(build_tree(X, y, max_depth=1), X, y)
+    assert shallow == pytest.approx([1.0])
+
+
+# --------------------------------------------------- дерево для регрессии
+def test_variance_reduction_on_a_clean_split():
+    assert variance_reduction([1.0, 1.0, 5.0, 5.0], [1.0, 1.0], [5.0, 5.0]) == pytest.approx(4.0)
+
+
+def test_variance_reduction_is_zero_when_nothing_improves():
+    assert variance_reduction([1.0, 5.0], [1.0, 5.0], []) == pytest.approx(0.0)
+
+
+def test_variance_reduction_of_identical_values_is_zero():
+    assert variance_reduction([3.0] * 4, [3.0, 3.0], [3.0, 3.0]) == pytest.approx(0.0)
+
+
+def test_regression_leaf_holds_the_mean_not_the_mode():
+    """Главное отличие от классификации: лист усредняет, а не голосует."""
+    tree = build_regression_tree([[0.0], [0.0], [0.0]], [1.0, 2.0, 9.0])
+    assert tree == {"leaf": True, "value": pytest.approx(4.0)}
+
+
+def test_regression_tree_splits_two_levels():
+    tree = build_regression_tree([[1.0], [2.0]], [10.0, 20.0])
+    assert tree["feature"] == 0
+    assert tree["threshold"] == pytest.approx(1.5)
+    assert tree["left"]["value"] == pytest.approx(10.0)
+    assert tree["right"]["value"] == pytest.approx(20.0)
+
+
+def test_regression_tree_reuses_tree_predict():
+    """tree_predict не знает, метка в листе или число — формат узлов один."""
+    X = [[1.0], [2.0], [8.0], [9.0]]
+    y = [1.0, 1.0, 100.0, 100.0]
+    tree = build_regression_tree(X, y)
+    assert tree_predict(tree, X) == pytest.approx(y)
+
+
+def test_regression_tree_cannot_extrapolate():
+    """Справа от обучающих данных дерево навсегда застревает в крайнем листе."""
+    X = [[1.0], [2.0], [3.0], [4.0]]
+    y = [10.0, 20.0, 30.0, 40.0]
+    tree = build_regression_tree(X, y)
+    assert tree_predict(tree, [[100.0], [1000.0]]) == pytest.approx([40.0, 40.0])
+
+
+def test_regression_tree_respects_max_depth():
+    X = [[float(i)] for i in range(8)]
+    y = [float(i) for i in range(8)]
+    tree = build_regression_tree(X, y, max_depth=1)
+    assert tree["left"]["leaf"] and tree["right"]["leaf"]
