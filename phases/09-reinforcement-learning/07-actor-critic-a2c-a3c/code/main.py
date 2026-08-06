@@ -120,9 +120,13 @@ def actor_critic(episodes, lr_a=0.05, lr_v=0.1, gamma=0.99, lam=0.95, ent_coef=0
 
             adv = advs_norm[t]
             probs = node["probs"]
+            # dH/dz_i = -p_i * (log p_i + H) for softmax logits z; H is this
+            # distribution's own entropy, not a constant. Using 1.0 in place of
+            # H leaves a per-i residual whose components do not sum to zero.
+            entropy = -sum(p * math.log(max(p, 1e-12)) for p in probs)
             for i in range(N_ACTIONS):
                 grad_logpi = (1.0 if i == node["a"] else 0.0) - probs[i]
-                entropy_grad = -math.log(max(probs[i], 1e-12)) - 1.0
+                entropy_grad = -math.log(max(probs[i], 1e-12)) - entropy
                 for j in range(N_FEAT):
                     theta[i][j] += lr_a * (adv * grad_logpi + ent_coef * entropy_grad * probs[i]) * node["x"][j]
 

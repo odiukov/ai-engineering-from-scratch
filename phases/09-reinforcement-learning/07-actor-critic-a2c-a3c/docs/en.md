@@ -136,7 +136,7 @@ A2C/A3C are rarely the final choice in 2026 but they are the architecture everyt
 |--------|----------------|
 | PPO | A2C + clipped importance ratio for multi-epoch updates |
 | IMPALA | A3C + V-trace off-policy correction |
-| SAC (Phase 9 · 07) | Off-policy A2C with a soft-value critic (next lesson) |
+| SAC (not covered in this phase) | Off-policy A2C with a soft-value critic and entropy in the reward |
 | GRPO (Phase 9 · 12) | A2C without the critic — group-relative advantage |
 | DPO | A2C collapsed into a preference-ranking loss, no sampling |
 | AlphaStar / OpenAI Five | A2C with league training + imitation pre-training |
