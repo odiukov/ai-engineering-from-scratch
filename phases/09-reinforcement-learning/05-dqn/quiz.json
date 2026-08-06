@@ -1,0 +1,78 @@
+{
+  "lesson": "05-dqn",
+  "title": "Deep Q-Networks (DQN)",
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "You swap the Q-table for a neural net and run plain Q-learning on Atari frames, changing nothing else. What does the lesson say happens?",
+      "options": [
+        "It works, just slowly, since a network generalizes across visually similar frames",
+        "It diverges — the combination has no convergence guarantee",
+        "It overfits the first episode and the gradients collapse to zero",
+        "It converges to Q^π for the exploration policy rather than to Q*"
+      ],
+      "correct": 1,
+      "explanation": "Function approximation plus bootstrapping plus off-policy learning is the deadly triad, and no theorem covers it. Replay and the target network exist specifically to make the combination behave in practice."
+    },
+    {
+      "stage": "check",
+      "question": "What does sampling minibatches uniformly from a replay buffer buy you?",
+      "options": [
+        "A lower-variance estimate of the full discounted return",
+        "An unbiased sample from the current policy's state distribution",
+        "Decorrelated updates, and repeated use of rare transitions",
+        "A guarantee that every state-action pair is visited infinitely often in the limit"
+      ],
+      "correct": 2,
+      "explanation": "Successive Atari frames are nearly identical, so consecutive on-policy gradient steps would be almost the same step. Shuffling a large buffer breaks that correlation and lets one lucky reward teach the net many times."
+    },
+    {
+      "stage": "check",
+      "question": "Why keep a second, frozen copy of the network for the Bellman target?",
+      "options": [
+        "To halve the memory the backward pass needs",
+        "So the regression target holds still while θ keeps moving",
+        "To supply the exploration noise that ε-greedy needs when Q values are still flat",
+        "So the two networks can vote on which action is greedy"
+      ],
+      "correct": 1,
+      "explanation": "With one network on both sides of the equation you are regressing onto your own shifting output. Freezing θ⁻ turns each interval into an ordinary supervised regression problem."
+    },
+    {
+      "stage": "check",
+      "question": "How does Double DQN change the target computation?",
+      "options": [
+        "It takes the minimum over two independently trained target networks",
+        "It clips the target into {-1, 0, +1} before the regression",
+        "It averages the target produced by the online net and the target net",
+        "The online net picks the argmax; the target net evaluates it"
+      ],
+      "correct": 3,
+      "explanation": "Selection and evaluation then rest on independently noisy estimates, so the noise no longer conspires to inflate the max. It is a drop-in change and consistently better."
+    },
+    {
+      "stage": "post",
+      "question": "Your rewards are dollar amounts from 1 to 5000 and DQN training is unstable. Which move does the lesson sanction, and what is the catch?",
+      "options": [
+        "Normalize the reward scale; you may discard information magnitudes carry",
+        "Push γ toward 1.0; you also lengthen the credit-assignment horizon considerably",
+        "Shrink the replay buffer; you also lose the rare transitions",
+        "Sync the target net every step; you also lose the frozen target"
+      ],
+      "correct": 0,
+      "explanation": "Gradient magnitude scales with reward magnitude, so a 5000× spread dominates every update. Atari-style sign clipping is only correct when the sign is all that matters — for dollars it usually is not."
+    },
+    {
+      "stage": "post",
+      "question": "You set the target-network sync interval to every single step. What have you effectively built?",
+      "options": [
+        "Double DQN, since selection and evaluation now use the same weights",
+        "DQN with no target network at all",
+        "A soft-update (Polyak) variant",
+        "An on-policy SARSA agent"
+      ],
+      "correct": 1,
+      "explanation": "Syncing every step means θ⁻ is always θ, which is precisely the moving-target instability the second network was introduced to remove. The opposite extreme, syncing too rarely, gives you stale targets instead."
+    }
+  ]
+}
