@@ -1,0 +1,78 @@
+{
+  "lesson": "04-q-learning-sarsa",
+  "title": "Temporal Difference — Q-Learning & SARSA",
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "Monte Carlo waits for the episode to end. What is the smallest change that lets you update from a single transition (s, a, r, s')?",
+      "options": [
+        "Buffer the transition and still update once the episode finishes",
+        "Use a model of the dynamics to compute the exact expected return in closed form",
+        "Replace the unobserved tail with γ times your estimate of s'",
+        "Average r over all transitions leaving s and use that as the value"
+      ],
+      "correct": 2,
+      "explanation": "Substituting your own estimate for the part you have not observed yet is bootstrapping. It buys online updates and a big variance reduction, at the cost of bias while the estimate is wrong."
+    },
+    {
+      "stage": "check",
+      "question": "What is the only difference between the Q-learning and SARSA updates?",
+      "options": [
+        "SARSA needs a transition model and Q-learning does not",
+        "Q-learning maxes over next actions; SARSA uses the one actually taken",
+        "Q-learning requires a decaying α for convergence while SARSA works with a constant one",
+        "Q-learning updates at episode end while SARSA updates every step"
+      ],
+      "correct": 1,
+      "explanation": "That one symbol decouples the target from the behavior policy. It is the whole reason one is off-policy and learns Q*, and the other is on-policy."
+    },
+    {
+      "stage": "check",
+      "question": "With ε pinned at 0.1 forever, what does SARSA converge to?",
+      "options": [
+        "Q* — ε only changes how quickly it gets there",
+        "Nothing; without decaying ε, SARSA has no fixed point at all",
+        "Q^π for the ε-greedy policy, short of Q*",
+        "The value of the uniform random policy"
+      ],
+      "correct": 2,
+      "explanation": "On-policy means the exploration noise is inside the target, so the fixed point is the value of the policy actually being run. Only as ε → 0 does that fixed point become Q*."
+    },
+    {
+      "stage": "check",
+      "question": "The max in Q-learning's target does something specific to noisy estimates. What, and what fixes it?",
+      "options": [
+        "Underestimation; fixed by optimistic initialization",
+        "Overestimation; fixed by Double Q-learning's two tables",
+        "Divergence; fixed by adding a replay buffer",
+        "Excess variance; fixed by switching to n-step returns or TD(λ)"
+      ],
+      "correct": 1,
+      "explanation": "E[max] ≥ max E, so taking the max over noisy values is biased upward. Splitting action selection from action evaluation across two tables removes the shared noise that drives the bias."
+    },
+    {
+      "stage": "post",
+      "question": "On cliff-walking, Q-learning hugs the cliff edge while SARSA walks a row further away. Why?",
+      "options": [
+        "SARSA's target prices in the chance exploration shoves it off",
+        "SARSA uses a smaller γ, so the -100 is discounted less",
+        "Q-learning simply has not converged yet on that task",
+        "SARSA initializes Q pessimistically in the cells adjacent to the cliff edge"
+      ],
+      "correct": 0,
+      "explanation": "SARSA evaluates the policy it is really running, ε-noise included, so the expected cost of an exploratory step into the cliff is priced into the values. Q-learning's max prices the greedy path instead."
+    },
+    {
+      "stage": "post",
+      "question": "Where do TD(0) and Monte Carlo sit on the n-step spectrum?",
+      "options": [
+        "TD(0) is n = ∞ and MC is n = 1",
+        "Both are n = 1 and differ only in on-policy versus off-policy",
+        "TD(0) is n = 1 and MC is n = ∞",
+        "Neither is an n-step method; TD(λ) is a separate family entirely"
+      ],
+      "correct": 2,
+      "explanation": "n is how many real rewards you collect before substituting an estimate: one for TD(0), all of them for MC. Deep RL usually lands between 3 and 20, and TD(λ) averages over all n with geometric weights."
+    }
+  ]
+}
