@@ -81,22 +81,32 @@ def returns_to_go(traj, gamma):
     return out
 
 
+def grad_log_pi(probs, a):
+    """grad of log pi(a|s) w.r.t. the logits: onehot(a) - pi(.|s)."""
+    return [(1.0 if i == a else 0.0) - probs[i] for i in range(N_ACTIONS)]
+
+
+def reinforce_step(theta, traj, returns, lr, baseline=0.0):
+    """theta += lr * sum_t (G_t - baseline) * grad log pi(a_t | s_t)."""
+    for (x, a, _r, probs), G in zip(traj, returns):
+        adv = G - baseline
+        grads = grad_log_pi(probs, a)
+        for i in range(N_ACTIONS):
+            for j in range(N_FEAT):
+                theta[i][j] += lr * adv * grads[i] * x[j]
+
+
 def reinforce(episodes, lr=0.05, gamma=0.99, use_baseline=False, rng=None):
     rng = rng or random.Random(0)
     theta = init_theta(rng)
     baseline = 0.0
     returns_log = []
-    for ep in range(episodes):
+    for _ep in range(episodes):
         traj = rollout(theta, rng)
         returns = returns_to_go(traj, gamma)
         if use_baseline:
             baseline = 0.95 * baseline + 0.05 * returns[0]
-        for (x, a, _r, probs), G in zip(traj, returns):
-            adv = G - (baseline if use_baseline else 0.0)
-            for i in range(N_ACTIONS):
-                grad = (1.0 if i == a else 0.0) - probs[i]
-                for j in range(N_FEAT):
-                    theta[i][j] += lr * adv * grad * x[j]
+        reinforce_step(theta, traj, returns, lr, baseline if use_baseline else 0.0)
         returns_log.append(returns[0] if returns else 0.0)
     return theta, returns_log
 
@@ -148,7 +158,8 @@ def main():
     print_policy(greedy_policy(theta_b), "final greedy policy (with-baseline)")
     print()
     print(f"final mean return (last 200 eps): vanilla={sum(r_plain[-200:])/200:.2f}   with-baseline={sum(r_base[-200:])/200:.2f}")
-    print("(optimal return on this 4x4 GridWorld = -6.0)")
+    print("(these are discounted returns; the optimal discounted return on this")
+    print(" 4x4 GridWorld is -5.85 = sum of -0.99^i for i in 0..5, i.e. -6.0 undiscounted)")
 
 
 if __name__ == "__main__":

@@ -32,7 +32,7 @@ where `G_t = Σ_{k=t}^{T} γ^{k-t} r_{k+1}` is the discounted return from step `
 **Variance reduction tricks.** Vanilla REINFORCE has murderous variance — returns are noisy, `∇ log π` is noisy, their product is very noisy. Two standard fixes:
 
 1. **Baseline subtraction.** Replace `G_t` with `G_t - b(s_t)` for any baseline `b(s_t)` that does not depend on `a_t`. Unbiased because `E[b(s_t) · ∇ log π(a_t | s_t)] = 0`. Typical choice: `b(s_t) = V̂(s_t)` learned by a critic → actor-critic (Lesson 07).
-2. **Reward-to-go.** Replace `Σ_t G_t · ∇ log π_θ(a_t | s_t)` with `Σ_t G_t^{from t} · ∇ log π_θ(a_t | s_t)`. Only future returns matter for a given action — past rewards contribute zero-mean noise.
+2. **Reward-to-go.** The naive estimator weights every step by the *whole trajectory's* return: `Σ_t G(τ) · ∇ log π_θ(a_t | s_t)`, where `G(τ) = G_0` includes rewards collected *before* step `t`. Replace it with `Σ_t G_t · ∇ log π_θ(a_t | s_t)` — the reward-to-go from `t` onward, exactly the `G_t` in the theorem above. Only future rewards can be caused by `a_t`; the earlier ones contribute zero-mean noise.
 
 Combined, you get:
 
@@ -92,15 +92,17 @@ def log_prob(probs, a):
 ### Step 3: rollout with log-probs captured
 
 ```python
-def rollout(theta, env, rng, gamma):
+def rollout(theta, env, rng, max_steps=100):
     trajectory = []
     s = env.reset()
-    while not done:
+    for _ in range(max_steps):
         logits = policy_logits(theta, s)
         probs = softmax(logits)
         a = sample_action(probs, rng)
         s_next, r, done = env.step(s, a)
         trajectory.append((s, a, r, probs))
+        if done:
+            break
         s = s_next
     return trajectory
 ```
@@ -188,7 +190,7 @@ Refuse REINFORCE-no-baseline on horizons > 500 steps. Refuse continuous-action c
 | REINFORCE | "The original PG algorithm" | Williams (1992); Monte Carlo returns multiplied by log-policy gradient. |
 | Log-derivative trick | "Score function estimator" | `∇P(τ;θ) = P(τ;θ) · ∇ log P(τ;θ)`; makes gradients of expectations tractable. |
 | Baseline | "Variance reduction" | Any `b(s)` subtracted from `G`; unbiased because `E[b · ∇ log π] = 0`. |
-| Reward-to-go | "Only future returns count" | `G_t^{from t}` instead of the full `G_0`; correct and lower-variance. |
+| Reward-to-go | "Only future rewards count" | `G_t` instead of the whole-trajectory return `G(τ) = G_0`; correct and lower-variance. |
 | Entropy bonus | "Encourage exploration" | `+β · H(π(·\|s))` term keeps the policy from collapsing. |
 | On-policy | "Train on what you just saw" | Gradient expectation is w.r.t. the current policy — cannot reuse old data directly. |
 | Advantage | "How much better than average" | `A(s, a) = G(s, a) - V(s)`; the signed quantity REINFORCE-with-baseline multiplies. |
