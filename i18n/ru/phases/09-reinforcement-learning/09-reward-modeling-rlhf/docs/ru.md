@@ -188,7 +188,7 @@ for batch in dataloader:
 
 - **Over-optimization / reward hacking.** Модель награды несовершенна; `π_θ` находит состязательные ответы с высоким баллом и низким качеством. Симптомы: награда растёт без остановки, а человеческая оценка стоит на месте или падает. Лечение: ранняя остановка, больший `β`, более разнообразные данные для RM.
 - **Length hacking.** Модели награды, обученные на полезных ответах, обычно неявно поощряют длину. Политика учится лить воду. Лечение: нормировать награду по длине или RLAIF с учитывающей длину моделью награды.
-- **Too-small RM.** Модель награды должна быть не меньше политики. Маленькая RM просто не в состоянии честно оценить выходы большой политики.
+- **Too-small RM.** Важно, способна ли RM *судить* выходы политики, а не совпадает ли она с политикой по числу параметров: в InstructGPT политику на 175B оценивала RM на 6B. Но если RM мала для самой задачи судейства, её точность на предпочтениях упирается в потолок и её становится тривиально взломать. Проверяйте достаточность RM по pairwise-точности на отложенных парах, а не по соотношению размеров.
 - **KL tuning.** Слишком маленький β — дрейф и взлом награды. Слишком большой β — политика почти не меняется. Стандартный приём: *адаптивный* β, который целится в фиксированный KL за шаг.
 - **Preference-data noise.** Около 30% человеческих меток шумные или спорные. Калибруйте: обучайте RM на данных, отфильтрованных по согласию разметчиков, или добавьте температуру в Брэдли-Терри.
 - **Off-policy problems.** После первой эпохи данные PPO уже слегка off-policy. Следите за долей клиппинга, как в уроке 08.
@@ -234,7 +234,7 @@ Given a base LM, a target behavior (alignment / reasoning / refusal / agent), an
 4. Diagnostics. Mean KL, reward stability, over-optimization guard (holdout human eval).
 5. Safety gate. Red-team set, refusal rate, safety RM separate from helpfulness RM.
 
-Refuse to ship RLHF-PPO without a KL monitor. Refuse to use an RM smaller than the target policy. Refuse length-only rewards. Flag any pipeline that does not hold back a blind human-eval set as lacking over-optimization protection.
+Refuse to ship RLHF-PPO without a KL monitor. Refuse to use an RM whose held-out pairwise accuracy was never measured (parameter count relative to the policy is not the test — InstructGPT used a 6B RM for a 175B policy). Refuse length-only rewards. Flag any pipeline that does not hold back a blind human-eval set as lacking over-optimization protection.
 ```
 
 > 🎒 **На пальцах.** Обратите внимание на пункт про holdout human eval: слепой набор, размеченный людьми, — единственный детектор взлома награды. Балл RM растёт всегда, потому что вы буквально оптимизируете именно его. Если 200 отложенных примеров, которые модель награды не видела, показывают падение — обучение пора останавливать, каким бы красивым ни был график награды.
