@@ -113,7 +113,7 @@ def rlhf_step(theta, ref, w, prompt, rng, eps=0.2, beta=0.1, lr=0.05):
 
 ### Step 4: monitor the KL
 
-Track mean `KL(π_θ || π_ref)` every update. If it creeps past `~5-10` the policy has drifted far from `π_SFT` — lower `β` is rising or reward hacking is starting. This is the top diagnostic in real RLHF.
+Track mean `KL(π_θ || π_ref)` every update. If it creeps past `~5-10` the policy has drifted far from `π_SFT` — either `β` is too low and needs raising, or reward hacking is starting. This is the top diagnostic in real RLHF.
 
 ### Step 5: the production recipe with TRL
 
@@ -165,7 +165,7 @@ Three things the library does for you. `adap_kl_ctrl=True` implements the adapti
 
 - **Over-optimization / reward hacking.** The RM is imperfect; `π_θ` finds adversarial completions that score high but are bad. Symptoms: reward climbs indefinitely while human eval score plateaus or drops. Fix: stop early, raise `β`, broaden RM training data.
 - **Length hacking.** RMs trained on helpful responses often implicitly reward length. The policy learns to pad responses. Remediation: length-normalized reward, or RLAIF with a length-aware RM.
-- **Too-small RM.** The RM needs to be at least as large as the policy. A tiny RM cannot faithfully score the policy's outputs.
+- **Too-small RM.** What matters is whether the RM can *judge* the policy's outputs, not whether it matches the policy's parameter count — InstructGPT scored a 175B policy with a 6B RM. But an RM that is too small for the judging task saturates on preference accuracy and becomes trivially hackable. Validate RM capacity on held-out pairwise accuracy before scaling the RL run, not on a parameter ratio.
 - **KL tuning.** Too low β → drift and reward hacking. Too high β → policy barely changes. The standard trick is an *adaptive* β that targets a fixed KL per step.
 - **Preference-data noise.** ~30% of human labels are noisy or ambiguous. Calibrate by training the RM on agreement-filtered data or use a temperature on BT.
 - **Off-policy problems.** PPO data is slightly off-policy after the first epoch. Monitor clip fraction as in Lesson 08.
@@ -207,7 +207,7 @@ Given a base LM, a target behavior (alignment / reasoning / refusal / agent), an
 4. Diagnostics. Mean KL, reward stability, over-optimization guard (holdout human eval).
 5. Safety gate. Red-team set, refusal rate, safety RM separate from helpfulness RM.
 
-Refuse to ship RLHF-PPO without a KL monitor. Refuse to use an RM smaller than the target policy. Refuse length-only rewards. Flag any pipeline that does not hold back a blind human-eval set as lacking over-optimization protection.
+Refuse to ship RLHF-PPO without a KL monitor. Refuse to use an RM whose held-out pairwise accuracy was never measured (parameter count relative to the policy is not the test — InstructGPT used a 6B RM for a 175B policy). Refuse length-only rewards. Flag any pipeline that does not hold back a blind human-eval set as lacking over-optimization protection.
 ```
 
 ## Exercises
