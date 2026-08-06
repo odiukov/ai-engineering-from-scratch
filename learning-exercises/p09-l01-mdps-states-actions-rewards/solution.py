@@ -1,0 +1,208 @@
+"""
+MDP: состояния, действия, награды — эталон.
+
+Открывай ПОСЛЕ своих зелёных тестов.
+"""
+
+
+def grid_step(state, action, grid=4, terminal=(3, 3)):
+    """Один шаг среды 4x4 GridWorld. Вернуть (next_state, reward, done).
+
+    Это ровно то, что в библиотеках называется `gym.Env.step` — только без
+    объекта среды: состояние передаём снаружи, поэтому функция чистая.
+
+    grid_step((0, 0), "down")   ->  ((1, 0), -1.0, False)
+    grid_step((0, 0), "up")     ->  ((0, 0), -1.0, False)   стена не пускает
+    grid_step((3, 2), "right")  ->  ((3, 3), -1.0, True)    дошли до терминала
+    grid_step((3, 3), "up")     ->  ((3, 3),  0.0, True)    absorbing state
+
+    Правила: за каждый шаг награда -1 (агент торопится), выход за границу
+    оставляет агента на месте (но шаг всё равно стоит -1), терминал
+    absorbing — из него никуда не уйти и награда там уже 0.
+
+    Ловушка: терминал надо проверять ПЕРВЫМ. Если сначала посчитать сдвиг,
+    из (3,3) агент уползёт наружу и награда -1 будет капать вечно.
+    """
+    # словарь сдвигов держим внутри: функция должна быть самодостаточной
+    deltas = {"up": (-1, 0), "down": (1, 0), "left": (0, -1), "right": (0, 1)}
+    if state == terminal:
+        return state, 0.0, True
+    dr, dc = deltas[action]
+    r, c = state
+    # min/max вместо if-ов: это и есть "упереться в стену"
+    nr = min(max(r + dr, 0), grid - 1)
+    nc = min(max(c + dc, 0), grid - 1)
+    return (nr, nc), -1.0, (nr, nc) == terminal
+
+
+def discounted_return(rewards, gamma=0.99):
+    """Дисконтированная сумма награды: G = r0 + g*r1 + g^2*r2 + ...
+
+    discounted_return([1.0, 1.0], 0.5)     ->  1.5
+    discounted_return([-1.0] * 6, 1.0)     ->  -6.0
+    discounted_return([5.0, 100.0], 0.0)   ->  5.0   будущее не считается
+
+    gamma — это цена времени. При gamma=0 агент видит только следующий шаг,
+    при gamma=1 далёкая награда весит столько же, сколько ближняя.
+
+    Считай в одном проходе, накапливая степень gamma, а не вызывая gamma**t:
+    возведение в степень внутри цикла и медленнее, и хуже по точности.
+    """
+    total = 0.0
+    weight = 1.0
+    for r in rewards:
+        total += weight * r
+        weight *= gamma
+    return total
+
+
+def effective_horizon(gamma):
+    """Сколько шагов вперёд реально видит агент при данном gamma: 1/(1-gamma).
+
+    effective_horizon(0.9)    ->  10.0
+    effective_horizon(0.99)   ->  100.0
+    effective_horizon(0.0)    ->  1.0
+
+    На gamma >= 1 горизонт бесконечен, а значения состояний расходятся.
+    Это не "очень большое число", это сломанная задача — брось ValueError.
+    Отрицательный gamma тоже бессмысленен.
+
+    Зачем: gamma — не «просто гиперпараметр», у него есть физический смысл.
+    Задача на 1000 шагов с gamma=0.9 не решается никаким числом эпизодов.
+    """
+    if not 0.0 <= gamma < 1.0:
+        raise ValueError(f"gamma must be in [0, 1), got {gamma}")
+    return 1.0 / (1.0 - gamma)
+
+
+def sample_action(dist, rng):
+    """Выбрать действие из распределения {action: prob} по обратной CDF.
+
+    sample_action({"up": 1.0, "down": 0.0}, rng)  ->  всегда "up"
+    sample_action({"a": 0.5, "b": 0.5}, rng)      ->  примерно 50/50
+
+    rng — это `random.Random(seed)`, передаётся снаружи. Глобальный `random`
+    использовать нельзя: тогда прогон не воспроизвести, а в RL без
+    воспроизводимости отладка невозможна.
+
+    Ловушка: из-за накопления ошибок сумма вероятностей может оказаться
+    чуть меньше 1.0, и цикл дойдёт до конца ничего не вернув. Подстрахуйся
+    последним действием с ненулевой вероятностью.
+    """
+    x = rng.random()
+    total = 0.0
+    last = None
+    for action, p in dist.items():
+        if p > 0.0:
+            last = action
+        total += p
+        if x <= total and p > 0.0:
+            return action
+    return last
+
+
+def rollout(policy, rng, grid=4, terminal=(3, 3), start=(0, 0), max_steps=200):
+    """Прогнать политику от start до терминала. Вернуть (total_reward, steps).
+
+    policy — функция state -> {action: prob}. Награда НЕ дисконтируется:
+    здесь нас интересует «сколько шагов реально стоил эпизод».
+
+    rollout(lambda s: {"down": 0.5, "right": 0.5, ...}, rng)  ->  (-6.0, 6)
+    rollout(lambda s: {"up": 1.0, ...}, rng, max_steps=10)    ->  (-10.0, 10)
+
+    Второй пример — обязательный предохранитель: политика «всегда вверх»
+    из угла не выйдет никогда, и без max_steps цикл был бы бесконечным.
+    Monte Carlo (урок 03) без такой заглушки просто зависнет.
+    """
+    state = start
+    total = 0.0
+    steps = 0
+    for _ in range(max_steps):
+        action = sample_action(policy(state), rng)
+        state, reward, done = grid_step(state, action, grid, terminal)
+        total += reward
+        steps += 1
+        if done:
+            break
+    return total, steps
+
+
+def policy_evaluation(policy, gamma=0.99, grid=4, terminal=(3, 3), tol=1e-12, max_iter=10000):
+    """Итеративное вычисление V^pi(s) для всех состояний. Вернуть dict.
+
+    Крутим уравнение Беллмана, пока значения не перестанут меняться:
+      V(s) <- sum_a pi(a|s) * (r + gamma * V(s'))
+
+    policy_evaluation(lambda s: {"down": .5, "right": .5, "up": 0, "left": 0})
+        ->  V[(0,0)] примерно -5.85 при gamma=0.99
+
+    V[terminal] обязан остаться 0.0 — из терминала награды больше нет.
+    Критерий остановки — sup-норма max_s |V_new(s) - V(s)|, НЕ средняя:
+    теория контракции даёт гарантию именно по максимуму.
+
+    Обновляем V на месте (Gauss-Seidel): свежие значения соседей сразу идут
+    в дело, и сходится это быстрее, чем через отдельную копию (Jacobi).
+    """
+    states = [(r, c) for r in range(grid) for c in range(grid)]
+    V = {s: 0.0 for s in states}
+    for _ in range(max_iter):
+        delta = 0.0
+        for state in states:
+            if state == terminal:
+                continue
+            v = 0.0
+            for action, pi_a in policy(state).items():
+                if pi_a == 0.0:
+                    continue  # нулевая вероятность вклада не даёт
+                s_next, reward, _ = grid_step(state, action, grid, terminal)
+                v += pi_a * (reward + gamma * V[s_next])
+            delta = max(delta, abs(v - V[state]))
+            V[state] = v
+        if delta < tol:
+            break
+    return V
+
+
+def q_from_v(V, gamma=0.99, grid=4, terminal=(3, 3), actions=("up", "down", "left", "right")):
+    """Пересчитать V в Q: Q(s,a) = r + gamma * V(s'). Вернуть dict of dict.
+
+    Это вторая половина уравнения Беллмана: «награда за шаг плюс
+    дисконтированная стоимость того, куда мы попали».
+
+    q_from_v({...})[(0, 0)]["down"]  ->  -1 + gamma * V[(1, 0)]
+    q_from_v({...})[(3, 3)]["up"]    ->  0.0   в терминале все Q нулевые
+
+    Проверка на связность: если V — это V^pi, то для любого s должно
+    выполняться V[s] == sum_a pi(a|s) * Q[s][a]. Если не выполняется —
+    где-то потерян gamma или награда.
+    """
+    Q = {}
+    for r in range(grid):
+        for c in range(grid):
+            state = (r, c)
+            if state == terminal:
+                Q[state] = {a: 0.0 for a in actions}
+                continue
+            row = {}
+            for action in actions:
+                s_next, reward, _ = grid_step(state, action, grid, terminal)
+                row[action] = reward + gamma * V[s_next]
+            Q[state] = row
+    return Q
+
+
+def greedy_from_q(Q):
+    """Жадная политика по Q: в каждом состоянии действие с максимальным Q.
+
+    greedy_from_q({(0,0): {"up": -9.0, "down": -5.0}})  ->  {(0,0): "down"}
+
+    При ничьей берём первое действие в порядке перебора — тай-брейк обязан
+    быть стабильным, иначе проверка «политика перестала меняться» в
+    policy iteration (урок 02) будет колебаться вечно.
+
+    Вернуть dict {state: action}, по одному действию на состояние
+    (детерминированная политика), а не распределение.
+    """
+    # max по key=row.get возвращает ПЕРВЫЙ максимум в порядке вставки ключей,
+    # то есть тай-брейк детерминирован сам собой
+    return {state: max(row, key=row.get) for state, row in Q.items()}
