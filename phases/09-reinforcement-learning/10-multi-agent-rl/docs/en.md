@@ -53,18 +53,18 @@ f3-marl-orbit
 
 ## Build It
 
-This lesson uses a 6×6 GridWorld with two cooperative agents. They start in opposite corners and must reach a shared goal. Shared reward: `-1` per step while either agent is still moving, `+10` when both arrive. See `code/main.py`.
+This lesson uses a 5×5 GridWorld with two cooperative agents. They start in opposite corners and must reach a shared goal. Shared reward: `-1` per step while either agent is still moving, `+10` when both arrive. See `code/main.py`.
 
 ### Step 1: the multi-agent env
 
 ```python
 class CoopGridWorld:
     def __init__(self):
-        self.size = 6
-        self.goal = (5, 5)
+        self.size = 5
+        self.goal = (4, 4)
 
     def reset(self):
-        return ((0, 0), (5, 0))  # two agents
+        return ((0, 0), (4, 0))  # two agents
 
     def step(self, state, actions):
         a1, a2 = state
