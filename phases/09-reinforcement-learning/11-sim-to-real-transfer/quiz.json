@@ -1,0 +1,78 @@
+{
+  "lesson": "11-sim-to-real-transfer",
+  "title": "Sim-to-Real Transfer",
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "If the reality gap is just simulator inaccuracy, why not simply build a more accurate simulator and be done?",
+      "options": [
+        "High-fidelity simulators cannot be stepped fast enough to collect the millions of episodes RL needs",
+        "Some unmodeled effect always survives, so robustness across a parameter range beats chasing exactness",
+        "Accurate physics engines are non-differentiable, and policy-gradient methods require differentiable dynamics",
+        "A perfectly accurate simulator would overfit the policy to one robot's exact serial-numbered hardware"
+      ],
+      "correct": 1,
+      "explanation": "Motor deadband, backlash, cable drag and sensor latency are endless; every fix reveals a smaller one. Robustness over a distribution degrades gracefully when your model is slightly wrong, which exactness never does."
+    },
+    {
+      "stage": "check",
+      "question": "You train with slip ~ Uniform[0.0, 0.3] and then evaluate the greedy policy at slip = 0.5. What is the honest expectation?",
+      "options": [
+        "Near-optimal return, because 0.5 is only slightly past the upper edge of the training range",
+        "The same return as slip = 0.3, because randomization has made the policy slip-invariant",
+        "Graceful degradation, not near-optimal — 0.5 is outside the envelope DR sampled from",
+        "A hard failure, because a value function fit on one slip range is undefined outside it"
+      ],
+      "correct": 2,
+      "explanation": "Domain randomization only promises coverage inside the range it sampled from. The point of the 0.5 and 0.7 columns is to show a softer decline than the fixed-slip policy's, not to claim the envelope extends."
+    },
+    {
+      "stage": "check",
+      "question": "What goes wrong if you widen the randomization to slip ~ Uniform[0.0, 0.9]?",
+      "options": [
+        "Training diverges, because a slip resampled every episode makes the transition kernel non-Markov in the observed state",
+        "The policy becomes so risk-averse that it gives up return even under nominal conditions",
+        "The policy memorizes the mean slip of the range and then acts as if every episode were drawn at that single value",
+        "Nothing — wider is always safer, it just needs more episodes"
+      ],
+      "correct": 1,
+      "explanation": "Very wide randomization acts like heavy regularization: the best policy averaged over near-random dynamics is a cautious one. Match the range to measured real variability instead of to worst-case imagination."
+    },
+    {
+      "stage": "check",
+      "question": "In privileged teacher-student training, what is the division of labor?",
+      "options": [
+        "The teacher runs on the hardware and the student runs in sim, so the split is about where each policy executes rather than what it sees",
+        "The teacher is the larger network and the student is a distilled, quantized copy of it, so the same behaviour fits inside the robot's onboard compute budget",
+        "The teacher trains with ground-truth sim state; the student sees only deployable sensors and must infer those quantities from observation history",
+        "The teacher provides the reward function and the student provides the value function"
+      ],
+      "correct": 2,
+      "explanation": "Privileged information like true friction or terrain height makes the teacher's problem easy to solve, and imitation then gives the student a target it can chase from proprioception alone. The split is about information, not model size or where each runs."
+    },
+    {
+      "stage": "post",
+      "question": "Your quadruped fails on hardware. The true gap is a 30 ms actuator delay, but your DR config randomizes lighting, textures and camera hue. What is the outcome?",
+      "options": [
+        "DR still helps, since any randomization widens the training distribution and a wider distribution always transfers better",
+        "DR buys nothing here — you randomized the wrong axis and must randomize or identify the delay itself",
+        "DR helps only if you also widen the visual ranges further",
+        "The failure must be a reward-shaping bug, since DR is axis-agnostic and covers unmodelled effects automatically"
+      ],
+      "correct": 1,
+      "explanation": "Randomization only confers robustness along the axes you actually vary. Profiling the real platform before choosing DR parameters is what keeps the compute pointed at the real gap."
+    },
+    {
+      "stage": "post",
+      "question": "System identification versus domain randomization — why does the 2026 recipe use both?",
+      "options": [
+        "SI covers the vision pipeline and DR covers the dynamics, so running both spans every modality that can shift between the simulator and the real platform",
+        "SI removes the need for a safety shield, and DR removes the need for any real-world data at all",
+        "SI narrows the gap on measurable parameters, but its residual error is invisible to the policy — DR is what buys tolerance for that residual",
+        "SI runs before training and DR runs at deployment time, so the two act on different phases and can never conflict"
+      ],
+      "correct": 2,
+      "explanation": "A well-identified sim gives you a tight, low-noise training target; what it cannot give you is robustness to the effects it failed to identify. Randomizing on top of the identified nominal covers that leftover."
+    }
+  ]
+}
