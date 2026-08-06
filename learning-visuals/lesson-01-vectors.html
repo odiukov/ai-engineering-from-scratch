@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Урок 01 — Интуиция линейной алгебры</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --border: #2a313c;
+    --ink: #e6edf3;
+    --muted: #8b949e;
+    --grid: #212934;
+    --axis: #3d4653;
+    --a: #5ac8fa;
+    --b: #ff9f43;
+    --proj: #a78bfa;
+    --resid: #f87171;
+    --ok: #4ade80;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f8fa; --panel: #fff; --border: #d4dae1; --ink: #1c2128;
+      --muted: #57606a; --grid: #e7ebef; --axis: #b6bec7;
+      --a: #0a7ea4; --b: #c2410c; --proj: #7c3aed; --resid: #dc2626; --ok: #15803d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 18px 60px;
+    background: var(--bg); color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -.02em; }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
+  h2 { font-size: 17px; margin: 0 0 14px; letter-spacing: -.01em; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px; margin-bottom: 22px;
+  }
+  .split { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 22px; align-items: start; }
+  @media (max-width: 820px) { .split { grid-template-columns: 1fr; } }
+  svg { width: 100%; height: auto; display: block; touch-action: none; cursor: crosshair; }
+  .handle { cursor: grab; }
+  .handle:active { cursor: grabbing; }
+  .readout { font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .readout .row { display: flex; justify-content: space-between; gap: 14px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .readout .row:last-child { border-bottom: 0; }
+  .readout .k { color: var(--muted); }
+  .readout .v { font-variant-numeric: tabular-nums; }
+  .verdict { margin-top: 14px; padding: 11px 13px; border-radius: 8px; font-size: 13.5px; line-height: 1.5; border: 1px solid var(--border); }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: baseline; margin-right: 5px; }
+  label.chk { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); cursor: pointer; margin-top: 12px; }
+  input[type=checkbox] { accent-color: var(--proj); width: 15px; height: 15px; }
+  .btns { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+  button {
+    font: inherit; font-size: 13px; padding: 6px 11px; cursor: pointer;
+    background: transparent; color: var(--ink);
+    border: 1px solid var(--border); border-radius: 7px;
+  }
+  button:hover { border-color: var(--a); color: var(--a); }
+  button.on { border-color: var(--a); color: var(--a); background: color-mix(in srgb, var(--a) 12%, transparent); }
+  code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--grid); padding: 1.5px 5px; border-radius: 4px; }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 12px; }
+  .mono-in { width: 58px; font: 13px ui-monospace, Menlo, monospace; background: var(--bg); color: var(--ink);
+             border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; text-align: center; }
+  .matgrid { display: inline-grid; grid-template-columns: auto auto; gap: 7px; margin: 4px 0 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Интуиция линейной алгебры</h1>
+  <p class="sub">Фаза 1 · Урок 01 — тяни векторы мышкой, смотри что происходит с числами.</p>
+
+  <!-- ============ 1. ВЕКТОР И ДЛИНА ============ -->
+  <div class="card">
+    <h2>1 · Вектор — это точка. Длина — расстояние до неё</h2>
+    <div class="split">
+      <svg id="s1" viewBox="0 0 400 400" aria-label="Вектор на плоскости"></svg>
+      <div>
+        <div class="readout" id="r1"></div>
+        <div class="verdict" id="v1"></div>
+        <p class="hint">Длина считается теоремой Пифагора: катеты — координаты x и y, гипотенуза — сам вектор. Тяни синюю точку.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 2. СКАЛЯРНОЕ ПРОИЗВЕДЕНИЕ ============ -->
+  <div class="card">
+    <h2>2 · Скалярное произведение — «мы идём в одну сторону?»</h2>
+    <div class="split">
+      <svg id="s2" viewBox="0 0 400 400" aria-label="Два вектора и угол между ними"></svg>
+      <div>
+        <div class="readout" id="r2"></div>
+        <div class="verdict" id="v2"></div>
+        <div class="btns">
+          <button data-preset="same">В одну сторону</button>
+          <button data-preset="perp">Перпендикулярно</button>
+          <button data-preset="opp">Навстречу</button>
+        </div>
+        <p class="hint">Именно так работает поиск похожего: RAG, рекомендации, attention. Косинус — это скалярное произведение, очищенное от длины: остаётся чистое «насколько похоже направление».</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 3. ПРОЕКЦИЯ ============ -->
+  <div class="card">
+    <h2>3 · Проекция — это тень</h2>
+    <div class="split">
+      <svg id="s3" viewBox="0 0 400 400" aria-label="Проекция вектора a на вектор b"></svg>
+      <div>
+        <div class="readout" id="r3"></div>
+        <label class="chk"><input type="checkbox" id="showResid" checked> показать остаток (перпендикулярную часть)</label>
+        <div class="verdict" id="v3"></div>
+        <p class="hint">Тень всегда что-то теряет — в этом её смысл. Оставить только нужное измерение. Отсюда растут линейная регрессия и PCA.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 4. МАТРИЦА = ПРАВИЛО ============ -->
+  <div class="card">
+    <h2>4 · Матрица — правило, одинаковое для всех точек сразу</h2>
+    <div class="split">
+      <svg id="s4" viewBox="0 0 400 400" aria-label="Преобразование сетки матрицей"></svg>
+      <div>
+        <div class="matgrid">
+          <input class="mono-in" id="m00" value="0"><input class="mono-in" id="m01" value="-1">
+          <input class="mono-in" id="m10" value="1"><input class="mono-in" id="m11" value="0">
+        </div>
+        <div class="btns">
+          <button data-mat="0,-1,1,0" class="on">Поворот 90°</button>
+          <button data-mat="2,0,0,3">Растяжение</button>
+          <button data-mat="1,1,0,1">Сдвиг</button>
+          <button data-mat="1,2,2,4">Ранг 1 ⚠️ (столкновение)</button>
+          <button data-mat="1,0,0,1">Ничего</button>
+          <button data-mat="0,0,0,0">Ранг 0</button>
+        </div>
+        <label class="chk"><input type="checkbox" id="showCols" checked> показать столбцы матрицы (куда уехали оси)</label>
+        <div class="readout" id="r4" style="margin-top:14px"></div>
+        <div class="verdict" id="v4"></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="hint" style="text-align:center">Веса нейросети — это такие матрицы. Слой сети = одно умножение матрицы на вектор.</p>
+
+</div>
+
+<script>
+(function () {
+  const SIZE = 400, C = 200, U = 40;          // центр и пиксели на единицу
+  const NS = "http://www.w3.org/2000/svg";
+  const X = v => C + v[0] * U;                 // мир -> экран
+  const Y = v => C - v[1] * U;
+  const toWorld = (px, py) => [(px - C) / U, (C - py) / U];
+  const snap = v => Math.abs(v - Math.round(v)) < 0.18 ? Math.round(v) : Math.round(v * 10) / 10;
+  const fmt = (n, d = 2) => (Math.abs(n) < 5e-3 ? 0 : n).toFixed(d);
+
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
+  const mag = a => Math.hypot(a[0], a[1]);
+
+  function el(tag, attrs, parent) {
+    const n = document.createElementNS(NS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+
+  // ---- общая сцена: сетка + оси + маркер стрелок ----
+  function scene(svg) {
+    svg.innerHTML = "";
+    const defs = el("defs", {}, svg);
+    ["a", "b", "proj", "resid", "ok"].forEach(name => {
+      const m = el("marker", {
+        id: "ar-" + name + "-" + svg.id, viewBox: "0 0 10 10",
+        refX: 8, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto-start-reverse"
+      }, defs);
+      el("path", { d: "M0,0 L10,5 L0,10 z", fill: "var(--" + name + ")" }, m);
+    });
+    const g = el("g", {}, svg);
+    for (let i = -5; i <= 5; i++) {
+      el("line", { x1: X([i, 0]), y1: 0, x2: X([i, 0]), y2: SIZE, stroke: "var(--grid)", "stroke-width": 1 }, g);
+      el("line", { x1: 0, y1: Y([0, i]), x2: SIZE, y2: Y([0, i]), stroke: "var(--grid)", "stroke-width": 1 }, g);
+    }
+    el("line", { x1: 0, y1: C, x2: SIZE, y2: C, stroke: "var(--axis)", "stroke-width": 1.5 }, g);
+    el("line", { x1: C, y1: 0, x2: C, y2: SIZE, stroke: "var(--axis)", "stroke-width": 1.5 }, g);
+    return svg;
+  }
+
+  function arrow(svg, from, to, kind, width) {
+    return el("line", {
+      x1: X(from), y1: Y(from), x2: X(to), y2: Y(to),
+      stroke: "var(--" + kind + ")", "stroke-width": width || 2.5,
+      "marker-end": "url(#ar-" + kind + "-" + svg.id + ")", "stroke-linecap": "round"
+    }, svg);
+  }
+
+  function handle(svg, vec, kind, onDrag) {
+    const h = el("circle", { cx: X(vec), cy: Y(vec), r: 9, fill: "var(--" + kind + ")",
+                             stroke: "var(--bg)", "stroke-width": 2.5, class: "handle" }, svg);
+    h.addEventListener("pointerdown", e => {
+      h.setPointerCapture(e.pointerId);
+      const move = ev => {
+        const r = svg.getBoundingClientRect();
+        const px = (ev.clientX - r.left) / r.width * SIZE;
+        const py = (ev.clientY - r.top) / r.height * SIZE;
+        let [wx, wy] = toWorld(px, py);
+        wx = Math.max(-4.8, Math.min(4.8, snap(wx)));
+        wy = Math.max(-4.8, Math.min(4.8, snap(wy)));
+        onDrag([wx, wy]);
+      };
+      const up = () => { svg.removeEventListener("pointermove", move); svg.removeEventListener("pointerup", up); };
+      svg.addEventListener("pointermove", move);
+      svg.addEventListener("pointerup", up);
+      e.preventDefault();
+    });
+    return h;
+  }
+
+  function label(svg, vec, text, kind) {
+    const off = vec[0] >= 0 ? 14 : -14;
+    return el("text", { x: X(vec) + off, y: Y(vec) - 12, fill: "var(--" + kind + ")",
+                        "font-size": 14, "font-weight": 600,
+                        "text-anchor": vec[0] >= 0 ? "start" : "end" }, svg).appendChild(
+             document.createTextNode(text)).parentNode;
+  }
+
+  const row = (k, v, color) =>
+    `<div class="row"><span class="k">${k}</span><span class="v"${color ? ` style="color:${color}"` : ""}>${v}</span></div>`;
+
+  // ================= 1. длина =================
+  let a1 = [3, 2];
+  const s1 = document.getElementById("s1");
+  function draw1() {
+    scene(s1);
+    // катеты
+    el("line", { x1: X([0, 0]), y1: Y([0, 0]), x2: X([a1[0], 0]), y2: Y([a1[0], 0]),
+                 stroke: "var(--muted)", "stroke-width": 1.5, "stroke-dasharray": "4 3" }, s1);
+    el("line", { x1: X([a1[0], 0]), y1: Y([a1[0], 0]), x2: X(a1), y2: Y(a1),
+                 stroke: "var(--muted)", "stroke-width": 1.5, "stroke-dasharray": "4 3" }, s1);
+    arrow(s1, [0, 0], a1, "a", 3);
+    label(s1, a1, `a = [${fmt(a1[0], 1)}, ${fmt(a1[1], 1)}]`, "a");
+    handle(s1, a1, "a", v => { a1 = v; draw1(); });
+
+    const L = mag(a1);
+    document.getElementById("r1").innerHTML =
+      row("x", fmt(a1[0], 1)) + row("y", fmt(a1[1], 1)) +
+      row("x² + y²", `${fmt(a1[0] * a1[0], 2)} + ${fmt(a1[1] * a1[1], 2)} = ${fmt(a1[0] ** 2 + a1[1] ** 2, 2)}`) +
+      row("|a| = √(x²+y²)", fmt(L), "var(--a)");
+    document.getElementById("v1").innerHTML =
+      `Пунктир — катеты треугольника (${fmt(Math.abs(a1[0]), 1)} и ${fmt(Math.abs(a1[1]), 1)}), синяя стрелка — гипотенуза. ` +
+      `Длина <b>${fmt(L)}</b> — расстояние напрямик, а не по клеточкам.`;
+  }
+
+  // ================= 2. скалярное произведение =================
+  let a2 = [3, 1], b2 = [2, 3];
+  const s2 = document.getElementById("s2");
+  function draw2() {
+    scene(s2);
+    // дуга угла
+    const angA = Math.atan2(a2[1], a2[0]), angB = Math.atan2(b2[1], b2[0]);
+    const R = 46;
+    let d = angB - angA;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    el("path", {
+      d: `M ${C + R * Math.cos(angA)} ${C - R * Math.sin(angA)} A ${R} ${R} 0 0 ${d > 0 ? 0 : 1} ${C + R * Math.cos(angB)} ${C - R * Math.sin(angB)}`,
+      fill: "none", stroke: "var(--muted)", "stroke-width": 1.5
+    }, s2);
+
+    arrow(s2, [0, 0], a2, "a", 3);
+    arrow(s2, [0, 0], b2, "b", 3);
+    label(s2, a2, "a", "a"); label(s2, b2, "b", "b");
+    handle(s2, a2, "a", v => { a2 = v; draw2(); });
+    handle(s2, b2, "b", v => { b2 = v; draw2(); });
+
+    const d2 = dot(a2, b2), cos = d2 / (mag(a2) * mag(b2) || 1);
+    const deg = Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
+    document.getElementById("r2").innerHTML =
+      row("a", `[${fmt(a2[0], 1)}, ${fmt(a2[1], 1)}]`, "var(--a)") +
+      row("b", `[${fmt(b2[0], 1)}, ${fmt(b2[1], 1)}]`, "var(--b)") +
+      row("a·b = ax·bx + ay·by",
+          `${fmt(a2[0] * b2[0], 2)} + ${fmt(a2[1] * b2[1], 2)} = ${fmt(d2)}`) +
+      row("угол", fmt(deg, 1) + "°") +
+      row("cos(угла) = a·b / (|a||b|)", fmt(cos), "var(--ok)");
+
+    let verdict;
+    if (d2 > 0.05) verdict = `<b style="color:var(--ok)">a·b = ${fmt(d2)} &gt; 0</b> — векторы смотрят примерно в одну сторону. «Похожи».`;
+    else if (d2 < -0.05) verdict = `<b style="color:var(--resid)">a·b = ${fmt(d2)} &lt; 0</b> — векторы расходятся навстречу. «Противоположны».`;
+    else verdict = `<b>a·b ≈ 0</b> — векторы перпендикулярны. Ничего общего.`;
+    document.getElementById("v2").innerHTML = verdict +
+      `<br><span style="color:var(--muted)">Косинус ${fmt(cos)} не зависит от длины — удлини любой вектор вдвое, он не изменится. Проверь.</span>`;
+  }
+  document.querySelectorAll("[data-preset]").forEach(btn => btn.onclick = () => {
+    const p = btn.dataset.preset;
+    a2 = [3, 1];
+    b2 = p === "same" ? [2, 0.7] : p === "perp" ? [-1, 3] : [-3, -1];
+    draw2();
+  });
+
+  // ================= 3. проекция =================
+  let a3 = [3, 4], b3 = [3, 0];
+  const s3 = document.getElementById("s3");
+  const residChk = document.getElementById("showResid");
+  function draw3() {
+    scene(s3);
+    const k = dot(a3, b3) / (dot(b3, b3) || 1);
+    const p = [k * b3[0], k * b3[1]];
+
+    // линия направления b, бесконечная
+    const bl = mag(b3) || 1, ux = b3[0] / bl, uy = b3[1] / bl;
+    el("line", { x1: X([-6 * ux, -6 * uy]), y1: Y([-6 * ux, -6 * uy]),
+                 x2: X([6 * ux, 6 * uy]), y2: Y([6 * ux, 6 * uy]),
+                 stroke: "var(--b)", "stroke-width": 1, "stroke-dasharray": "5 5", opacity: .5 }, s3);
+
+    if (residChk.checked)
+      el("line", { x1: X(a3), y1: Y(a3), x2: X(p), y2: Y(p), stroke: "var(--resid)",
+                   "stroke-width": 2, "stroke-dasharray": "5 4" }, s3);
+
+    arrow(s3, [0, 0], b3, "b", 2.5);
+    arrow(s3, [0, 0], a3, "a", 3);
+    arrow(s3, [0, 0], p, "proj", 5);
+    label(s3, a3, "a", "a"); label(s3, b3, "b", "b");
+    handle(s3, a3, "a", v => { a3 = v; draw3(); });
+    handle(s3, b3, "b", v => { b3 = v; draw3(); });
+
+    const resid = [a3[0] - p[0], a3[1] - p[1]];
+    document.getElementById("r3").innerHTML =
+      row("a", `[${fmt(a3[0], 1)}, ${fmt(a3[1], 1)}]`, "var(--a)") +
+      row("b (направление)", `[${fmt(b3[0], 1)}, ${fmt(b3[1], 1)}]`, "var(--b)") +
+      row("k = a·b / b·b", fmt(k)) +
+      row("proj = k·b", `[${fmt(p[0])}, ${fmt(p[1])}]`, "var(--proj)") +
+      row("остаток a − proj", `[${fmt(resid[0])}, ${fmt(resid[1])}]`, "var(--resid)") +
+      row("proj · остаток", fmt(dot(p, resid), 3) + "  (всегда 0)", "var(--muted)");
+    document.getElementById("v3").innerHTML =
+      `Фиолетовая стрелка — тень вектора <span style="color:var(--a)">a</span> на направление ` +
+      `<span style="color:var(--b)">b</span>. Красный пунктир — то, что тень потеряла, и он ` +
+      `<b>всегда перпендикулярен</b> b (их скалярное произведение = 0, смотри последнюю строку).`;
+  }
+  residChk.onchange = draw3;
+
+  // ================= 4. матрица =================
+  let M = [0, -1, 1, 0];
+  let p4 = [2, 0], p4b = [0, 1];
+  const s4 = document.getElementById("s4");
+  const ins = ["m00", "m01", "m10", "m11"].map(id => document.getElementById(id));
+  const showCols = document.getElementById("showCols");
+  showCols.onchange = () => draw4();
+  const apply = (m, v) => [m[0] * v[0] + m[1] * v[1], m[2] * v[0] + m[3] * v[1]];
+
+  function draw4() {
+    scene(s4);
+    // исходная единичная сетка бледно + преобразованная ярко
+    for (let i = -4; i <= 4; i++) {
+      const h0 = apply(M, [-4, i]), h1 = apply(M, [4, i]);
+      const v0 = apply(M, [i, -4]), v1 = apply(M, [i, 4]);
+      el("line", { x1: X(h0), y1: Y(h0), x2: X(h1), y2: Y(h1),
+                   stroke: "var(--proj)", "stroke-width": i === 0 ? 1.8 : .8, opacity: i === 0 ? .9 : .35 }, s4);
+      el("line", { x1: X(v0), y1: Y(v0), x2: X(v1), y2: Y(v1),
+                   stroke: "var(--proj)", "stroke-width": i === 0 ? 1.8 : .8, opacity: i === 0 ? .9 : .35 }, s4);
+    }
+    const q = apply(M, p4), q2 = apply(M, p4b);
+
+    // столбцы матрицы = куда уехали базовые векторы [1,0] и [0,1]
+    const c1 = [M[0], M[2]], c2 = [M[1], M[3]];
+    if (showCols.checked) {
+      arrow(s4, [0, 0], c1, "proj", 4);
+      arrow(s4, [0, 0], c2, "proj", 4);
+      label(s4, c1, "столбец 1", "proj");
+      label(s4, c2, "столбец 2", "proj");
+    }
+
+    // исходные точки бледные, результаты яркие
+    arrow(s4, [0, 0], p4, "a", 2);
+    arrow(s4, [0, 0], p4b, "b", 2);
+    arrow(s4, [0, 0], q, "ok", 3.5);
+    arrow(s4, [0, 0], q2, "resid", 3.5);
+    label(s4, p4, "P", "a"); label(s4, p4b, "Q", "b");
+    handle(s4, p4, "a", v => { p4 = v; draw4(); });
+    handle(s4, p4b, "b", v => { p4b = v; draw4(); });
+
+    const collide = Math.hypot(q[0] - q2[0], q[1] - q2[1]) < 0.08;
+    const apart = Math.hypot(p4[0] - p4b[0], p4[1] - p4b[1]) > 0.15;
+    if (collide && apart)
+      el("circle", { cx: X(q), cy: Y(q), r: 16, fill: "none",
+                     stroke: "var(--resid)", "stroke-width": 2.5, "stroke-dasharray": "4 3" }, s4);
+
+    const det = M[0] * M[3] - M[1] * M[2];
+    const rank = Math.abs(det) > 1e-9 ? 2
+               : (mag(c1) > 1e-9 || mag(c2) > 1e-9) ? 1 : 0;
+    document.getElementById("r4").innerHTML =
+      row("P", `[${fmt(p4[0],1)}, ${fmt(p4[1],1)}]  →  [${fmt(q[0])}, ${fmt(q[1])}]`, "var(--ok)") +
+      row("Q", `[${fmt(p4b[0],1)}, ${fmt(p4b[1],1)}]  →  [${fmt(q2[0])}, ${fmt(q2[1])}]`, "var(--resid)") +
+      row("строка 1 для P", `${fmt(M[0],1)}×${fmt(p4[0],1)} + ${fmt(M[1],1)}×${fmt(p4[1],1)} = ${fmt(q[0])}`) +
+      row("строка 2 для P", `${fmt(M[2],1)}×${fmt(p4[0],1)} + ${fmt(M[3],1)}×${fmt(p4[1],1)} = ${fmt(q[1])}`) +
+      row("столбец 1 — куда уехал [1,0]", `[${fmt(c1[0],1)}, ${fmt(c1[1],1)}]`, "var(--proj)") +
+      row("столбец 2 — куда уехал [0,1]", `[${fmt(c2[0],1)}, ${fmt(c2[1],1)}]`, "var(--proj)") +
+      row("определитель", fmt(det), Math.abs(det) < 1e-6 ? "var(--resid)" : "var(--muted)") +
+      row("РАНГ", rank + (rank === 2 ? "  (заполняет плоскость)" : rank === 1 ? "  (только прямая)" : "  (только точка)"),
+          rank === 2 ? "var(--ok)" : "var(--resid)");
+
+    let msg;
+    if (collide && apart)
+      msg = `<b style="color:var(--resid)">Столкновение.</b> P и Q — <b>разные</b> точки, а результат у них <b>один и тот же</b>. ` +
+            `Дай кому-то только результат — он уже не восстановит, откуда точка пришла. Информация стёрлась. ` +
+            `Вот это и значит «отменить нельзя».`;
+    else if (Math.abs(det) < 1e-6)
+      msg = `<b style="color:var(--resid)">Ранг 1.</b> Посмотри на два фиолетовых столбца — они легли на ` +
+            `<b>одну прямую</b>. Один — просто растянутая копия другого, разное направление всего одно. ` +
+            `Значит и выход не может покинуть эту прямую. Подвигай P и Q — найди пару, где результаты совпадут.`;
+    else
+      msg = `<b style="color:var(--ok)">Ранг 2.</b> Два фиолетовых столбца смотрят в <b>разные</b> стороны — ` +
+            `их комбинациями достаётся любая точка плоскости. Каждая точка едет в свою, столкновений нет, ` +
+            `преобразование обратимо. Теперь жми «Ранг 1» и смотри, что станет со столбцами.`;
+    document.getElementById("v4").innerHTML = msg;
+  }
+  function syncInputs() { ins.forEach((inp, i) => inp.value = M[i]); }
+  ins.forEach((inp, i) => inp.oninput = () => {
+    const v = parseFloat(inp.value);
+    if (!isNaN(v)) { M[i] = v; document.querySelectorAll("[data-mat]").forEach(b => b.classList.remove("on")); draw4(); }
+  });
+  document.querySelectorAll("[data-mat]").forEach(btn => btn.onclick = () => {
+    document.querySelectorAll("[data-mat]").forEach(b => b.classList.remove("on"));
+    btn.classList.add("on");
+    M = btn.dataset.mat.split(",").map(Number);
+    syncInputs(); draw4();
+  });
+
+  draw1(); draw2(); draw3(); draw4();
+})();
+</script>
+</body>
+</html>

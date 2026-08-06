@@ -101,6 +101,29 @@ artifact. Teach it in that order, interactively:
    what they actually said, and adjust depth. A learner saying "I know this,
    speed up" outranks the script.
 
+### Three things never to skip
+
+**The `🎒 На пальцах` blocks.** Most lessons carry blockquote asides that
+restate the concept at a schoolkid's level — an everyday analogy plus numbers
+worked by hand. They are not filler and they are not optional. Deliver one for
+every section you teach, in the learner's language. If a lesson file lacks
+them, write the equivalent yourself: a concrete real-world analogy and a
+worked arithmetic example small enough to check on paper.
+
+**Interactive visuals over ASCII art.** Whenever a concept is geometric,
+spatial, or diagrammatic — vectors, projections, matrix transforms, gradient
+descent, attention maps, network topologies — build a self-contained HTML
+page with draggable controls and live numeric readouts, save it under
+`learning-visuals/` in the repo, and open it in the browser. Seeing the
+numbers move while dragging is what makes the concept stick; a static text
+diagram is a fallback, not the goal.
+
+**The structured question tool.** Every question — warm-up recall,
+mid-lesson comprehension check, and end-of-lesson quiz — goes through the
+environment's structured question/option tool (`AskUserQuestion` in Claude
+Code), one call per pause, options as choices. Only fall back to lettered
+options typed as plain text when no such tool exists.
+
 ## Step 3 — Quiz
 
 Fetch `quiz.json` and ask every question whose `stage` is `"post"` (fall
