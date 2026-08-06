@@ -82,15 +82,15 @@ def step(state, action, slip):
 
 ### Step 2: train with DR
 
-В начале каждого эпизода сэмплируем `slip ~ Uniform[0.0, 0.4]`. Обучаем PPO / Q-learning / что угодно. Повторяем много эпизодов.
+В начале каждого эпизода сэмплируем `slip ~ Uniform[0.0, 0.3]`. Обучаем PPO / Q-learning / что угодно. Повторяем много эпизодов.
 
-> 🎒 **На пальцах.** За 10 000 эпизодов агент увидит примерно 2500 эпизодов со `slip` около 0.05, 2500 около 0.15 и так далее — равномерно по всему отрезку до 0.4. Он не знает, какой сегодня `slip`, поэтому вынужден выбрать маршрут, который неплох при любом из них.
+> 🎒 **На пальцах.** Отрезок `[0, 0.3]` делится на три полосы шириной 0.1, и равномерное распределение раскладывает эпизоды по ним ровно: за 10 000 эпизодов агент увидит примерно 3333 эпизода со `slip` около 0.05, 3333 около 0.15 и 3333 около 0.25. Он не знает, какой сегодня `slip`, поэтому вынужден выбрать маршрут, который неплох при любом из них.
 
 ### Step 3: evaluate zero-shot on "real" slips
 
 Проверяем на `slip ∈ {0.0, 0.1, 0.2, 0.3, 0.5, 0.7}`. Первые четыре — внутри тренировочного диапазона; `0.5` и `0.7` — снаружи. DR-политика должна оставаться почти оптимальной внутри диапазона и деградировать плавно снаружи. Политика, обученная на одном фиксированном `slip`, вне своего значения ломается резко.
 
-> 🎒 **На пальцах.** Zero-shot значит «ни одного шага дообучения на новом slip». Ожидаемая картинка: на 0.0–0.3 возврат почти не падает, на 0.5 просядет процентов на 20, на 0.7 — сильнее. Плавный спуск, а не обрыв, — это и есть подпись domain randomization.
+> 🎒 **На пальцах.** Zero-shot значит «ни одного шага дообучения на новом slip». Числа из демо (`code/main.py`, DR-политика): оптимум на сетке 5×5 — это 8 шагов, то есть возврат `-8.00`; на slip 0.0 получаем ровно `-8.00`, на 0.1 — `-8.78`, на 0.2 — `-9.78`, на краю диапазона 0.3 — `-11.04`. Дальше начинается OOD: 0.5 даёт `-15.78`, 0.7 — `-28.73`. Внутри диапазона просадка порядка 38% от оптимума, снаружи она ускоряется, но обрыва нет — плавный спуск и есть подпись domain randomization.
 
 ### Step 4: compare to narrow training
 
@@ -180,9 +180,8 @@ Refuse to deploy without (a) a zero-shot sim-variant test, (b) a safety shield, 
 
 - [Tobin et al. (2017). Domain Randomization for Transferring Deep Neural Networks from Simulation to the Real World](https://arxiv.org/abs/1703.06907) — оригинальная статья про DR (зрение для робототехники).
 - [Peng et al. (2018). Sim-to-Real Transfer of Robotic Control with Dynamics Randomization](https://arxiv.org/abs/1710.06537) — DR для динамики, ходьба четвероногого.
-- [OpenAI et al. (2019). Solving Rubik's Cube with a Robot Hand](https://arxiv.org/abs/1910.07113) — Dactyl, ADR на большом масштабе.
+- [OpenAI: Akkaya et al. (2019). Solving Rubik's Cube with a Robot Hand](https://arxiv.org/abs/1910.07113) — Dactyl; статья, в которой и была введена Automatic Domain Randomization (ADR), сразу на большом масштабе.
 - [Miki et al. (2022). Learning robust perceptive locomotion for quadrupedal robots in the wild](https://www.science.org/doi/10.1126/scirobotics.abk2822) — teacher-student для ANYmal.
 - [Makoviychuk et al. (2021). Isaac Gym: High Performance GPU Based Physics Simulation for Robot Learning](https://arxiv.org/abs/2108.10470) — массово-параллельная симуляция, на которой держатся деплои 2025–2026.
-- [Akkaya et al. (2019). Automatic Domain Randomization](https://arxiv.org/abs/1910.07113) — метод курса ADR.
 - [Sutton & Barto (2018). Ch. 8 — Planning and Learning with Tabular Methods](http://incompleteideas.net/book/RLbook2020.pdf) — рамка Dyna (использовать модель для планирования и роллаутов), на которой стоят современные sim-to-real конвейеры.
 - [Zhao, Queralta & Westerlund (2020). Sim-to-Real Transfer in Deep Reinforcement Learning for Robotics: a Survey](https://arxiv.org/abs/2009.13303) — таксономия методов sim-to-real с результатами бенчмарков.
