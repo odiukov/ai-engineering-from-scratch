@@ -1,0 +1,78 @@
+{
+  "lesson": "08-ppo",
+  "title": "Proximal Policy Optimization (PPO)",
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "PPO's headline benefit over plain actor-critic is what?",
+      "options": [
+        "It removes the critic, so there is one network instead of two",
+        "It bounds the reward so the advantage never explodes",
+        "It lets you take many gradient epochs on one rollout without the policy running away from the data",
+        "It replaces the discount factor with an explicit trust region on the discounted return, bounding each update's effect"
+      ],
+      "correct": 2,
+      "explanation": "Rollouts are the expensive part. The clipped surrogate keeps multi-epoch reuse safe by removing the incentive to move any sample's probability more than ε away from the policy that collected it."
+    },
+    {
+      "stage": "check",
+      "question": "A sample has A_t < 0. On which side of the corridor does the clip switch off its gradient?",
+      "options": [
+        "When the ratio rises above 1 + ε",
+        "When the ratio falls below 1 − ε",
+        "Only when the ratio equals exactly 1",
+        "Never — clipping only engages for positive advantages"
+      ],
+      "correct": 1,
+      "explanation": "For a bad action the update pushes its probability down, so the ratio moves downward; the floor at 1 − ε is what stops it. The two clip boundaries are direction-matched to the sign of the advantage."
+    },
+    {
+      "stage": "check",
+      "question": "Once a sample lands outside its clip boundary, what does it contribute to the policy gradient on that step?",
+      "options": [
+        "The same magnitude with the sign flipped, pulling the ratio back",
+        "The full gradient scaled down by ε",
+        "Exactly zero — the objective is flat there, so the sample stops moving θ",
+        "Only the value-loss part survives; the policy-gradient part is halved rather than removed"
+      ],
+      "correct": 2,
+      "explanation": "clip() makes the surrogate a constant in that region, and the derivative of a constant is zero. The sample is not reversed or damped; it simply stops contributing until the ratio drifts back inside."
+    },
+    {
+      "stage": "check",
+      "question": "Why is the ratio always computed as exp(log π_θ − log π_old) rather than as π_θ / π_old?",
+      "options": [
+        "Because the log-space form is numerically stable when both probabilities are tiny, where the direct quotient underflows",
+        "Because exp() is cheaper than division on a GPU",
+        "Because the quotient form would need a separate gradient rule",
+        "Because the log form keeps the ratio bounded inside [1-eps, 1+eps], which the raw quotient is not"
+      ],
+      "correct": 0,
+      "explanation": "Token- or long-horizon probabilities are routinely 1e-30 or smaller; dividing two such numbers loses most of the mantissa or hits zero. Subtracting logs keeps full precision, and the ratio itself is unbounded either way."
+    },
+    {
+      "stage": "post",
+      "question": "Sixty updates in, your clip fraction sits at 0.002 and mean KL is essentially zero, while return improves painfully slowly. What does that diagnose?",
+      "options": [
+        "The policy is drifting too far each update — lower the learning rate and cut K epochs until mean KL settles",
+        "Advantage normalization is broken — the advantages must be near-constant",
+        "ε is too small — widen the corridor from 0.2 to 0.3 so the clip has room to engage again",
+        "The updates are too timid — the corridor is never reached, so raise LR or K epochs"
+      ],
+      "correct": 3,
+      "explanation": "A clip fraction near zero means the constraint is never binding, so it is not what limits you; the healthy band is roughly 0.1–0.3. Widening ε would loosen a constraint that is already inactive."
+    },
+    {
+      "stage": "post",
+      "question": "How does PPO relate to TRPO, its predecessor?",
+      "options": [
+        "PPO keeps TRPO's hard KL constraint on every update and solves it with conjugate gradients, which is why it needs no clipping term",
+        "PPO trades TRPO's hard trust region for a first-order clipped surrogate — no constrained solve, similar behavior in practice",
+        "PPO abandons the trust-region idea entirely and relies on global gradient-norm clipping to keep updates small",
+        "PPO is TRPO with the critic removed and the mean reward over a group of sampled completions used as the baseline"
+      ],
+      "correct": 1,
+      "explanation": "TRPO's guarantee came from an explicit KL constraint that needs a conjugate-gradient solve every update; PPO approximates the same 'stay near π_old' intent with one clipping line and plain SGD. Removing the critic for a group baseline is GRPO, not PPO."
+    }
+  ]
+}
