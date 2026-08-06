@@ -37,10 +37,9 @@ transformer-block
 ### Encoder block (used by BERT, T5 encoder)
 
 ```
-x → LN → MHA(self) → + → LN → FFN → + → out
-                     ^              ^
-                     |              |
-                     └── residual ──┘
+x ──┬──────── residual ────────→ + ──┬──── residual ────→ + ──→ out
+    │                            ^   │                    ^
+    └── LN → MHA(self) ──────────┘   └── LN → FFN ────────┘
 ```
 
 Encoder is bidirectional. No masking. All positions see all positions.
@@ -65,7 +64,7 @@ Vaswani 2017 shipped LayerNorm + ReLU. Modern stacks replaced both. What product
 |-----------|------|------|
 | Normalization | LayerNorm | RMSNorm |
 | FFN activation | ReLU | SwiGLU |
-| FFN expansion | 4× | 2.6× (SwiGLU uses three matrices, total params match) |
+| FFN expansion | 4× | 2.6×–3.5× (SwiGLU uses three matrices, so 2.67× already matches a 4× two-matrix FFN in params; Llama 3 spends more and uses 3.5×) |
 | Position | Sinusoidal absolute | RoPE |
 | Attention | Full MHA | GQA (or MLA) |
 | Bias terms | Yes | No |
@@ -77,10 +76,16 @@ RMSNorm drops the mean-centering of LayerNorm (one fewer subtraction), which sav
 For one block with `d_model = d` and FFN expansion `r`:
 
 - MHA: `4 · d²` (Q, K, V, O projections)
-- FFN (SwiGLU): `3 · d · (r · d)` ≈ `3rd²`
+- FFN (SwiGLU): `3 · d · (r · d)` = `3rd²`
 - Norms: negligible
 
-At `d = 4096, r = 2.6, layers = 32` (roughly Llama 3 8B), total: `32 · (4·4096² + 3·2.6·4096²) ≈ 32 · (16 + 32) M = ~1.5B parameters per layer × 32 ≈ 7B` (plus embeddings and head). Matches published counts.
+Work it out for Llama 3 8B: `d = 4096`, 32 layers, FFN intermediate size 14336 (so `r = 3.5`), and GQA with 32 query heads but only 8 KV heads. GQA shrinks K and V to a quarter each, so attention costs `2·d² + 2·(d²/4) = 2.5·d²` instead of `4·d²`:
+
+- Attention: `2.5 · 4096² ≈ 41.9 M`
+- FFN: `3 · 3.5 · 4096² ≈ 176.2 M`
+- Per layer: `≈ 218 M`
+
+Times 32 layers: `≈ 7.0 B`. Add the (untied) embedding table and output head at `128256 · 4096 ≈ 0.53 B` each and you land at `≈ 8.0 B` — which is where the name comes from. Note that with full MHA instead of GQA the same block would cost `67.1 M + 176.2 M ≈ 243 M`, or `7.8 B` for the stack.
 
 ## Build It
 

@@ -70,31 +70,37 @@ class KVCache:
 
 
 def decode_naive(all_K, all_V, all_queries):
-    """Recompute attention over the full prefix at every step.
-    Returns list of outputs, one per generated token. Op count = 1+2+...+N = N(N+1)/2.
+    """No cache: re-derive K,V for the whole prefix at every step.
+
+    Returns (outputs, kv_projections). A cache-less decoder re-projects every
+    prefix token on every step, so the K,V projection count is
+    1+2+...+N = N(N+1)/2 -- the O(N^2) term the cache removes.
     """
     outputs = []
-    ops = 0
+    kv_projections = 0
     for t, q in enumerate(all_queries):
         Ks = all_K[:t + 1]
         Vs = all_V[:t + 1]
+        kv_projections += t + 1  # K,V recomputed for positions 0..t
         out = attention_full(q, Ks, Vs)
-        ops += t + 1
         outputs.append(out)
-    return outputs, ops
+    return outputs, kv_projections
 
 
 def decode_cached(all_K, all_V, all_queries):
-    """KV cache: each new step appends one K,V and queries against the cache."""
+    """KV cache: each step projects exactly one new K,V and reuses the rest.
+
+    Returns (outputs, kv_projections). One projection per step => N total.
+    """
     cache = KVCache()
     outputs = []
-    ops = 0
+    kv_projections = 0
     for q, k, v in zip(all_queries, all_K, all_V):
         cache.append(k, v)
+        kv_projections += 1  # only the new token is projected, ever
         out = attention_full(q, cache.K, cache.V)
-        ops += len(cache)
         outputs.append(out)
-    return outputs, ops
+    return outputs, kv_projections
 
 
 def kv_cache_bytes(N, n_layers, n_heads_kv, d_head, dtype=2):
@@ -105,24 +111,26 @@ def kv_cache_bytes(N, n_layers, n_heads_kv, d_head, dtype=2):
 def main():
     rng = random.Random(42)
     d_head = 8
-    N = 10
+    N = 100
 
     # Random Q, K, V for a 10-token sequence, one head.
     all_Q = [[rng.gauss(0, 1) for _ in range(d_head)] for _ in range(N)]
     all_K = [[rng.gauss(0, 1) for _ in range(d_head)] for _ in range(N)]
     all_V = [[rng.gauss(0, 1) for _ in range(d_head)] for _ in range(N)]
 
-    naive, naive_ops = decode_naive(all_K, all_V, all_Q)
-    cached, cached_ops = decode_cached(all_K, all_V, all_Q)
+    naive, naive_kv = decode_naive(all_K, all_V, all_Q)
+    cached, cached_kv = decode_cached(all_K, all_V, all_Q)
 
     print(f"=== naive vs KV-cached decoding on N={N} tokens ===")
-    print(f"naive attention ops:  {naive_ops}  (O(N^2) = {N * (N + 1) // 2})")
-    print(f"cached attention ops: {cached_ops}  (O(N) with per-step cost, unchanged)")
+    print(f"naive  K,V projections: {naive_kv:>5}  (O(N^2) = N(N+1)/2 = {N * (N + 1) // 2})")
+    print(f"cached K,V projections: {cached_kv:>5}  (O(N) = N = {N})")
+    print(f"work saved by the cache: {naive_kv / cached_kv:.1f}x fewer K,V projections")
     print("outputs match (max abs diff over all tokens):",
           f"{max(abs(a - b) for va, vb in zip(naive, cached) for a, b in zip(va, vb)):.2e}")
     print()
-    print("* naive has same per-step cost; saving comes from not REcomputing earlier")
-    print("  hidden states. counting K,V recomputes would make naive O(N^2) in matmuls.")
+    print("* the score/softmax work per step is the same either way -- a query still")
+    print("  attends to the whole prefix. what the cache removes is REcomputing the")
+    print("  prefix's K,V (and the hidden states behind them) on every single step.")
     print()
 
     print("=== tiled-softmax (Flash) vs standard softmax agreement ===")

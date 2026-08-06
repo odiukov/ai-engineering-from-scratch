@@ -162,8 +162,14 @@ def sample_joint(net, alphas, alpha_bars, T, t_dim, rng):
 
 
 def independent_per_frame(T_frames, rng):
-    """Baseline: sample each frame independently from a random walk."""
-    return [rng.gauss(0, 1) + 0.3 * t for t in range(T_frames)]
+    """Baseline: each frame comes from its own independent clip.
+
+    Frame t is drawn from exactly the same distribution as frame t of a real clip
+    (same make_video, same base/slope law) -- the only thing removed is that the
+    frames no longer share one trajectory. So any delta gap versus joint sampling
+    measures temporal coherence, not a difference in the marginal distributions.
+    """
+    return [make_video(rng)[t] for t in range(T_frames)]
 
 
 def frame_deltas(video):

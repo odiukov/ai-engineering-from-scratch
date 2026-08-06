@@ -89,8 +89,8 @@ def entropy(counts):
     return -sum(p * math.log(p) for p in ps)
 
 
-def dense_active_params(n_experts, expert_params, top_k, d_model):
-    """Total params, active params per token. d_model used for attention est."""
+def dense_active_params(n_experts, expert_params, top_k):
+    """(total params, active params per token) for one MoE layer's experts."""
     total = n_experts * expert_params
     active = top_k * expert_params
     return total, active
@@ -127,8 +127,12 @@ def main():
     print()
 
     print("=== parameter counts (FFN portion, per layer) ===")
-    ffn_params = d_model * d_hidden * 3  # SwiGLU-like: W1, W2, W3
-    print(f"  toy MoE       : total={n_experts * ffn_params:>10}  active={top_k * ffn_params:>10}")
+    # `make_expert` builds ONE d_model x d_hidden matrix per expert, so that is
+    # what we count here. (Real MoEs use SwiGLU = 3 matrices; see below.)
+    expert_params = d_model * d_hidden
+    toy_total, toy_active = dense_active_params(n_experts, expert_params, top_k)
+    print(f"  toy MoE       : total={toy_total:>10}  active={toy_active:>10}"
+          f"  ({n_experts} x {d_model}x{d_hidden}, top-{top_k})")
 
     # DeepSeek-V3 shape (per-layer FFN; real model has 61 layers)
     d = 7168
@@ -142,9 +146,15 @@ def main():
     active_moe_per_layer = (shared + active) * fine_expert
     print(f"  deepseek-v3-ish per layer:  total={total_moe_per_layer / 1e9:.1f}B  active={active_moe_per_layer / 1e9:.1f}B")
     print(f"  deepseek-v3 FFN total (×{layers} layers): ~{total_moe_per_layer * layers / 1e9:.0f}B total,  ~{active_moe_per_layer * layers / 1e9:.0f}B active")
-    print(f"  llama-3-70b FFN total: ~{32 * ffn_full / 1e9:.0f}B  (all active every token)")
+    # Llama-3-70B (dense), real geometry: 80 layers, d_model 8192, SwiGLU hidden
+    # 28672. Do NOT reuse deepseek's d here — the two models are shaped differently.
+    llama_ffn = 80 * 3 * 8192 * 28672
+    print(f"  llama-3-70b FFN total: ~{llama_ffn / 1e9:.0f}B  (all active every token)")
     print()
-    print("takeaway: same active FLOPs, vastly larger parameter footprint.")
+    print(f"  deepseek stores {total_moe_per_layer * layers / llama_ffn:.0f}x llama's FFN weights, but its")
+    print(f"  active FFN per token is {active_moe_per_layer * layers / llama_ffn:.0%} of llama's always-on FFN.")
+    print()
+    print("takeaway: fewer active FLOPs than the dense 70B, vastly larger parameter footprint.")
 
 
 if __name__ == "__main__":

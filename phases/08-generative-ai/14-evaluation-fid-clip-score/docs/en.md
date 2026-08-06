@@ -32,7 +32,7 @@ Heusel et al. (2017). Steps:
 Interpretation: Fréchet distance between two multivariate Gaussians in feature space. Lower = more similar distributions.
 
 Failure modes:
-- **Biased on small N.** FID is mean-squared over the feature distribution — small N under-estimates covariance, gives falsely low FID. Always use N ≥ 10,000.
+- **Biased on small N.** FID is a *positively* biased estimator: at small N the sample mean and covariance are noisy, and that noise only ever adds to `||μ_r - μ_g||²` and to the trace term. Two pools drawn from the *same* distribution therefore score well above 0, and the score shrinks as N grows. Always use N ≥ 10,000, and never compare FIDs computed at different N.
 - **Inception-dependent.** Inception-v3 was trained on ImageNet. Domains far from ImageNet (faces, art, text images) produce meaningless FID. Use a domain-specific feature extractor.
 - **Gaming.** Overfitting to the Inception prior gives low FID without visual quality improvement. Beat it with CMMD (below).
 

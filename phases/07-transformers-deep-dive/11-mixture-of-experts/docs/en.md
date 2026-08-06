@@ -111,11 +111,21 @@ Bias affects selection, not gate weight. That is the DeepSeek-V3 trick — bias 
 
 ### Step 2: run 100 tokens through the router
 
-Track which experts fire how often. Without the bias, usage is skewed. With a bias update loop (`-γ` for over-used experts, `+γ` for under-used), usage converges to a uniform distribution over a few iterations.
+Track which experts fire how often. Without the bias, usage is skewed. With a bias update loop (`-γ` for over-used experts, `+γ` for under-used), usage flattens out and then *oscillates* around uniform instead of converging to it: the update is a fixed step of `±γ` regardless of how far off the count is, so once an expert crosses the target the next step pushes it back over. γ sets the amplitude of that wobble — small γ means a tight orbit around uniform, large γ means the counts overshoot and bounce. Run `code/main.py` and you will see entropy climb close to `ln(E)` and then settle into a repeating cycle, not a fixed point.
 
 ### Step 3: param count comparison
 
-Print the "dense equivalent" of an MoE config. DeepSeek-V3-shaped: 256 routed + 1 shared, 8 active, d_model=7168. The total parameter count is eye-watering. The active count is a seventh of a dense Llama 3 70B.
+Print the "dense equivalent" of an MoE config. DeepSeek-V3-shaped: 256 routed + 1 shared, 8 active, d_model=7168. The total parameter count is eye-watering: ~806B of FFN weights across 61 layers, roughly **14× the ~56B of FFN** in a dense Llama 3 70B (80 layers, d_model 8192, SwiGLU hidden 28672).
+
+Be explicit about which two numbers you are dividing, because "5%" and "half" both describe this model:
+
+| Comparison | Ratio |
+|------------|-------|
+| DeepSeek active FFN vs its own total FFN | 28B / 806B ≈ 3.5% (this is the `k/E` expert sparsity) |
+| DeepSeek active FFN vs Llama-3-70B's FFN | 28B / 56B ≈ **half** |
+| DeepSeek active model params vs Llama-3-70B total | 37B / 70B ≈ **53%** |
+
+So MoE is not doing a seventh of the dense model's work — it is doing about half the per-token compute of a dense 70B while carrying ~14× the stored knowledge. That is the whole trade: compute per token from `k`, knowledge from `E`.
 
 ## Use It
 
@@ -144,7 +154,7 @@ See `outputs/skill-moe-configurator.md`. The skill picks E, k, and shared-expert
 
 ## Exercises
 
-1. **Easy.** Run `code/main.py`. Watch how the auxiliary-loss-free bias update evens out expert usage over 50 iterations.
+1. **Easy.** Run `code/main.py`. Watch the auxiliary-loss-free bias update even out expert usage over its 10 iterations — and notice that the usage counts end up cycling around the target rather than landing on it. Change `gamma` and confirm the cycle's amplitude follows γ.
 2. **Medium.** Replace the learned router with a hash-based router (deterministic, no learning). Compare quality and balance. Why is the learned router better?
 3. **Hard.** Implement GRPO-style "rollout-matched routing" (DeepSeek-V3.2 trick): log which experts fire during inference, force the same routing during gradient computation. Measure the effect on a toy policy-gradient setup.
 
@@ -159,7 +169,7 @@ See `outputs/skill-moe-configurator.md`. The skill picks E, k, and shared-expert
 | Auxiliary-loss-free | "DeepSeek-V3's trick" | Balance via per-expert bias on the router's selection only; no extra gradient. |
 | Shared expert | "Always on" | Extra expert through which every token passes; captures common knowledge. |
 | Expert parallelism | "Shard by expert" | Distribute different experts to different GPUs; route tokens across the network. |
-| Sparsity | "Active params < total params" | The ratio `k × expert_size / (E × expert_size)`; 37/671 ≈ 5.5% for DeepSeek-V3. |
+| Sparsity | "Active params < total params" | Two different ratios that get conflated. **Expert sparsity** inside one MoE layer: `k × expert_size / (E × expert_size)` = `k / E` = 8/256 ≈ 3.1% for DeepSeek-V3. **Model-level active-parameter share**: 37B / 671B ≈ 5.5% — higher, because attention, embeddings, and the always-on shared expert fire for every token and are not part of the `k / E` fraction. |
 
 ## Further Reading
 

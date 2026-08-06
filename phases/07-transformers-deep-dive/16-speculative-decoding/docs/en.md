@@ -145,6 +145,8 @@ def spec_step(prefix, q_model, p_model, N, rng):
 
 Five accepted → one bonus → six tokens produced in one verifier pass.
 
+Keep the two counts separate. A step emits `n_accepted + 1` tokens, where `n_accepted ∈ [0, N]` is how many *drafts* survived verification, and the `+1` is exactly one extra token — the residual resample on rejection, or the bonus from `q_{N+1}` on full acceptance. Never both. `spec_step_n` in `code/main.py` returns `(final_token, n_accepted, is_bonus)` for this reason: folding the bonus into the accept count would have it report `N+1` accepted out of `N` drafts.
+
 ### Step 4: measure acceptance rate
 
 Run 10,000 speculative steps at varying draft-quality levels. Plot acceptance rate vs. KL divergence between draft and verifier distributions. You should see a clean monotone relationship.

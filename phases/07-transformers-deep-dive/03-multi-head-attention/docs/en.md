@@ -46,52 +46,71 @@ multihead-split
 
 ### Step 1: split heads from the single-head attention we already have
 
-Take the `SelfAttention` from Lesson 02 and wrap it with a split/concat pair. See `code/main.py` for a numpy implementation; the logic is:
+Lesson 02's single-head attention lives in `02-self-attention-from-scratch/code/self_attention.py` and is written on numpy. Do not import it here: this lesson's `code/main.py` is pure stdlib — no numpy, no torch — so it re-derives the same scaled dot-product attention on a tiny row-major `Matrix` class (`get`, `set`, `row`) and stays runnable on a bare Python install. Same math, one file, zero dependencies.
+
+So take Lesson 02's attention as the *formula* you already know, and wrap it in a split/concat pair. Splitting is just slicing a contiguous band of columns per head:
 
 ```python
-def split_heads(X, n_heads):
-    n, d = X.shape
-    d_head = d // n_heads
-    return X.reshape(n, n_heads, d_head).transpose(1, 0, 2)  # (heads, n, d_head)
+def split_heads(X: Matrix, n_heads: int) -> List[Matrix]:
+    assert X.cols % n_heads == 0, "d_model not divisible by n_heads"
+    d_head = X.cols // n_heads
+    heads = []
+    for h in range(n_heads):
+        H = Matrix(X.rows, d_head)
+        for i in range(X.rows):
+            for j in range(d_head):
+                H.set(i, j, X.get(i, h * d_head + j))
+        heads.append(H)
+    return heads
 
-def combine_heads(H):
-    h, n, d_head = H.shape
-    return H.transpose(1, 0, 2).reshape(n, h * d_head)
+def combine_heads(heads: List[Matrix]) -> Matrix:
+    n, d_head = heads[0].rows, heads[0].cols
+    out = Matrix(n, d_head * len(heads))
+    for h, H in enumerate(heads):
+        for i in range(n):
+            for j in range(d_head):
+                out.set(i, h * d_head + j, H.get(i, j))
+    return out
 ```
 
-One reshape and one transpose. No loop. This is exactly what PyTorch does under `nn.MultiheadAttention`.
+With numpy or torch this is one `reshape` plus one `transpose` and no Python loop — the head axis is a view, not a copy. That is exactly what `nn.MultiheadAttention` does under the hood; here we spell the indexing out so you can see which columns belong to which head.
 
 ### Step 2: run scaled-dot-product attention per head
 
-Each head gets its own slice of Q, K, V. Attention becomes a batched matmul:
+Each head gets its own slice of Q, K, V. In stdlib that is a loop over heads:
 
 ```python
-def mha_forward(X, W_q, W_k, W_v, W_o, n_heads):
-    Q = X @ W_q
-    K = X @ W_k
-    V = X @ W_v
-    Qh = split_heads(Q, n_heads)         # (heads, n, d_head)
+def multi_head_attention(X: Matrix, Wq, Wk, Wv, Wo, n_heads: int):
+    Q, K, V = matmul(X, Wq), matmul(X, Wk), matmul(X, Wv)
+    Qh = split_heads(Q, n_heads)          # list of (n, d_head)
     Kh = split_heads(K, n_heads)
     Vh = split_heads(V, n_heads)
-    scores = Qh @ Kh.transpose(0, 2, 1) / np.sqrt(Qh.shape[-1])
-    weights = softmax(scores, axis=-1)
-    out = weights @ Vh                    # (heads, n, d_head)
-    concat = combine_heads(out)
-    return concat @ W_o, weights
+    head_outs = []
+    per_head_weights = []
+    for q, k, v in zip(Qh, Kh, Vh):
+        o, w = scaled_dot_product_attention(q, k, v)   # Lesson 02's math, on Matrix
+        head_outs.append(o)
+        per_head_weights.append(w)
+    concat = combine_heads(head_outs)
+    return matmul(concat, Wo), per_head_weights
 ```
 
-On real hardware `Qh @ Kh.transpose(...)` is one `bmm`. The GPU sees a single batched matmul of shape `(heads, N, d_head) × (heads, d_head, N) -> (heads, N, N)`. Adding heads is free.
+`scaled_dot_product_attention` is Lesson 02's function with numpy swapped for `Matrix` ops — `softmax_rows(matmul(q, transpose(k)) * (1/math.sqrt(q.cols)))`, then `matmul(weights, v)` — and it is defined in this lesson's `code/main.py`, not imported.
+
+Our Python loop over heads is a teaching device. On real hardware the same math is one `bmm`: the GPU sees a single batched matmul of shape `(heads, N, d_head) × (heads, d_head, N) -> (heads, N, N)`. Adding heads is free.
 
 ### Step 3: Grouped-Query Attention variant
 
 Only the key and value projections change. Q gets `n_heads` groups; K and V get `n_kv_heads < n_heads` groups and are repeated to match:
 
 ```python
-def gqa_project(X, W, n_kv_heads, n_heads):
-    kv = split_heads(X @ W, n_kv_heads)       # (kv_heads, n, d_head)
+def gqa_project(X: Matrix, W, n_kv_heads: int, n_heads: int) -> List[Matrix]:
+    kv_small = split_heads(matmul(X, W), n_kv_heads)   # n_kv_heads matrices
     repeat = n_heads // n_kv_heads
-    return np.repeat(kv, repeat, axis=0)      # (n_heads, n, d_head)
+    return [kv_small[i // repeat] for i in range(n_heads)]
 ```
+
+Note the returned list holds *references*, not copies — `Kh[0]` and `Kh[1]` are the same object when `repeat = 2`. That is the whole point: one stored KV head serves several query heads.
 
 At inference this saves memory because only `n_kv_heads` copies live in the KV cache, not `n_heads`. Llama 3 70B uses 64 query heads with 8 KV heads — an 8× cache shrink.
 

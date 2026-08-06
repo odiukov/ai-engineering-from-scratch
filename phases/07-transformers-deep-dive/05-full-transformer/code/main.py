@@ -217,12 +217,14 @@ def main():
     ffn_expansion = 2.0
     src_len = 6
     tgt_len = 5
+    vocab_size = 16
 
     src = randn(src_len, d, rng, scale=0.5)
     tgt = randn(tgt_len, d, rng, scale=0.5)
 
     enc_params = [BlockParams(d, n_heads, ffn_expansion, rng) for _ in range(2)]
     dec_params = [BlockParams(d, n_heads, ffn_expansion, rng) for _ in range(2)]
+    W_vocab = randn(d, vocab_size, rng)  # final output projection ("unembedding")
 
     enc_out = src
     for p in enc_params:
@@ -232,11 +234,17 @@ def main():
     for p in dec_params:
         dec_out = decoder_block(dec_out, enc_out, p)
 
+    # Final LN, then project the residual stream to vocab logits. Pre-norm
+    # stacks need this last norm: nothing normalized the stream after the
+    # top block's residual add.
+    logits = matmul(rms_norm(dec_out), W_vocab)
+
     print("=== full transformer forward pass ===")
     print(f"source shape:           ({src.rows}, {src.cols})")
     print(f"encoder output shape:   ({enc_out.rows}, {enc_out.cols})")
     print(f"target shape:           ({tgt.rows}, {tgt.cols})")
     print(f"decoder output shape:   ({dec_out.rows}, {dec_out.cols})")
+    print(f"logits shape:           ({logits.rows}, {logits.cols})   <- (tgt_len, vocab)")
     print()
     print("first 3 cells of encoder output:")
     for i in range(3):
@@ -246,7 +254,8 @@ def main():
     for i in range(3):
         print("  " + "  ".join(f"{v:+.3f}" for v in dec_out.row(i)[:4]))
     print()
-    print("stack: 2-layer encoder + 2-layer decoder, pre-norm, RMSNorm, SwiGLU.")
+    print("stack: 2-layer encoder + 2-layer decoder, pre-norm, RMSNorm, SwiGLU,")
+    print("       final RMSNorm + projection to vocab logits.")
     print("this is the 2026 block skeleton (minus RoPE).")
 
 

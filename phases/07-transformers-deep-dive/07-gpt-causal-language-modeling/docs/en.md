@@ -74,7 +74,7 @@ mask-derivation
 
 ### Parallel training, serial inference
 
-Training: forward-pass the whole `(N, d_model)` sequence once, compute N cross-entropy losses (one per position), sum, backprop. Parallel along the sequence. This is why GPT training scales — you process 1M tokens in a batch in one GPU pass.
+Training: forward-pass the whole `(N, d_model)` sequence once, compute N cross-entropy losses (one per position), average, backprop. Parallel along the sequence. This is why GPT training scales — you process 1M tokens in a batch in one GPU pass.
 
 Inference: you generate token by token. Feed `[t1, t2, t3]`, get `t4`. Feed `[t1, t2, t3, t4]`, get `t5`. Feed `[t1, t2, t3, t4, t5]`, get `t6`. The KV cache (Lesson 12) saves the hidden states of `t1…tn` so you don't recompute them each step. But serial depth at inference = output length. That is the autoregressive tax and why decoding is the latency bottleneck of every LLM.
 
@@ -85,7 +85,7 @@ Given tokens `[t1, t2, t3, t4]`:
 - Input: `[t1, t2, t3]`
 - Targets: `[t2, t3, t4]`
 
-For every position `i`, compute `-log P(target_i | inputs[:i+1])`. Sum. This is the cross-entropy for the whole sequence.
+For every position `i`, compute `-log P(target_i | inputs[:i+1])`. **Average over positions.** That mean is the cross-entropy loss for the sequence — averaging rather than summing keeps the loss comparable across sequences of different lengths, which is why every LM framework (and `cross_entropy_shifted` in `code/main.py`) reports the mean.
 
 Every transformer LM you've heard of trains on this loss. Pre-training, fine-tuning, SFT — same loss, different data.
 
@@ -99,7 +99,7 @@ After training, sampling choices matter more than people think.
 | Temperature | Divide logits by T, sample | Creative tasks, higher T = more diversity |
 | Top-k | Sample from top-k tokens only | Kills low-probability tails |
 | Top-p (nucleus) | Sample from smallest set with cumulative prob ≥ p | 2020+ default; adapts to distribution shape |
-| Min-p | Keep tokens with `p > min_p * max_p` | 2024+; better at rejecting long tails than top-p |
+| Min-p | Keep tokens with `p ≥ min_p × max_p` | 2024+; better at rejecting long tails than top-p |
 | Speculative decoding | Draft model proposes N tokens, big model verifies | 2–3× latency reduction at same quality |
 
 In 2026, min-p + temperature 0.7 is a reasonable default for open-weights models. Speculative decoding is table stakes for any production inference stack.

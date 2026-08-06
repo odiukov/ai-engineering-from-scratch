@@ -51,7 +51,7 @@ In 2026 GANs are no longer the SOTA generator (diffusion and flow matching ate t
 | 2019 | StyleGAN / StyleGAN2 | Mapping network + adaptive instance norm. State of the art for fixed-domain photorealism. |
 | 2021 | StyleGAN3 | Alias-free, translation-equivariant — still the face gold standard in 2026. |
 | 2022 | StyleGAN-XL | Conditional, class-aware, larger scale. |
-| 2024 | R3GAN | Rebrands with stronger regularization; works on 1024² without tricks. |
+| 2025 | R3GAN | Rebrands with stronger regularization; works on 1024² without tricks. |
 
 ```figure
 gan-minimax
@@ -59,11 +59,16 @@ gan-minimax
 
 ## Build It
 
-`code/main.py` trains a tiny GAN on 1-D data: a mixture of two Gaussians. Generator and discriminator are single-hidden-layer MLPs. We implement forward, backward, and the minimax loop by hand. The goal is to see the two key failure modes (mode collapse + vanishing gradient) as they happen.
+`code/main.py` trains a tiny GAN on 1-D data: a mixture of two Gaussians. Generator and discriminator are single-hidden-layer MLPs. We implement forward, backward, and the minimax loop by hand. The goal is to see the two key failure modes (mode collapse + vanishing gradient) as they happen, and both are printed:
+
+- **Mode collapse** shows up live in the training log as `modeA`/`modeB` counts, with a `[!]` warning when one mode drops below 50 of 400 samples.
+- **Vanishing gradient** gets two printouts. First a pure-arithmetic table of `d/ds log(1-D)` vs `d/ds -log D` vs `d/dp log(1-D)` at `p = 0.5, 0.1, 0.01, 0.001`, so you can see which derivative saturates. Then a measured version at the end: freeze an untrained `G`, train only `D`, and watch the gradient `G` would actually receive collapse from `0.48` to `0.07` under the vanilla loss while the non-saturating form climbs from `0.52` to `0.93`.
 
 ### Step 1: non-saturating loss
 
-The vanilla Goodfellow loss `log(1 - D(G(z)))` goes to 0 when D classifies G's fake as fake with high confidence. At that point the gradient for G is basically zero — G cannot improve. The non-saturating form `-log D(G(z))` has the opposite asymptote: it blows up when D is confident, giving G a strong signal.
+The vanilla Goodfellow loss `log(1 - D(G(z)))` goes to 0 when D classifies G's fake as fake with high confidence. At that point the gradient for G *with respect to D's logit* is basically zero — G cannot improve.
+
+Be precise about which derivative saturates, because it is not the one in `p`. Write `p = D(G(z)) = σ(s)` for logit `s`. In `p` alone, `d/dp log(1 - p) = -1/(1 - p) → -1` as `p → 0` — nothing vanishes. But gradients reach G's weights *through* `s`, and `dp/ds = p(1 - p) → 0`, so the chain rule gives `d/ds log(1 - σ(s)) = -σ(s) = -p → 0`. The signal dies in the sigmoid, not in the log. The non-saturating form `-log D(G(z))` has the opposite asymptote: `d/ds (-log σ(s)) = -(1 - p) → -1`, a full-strength gradient exactly when D is most confident.
 
 ```python
 def g_loss(d_fake):
@@ -102,7 +107,7 @@ The canonical symptom: one of the two real modes stops being generated. The disc
 
 ## Pitfalls
 
-- **Discriminator too strong.** Cut D's learning rate by 2-5x, or add instance/layer noise. If D reaches >95% accuracy, G is dead.
+- **Discriminator too strong.** Cut D's learning rate by 2-5x, or add instance/layer noise. Define the accuracy you watch before you trust it: score D on a batch with equal numbers of real and fake samples, and count a sample as "called real" when `D(x) >= 0.5` (tie-inclusive). Under that rule the healthy equilibrium `D ≡ 0.5` scores exactly 50%, which is the number you want to hover near. If accuracy climbs past ~95%, D is separating the two sets cleanly, `D(G(z)) ≈ 0`, and G has no usable gradient left.
 - **Generator memorizes a mode.** Add noise to D inputs, use a minibatch-discriminator layer, or switch to WGAN-GP.
 - **Batch norm leaking statistics.** Real batch + fake batch flowing through the same BN layer mixes their statistics. Use instance norm or spectral norm instead.
 - **Inception-score gaming.** FID and IS are noisy at low sample counts. Use ≥10k samples at eval.

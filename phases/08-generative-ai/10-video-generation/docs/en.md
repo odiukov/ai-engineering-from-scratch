@@ -71,11 +71,16 @@ video-diffusion-denoise
 ### Step 1: patchify a synthetic 1-D "video"
 
 ```python
-def make_video(T_frames=8, rng=None):
+T_FRAMES = 6
+
+def make_video(rng):
     # a "video" is a sequence of 1-D values following a smooth trajectory
-    base = rng.gauss(0, 1)
-    return [base + 0.3 * t + rng.gauss(0, 0.1) for t in range(T_frames)]
+    base = rng.gauss(0, 1)        # where this clip starts
+    slope = rng.gauss(0, 0.3)     # how fast it drifts — drawn fresh per clip
+    return [base + slope * t + rng.gauss(0, 0.05) for t in range(T_FRAMES)]
 ```
+
+The slope is random per clip, not a constant: the model has to infer *this* clip's motion from the frames it sees, which is the whole point of the coherence test below.
 
 ### Step 2: position embedding per frame
 
@@ -91,6 +96,8 @@ Instead of denoising each frame independently, our tiny net concatenates all fra
 ### Step 4: temporal coherence test
 
 After training, sample a video. Measure the frame-to-frame delta. If the model has learned temporal structure, the deltas stay smaller than sampling each frame independently.
+
+The baseline has to be a fair one, or the comparison measures the wrong thing. `independent_per_frame` builds frame `t` by generating a whole clip with `make_video` and keeping only frame `t`, so each frame comes from exactly the same distribution as a real frame `t` — the only thing removed is that the frames no longer share one trajectory. The run reports `joint=0.61` vs `independent=1.31`: that gap is temporal coherence and nothing else.
 
 ## Pitfalls
 

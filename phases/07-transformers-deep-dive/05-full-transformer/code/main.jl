@@ -307,12 +307,14 @@ function demo_full_transformer()
     ffn_exp = 2.0
     src_len = 6
     tgt_len = 5
+    vocab_size = 16
 
     src = randn_matrix(rng, src_len, d; scale=0.5)
     tgt = randn_matrix(rng, tgt_len, d; scale=0.5)
 
     enc_params = [BlockParams(d, n_heads, ffn_exp, rng) for _ in 1:2]
     dec_params = [BlockParams(d, n_heads, ffn_exp, rng) for _ in 1:2]
+    W_vocab = randn_matrix(rng, d, vocab_size)  # output projection ("unembedding")
 
     enc_out = src
     for p in enc_params
@@ -328,6 +330,13 @@ function demo_full_transformer()
     @printf("encoder output shape:   (%d, %d)\n", size(enc_out, 1), size(enc_out, 2))
     @printf("target shape:           (%d, %d)\n", size(tgt, 1), size(tgt, 2))
     @printf("decoder output shape:   (%d, %d)\n", size(dec_out, 1), size(dec_out, 2))
+
+    # Final LN, then project the residual stream to vocab logits. Pre-norm
+    # stacks need this last norm: nothing normalized the stream after the
+    # top block's residual add.
+    logits = rms_norm(dec_out) * W_vocab
+    @printf("logits shape:           (%d, %d)   <- (tgt_len, vocab)\n",
+            size(logits, 1), size(logits, 2))
     println("\nfirst 3 rows of encoder output:")
     for i in 1:3
         println("  " * join([@sprintf("%+.3f", enc_out[i, j]) for j in 1:4], "  "))
@@ -336,7 +345,8 @@ function demo_full_transformer()
     for i in 1:3
         println("  " * join([@sprintf("%+.3f", dec_out[i, j]) for j in 1:4], "  "))
     end
-    println("\nstack: 2-layer encoder + 2-layer decoder, pre-norm, RMSNorm, SwiGLU.")
+    println("\nstack: 2-layer encoder + 2-layer decoder, pre-norm, RMSNorm, SwiGLU,")
+    println("       final RMSNorm + projection to vocab logits.")
 end
 
 

@@ -110,24 +110,38 @@ def main():
     render(swa_mask(8, window=4), "sliding window (W=4)")
     render(strided_mask(8, window=2, stride=3), "local (W=2) + strided (stride=3)")
 
-    print("=== attention sink: one 'noisy' query on 8 random tokens ===")
+    print("=== attention sink: an uninformative query on 8 tokens ===")
     import random
     rng = random.Random(0)
     d = 8
+    # The sink is LEARNED, not automatic: random Q/K produce no sink at all,
+    # position 0 just gets an ordinary random weight. What a trained model
+    # learns is a large-norm key at position 0 aligned with a bias direction
+    # every query carries. Softmax rows must sum to 1, so a query with nothing
+    # to retrieve dumps its mass there. We put that structure in by hand.
+    bias = [1.0 / math.sqrt(d)] * d          # unit vector shared by all queries
     K = [[rng.gauss(0, 1) for _ in range(d)] for _ in range(8)]
     V = [[rng.gauss(0, 1) for _ in range(d)] for _ in range(8)]
-    q = [rng.gauss(0, 1) for _ in range(d)]
+    K[0] = [k + 8.0 * b for k, b in zip(K[0], bias)]   # the learned sink key
+    q = [0.3 * rng.gauss(0, 1) + b for b in bias]      # weak content + bias
     mask = causal_mask(8)[7]
     _, w_single = attention_row(q, K, V, mask)
+    share = w_single[0] / sum(abs(w) for w in w_single)
     print(f"single attn weights: " + " ".join(f"{w:.3f}" for w in w_single))
-    print(f"  (notice the weight bleeding to position 0 — the attention sink)")
+    print(f"  position 0 takes {share:.0%} of the row despite carrying no content")
+    print(f"  the query wants — that is the attention sink.")
 
+    # The second map shares the sink (same bias direction, same position-0 key)
+    # but sees slightly different content. Subtraction cancels the common-mode
+    # sink; the content weights, which differ between the maps, survive.
     q1 = q[:]
     q2 = [x + 0.2 * rng.gauss(0, 1) for x in q]
     K2 = [[x + 0.2 * rng.gauss(0, 1) for x in row] for row in K]
-    _, w_diff = diff_attention_row(q1, q2, K, K2, V, mask, lam=0.5)
+    _, w_diff = diff_attention_row(q1, q2, K, K2, V, mask, lam=0.8)
+    share_diff = abs(w_diff[0]) / sum(abs(w) for w in w_diff)
     print(f"diff   attn weights: " + " ".join(f"{w:+.3f}" for w in w_diff))
-    print(f"  (lambda=0.5 subtracts the sink component; negative weights allowed)")
+    print(f"  lambda=0.8 cancels the common-mode sink: position 0 drops from")
+    print(f"  {share:.0%} to {share_diff:.0%} of the row. negative weights allowed.")
     print()
 
     print("=== KV cache @ 128K context, Llama-3-70B-ish (80 layers, 8 KV heads, d_head=128, fp16) ===")

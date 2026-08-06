@@ -11,7 +11,7 @@
 
 Pixel-space diffusion at 512² means the U-Net runs on tensors of shape `[B, 3, 512, 512]`. Each sampling step is ~100 GFLOPS for a 500M-param U-Net. Fifty steps is 5 TFLOPS per image. Train on a billion images and the compute bill is absurd.
 
-Most of those FLOPs go to pushing perceptually unimportant details through the net — the high-frequency texture that a lossy VAE could compress away. Rombach's idea: train a VAE once (the *first stage*), freeze it, and run diffusion entirely in the 4-channel 64×64 latent space (the *second stage*). Same U-Net. 1/16th the pixels. ~64x fewer FLOPs for comparable quality.
+Most of those FLOPs go to pushing perceptually unimportant details through the net — the high-frequency texture that a lossy VAE could compress away. Rombach's idea: train a VAE once (the *first stage*), freeze it, and run diffusion entirely in the 4-channel 64×64 latent space (the *second stage*). Same U-Net, three numbers that all describe the same compression: **64× fewer spatial positions** (8× per axis, `512² = 262,144 → 64² = 4,096`), **48× fewer numbers in the tensor** once you count channels (`512·512·3 = 786,432 → 64·64·4 = 16,384`), and **~64× fewer FLOPs per denoising step**, because conv and attention cost tracks spatial positions, not the 3 → 4 channel change.
 
 This is the Stable Diffusion recipe. SD 1.x / 2.x used an 860M U-Net over `64×64×4` latents, SDXL used a 2.6B U-Net over `128×128×4`, SD3 swapped the U-Net for a Diffusion Transformer (DiT) with flow matching. Flux.1-dev (Black Forest Labs, 2024) ships a 12B-param DiT-MMDiT. All run on the same two-stage substrate.
 
@@ -21,7 +21,7 @@ This is the Stable Diffusion recipe. SD 1.x / 2.x used an 860M U-Net over `64×6
 
 **Two stages, separately trained.**
 
-1. **Stage 1 — VAE.** Encoder `E(x) → z`, decoder `D(z) → x`. Target compression: 8× downsample in each spatial axis + adjust channels so total latent size is ~1/16th of pixel count. Loss = reconstruction (L1 + LPIPS perceptual) + KL (small weight so `z` isn't forced too Gaussian, because we do not need exact sampling from `z`). Often trained with an adversarial loss so decoded images are sharp.
+1. **Stage 1 — VAE.** Encoder `E(x) → z`, decoder `D(z) → x`. Target compression: 8× downsample in each spatial axis (64× fewer spatial positions) with 3 → 4 channels, so the latent tensor holds ~1/48 as many numbers as the pixel tensor. Loss = reconstruction (L1 + LPIPS perceptual) + KL (small weight so `z` isn't forced too Gaussian, because we do not need exact sampling from `z`). Often trained with an adversarial loss so decoded images are sharp.
 
 2. **Stage 2 — diffusion on `z`.** Treat `z = E(x_real)` as the data. Train a U-Net (or DiT) to denoise `z_t`. At inference: sample `z_0` via diffusion, then `x = D(z_0)`.
 
@@ -86,7 +86,7 @@ This is the only substantive difference between a class-conditional diffusion mo
 
 ## Pitfalls
 
-- **VAE-scale mismatch.** SD 1.x VAEs have a scaling constant (`scaling_factor ≈ 0.18215`) applied after encoding. Forgetting this makes the U-Net train on latents with wildly wrong variance. Every checkpoint ships one.
+- **VAE-scale mismatch.** SD 1.x VAEs have a scaling constant (`scaling_factor = 0.18215`) that is *multiplied in* after encoding (`z = E(x) * 0.18215`) and *divided out* before decoding (`x = D(z / 0.18215)`). Forgetting this — or applying it in the wrong direction — makes the U-Net train on latents with wildly wrong variance. Every checkpoint ships one.
 - **Text encoder silently wrong.** SD3 needs T5-XXL with >=128 tokens, and the fallback to CLIP-only is lossy. Always check `use_t5=True` or prompt fidelity craters.
 - **Mixing latent spaces.** SDXL, SD3, Flux all use different VAEs. A LoRA trained on SDXL latents will not work on SD3. Hugging Face diffusers 0.30+ refuses to load mismatched checkpoints.
 - **CFG too high.** `w > 10` produces saturated, oily images and over-fits the prompt at the cost of diversity. The sweet spot is `w = 3-7`.
@@ -126,7 +126,7 @@ Save `outputs/skill-sd-prompter.md`. Skill takes a text prompt + target style an
 | Cross-attention | "How text gets in" | Each U-Net block attends to text tokens as K and V. |
 | DiT | "Diffusion Transformer" | Replace U-Net with a transformer over latent patches; scales better. |
 | MMDiT | "Multi-modal DiT" | SD3's architecture: text and image streams with joint attention. |
-| VAE scaling factor | "Magic number" | Divides latents by ~5.4 so diffusion operates in unit-variance space. |
+| VAE scaling factor | "Magic number" | `scaling_factor = 0.18215` (SD 1.x). **Encode:** `z = E(x).sample() * 0.18215` — multiply, i.e. shrink by ~5.49×, so the U-Net sees roughly unit-variance latents. **Decode:** `x = D(z / 0.18215)` — divide it back out before the decoder. |
 
 ## Production note: running Flux-12B on an 8GB consumer GPU
 

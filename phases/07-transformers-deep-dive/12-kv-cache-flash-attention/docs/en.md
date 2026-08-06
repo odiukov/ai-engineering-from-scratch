@@ -26,32 +26,35 @@ By 2026 both are universal. Every production inference stack (vLLM, TensorRT-LLM
 
 ### KV cache math
 
-Per decoder layer, per token, per head:
+Per decoder layer, per token — summed over all KV heads:
 
 ```
-bytes_per_token_per_layer = 2 * d_head * dtype_size
+bytes_per_token_per_layer = 2 * n_kv_heads * d_head * dtype_size
                           ^
                           K and V
 ```
 
-For a 7B model with 32 layers, 32 heads, d_head=128, fp16:
+`n_kv_heads` is the number of *distinct* K/V heads: equal to the query-head count under MHA, smaller under GQA, one under MQA.
+
+For a 7B model with 32 layers, 32 heads (plain MHA, so `n_kv_heads = 32`), d_head=128, fp16:
 
 ```
-per token per layer = 2 * 128 * 2 = 512 bytes
-per token (32 layers) = 16 KB
-per 32K context = 512 MB
+per token per layer = 2 * 32 * 128 * 2 = 16384 bytes (16 KB)
+per token (32 layers) = 512 KB
+per 32K context = 16 GiB
 ```
 
 For Llama 3 70B (80 layers, d_head=128, GQA with 8 KV heads):
 
 ```
 per token per layer = 2 * 8 * 128 * 2 = 4096 bytes (4 KB)
-per 32K context = 10.4 GB
+per token (80 layers) = 320 KiB
+per 32K context = 10 GiB (10.7 GB in decimal units)
 ```
 
-That 10 GB is why Llama 3 70B at 128K context needs most of a 40 GB A100 just for KV cache at batch size 1.
+That 10 GiB is why Llama 3 70B at 128K context needs most of a 40 GB A100 just for KV cache at batch size 1.
 
-**GQA is the KV-cache win.** MHA with 64 heads would be 32 GB. MLA compresses even further.
+**GQA is the KV-cache win.** The same 80-layer model with plain MHA at 64 heads would be 8× that — 80 GiB at 32K context, more than a single H100. MLA compresses even further.
 
 Drag the dimensions and watch the cache size move. Push the sequence length or batch up and see how fast it blows past a single GPU:
 
@@ -174,7 +177,9 @@ Bit-identical output to `softmax(qK) V` in one shot, but at any time the working
 
 ### Step 3: compare naive vs cached decoding on 100-token generation
 
-Count attention operations. Naive: `O(N²)` = 5050. Cached: `O(N)` = 100. The code prints both.
+Count the K/V projections — the work the cache actually removes. Without a cache every step re-derives K and V for the whole prefix: `1 + 2 + ... + 100` = `O(N²)` = 5050. With a cache each step projects exactly one new token: `O(N)` = 100. The code prints both, plus a check that the two decoders emit identical outputs.
+
+(The per-step *score* work is unchanged — a query still attends to the whole prefix either way. The cache buys you the prefix's K, V, and the hidden states behind them, not the attention itself.)
 
 ## Use It
 

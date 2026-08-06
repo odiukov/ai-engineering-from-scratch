@@ -29,15 +29,15 @@ Audio at 16 kHz. Clip/pad to 30 seconds. Compute log-mel spectrogram: 80 mel bin
 
 ### Step 2 — convolutional stem
 
-Two Conv1D layers with kernel 3 and stride 2 reduce the 3,000 frames to 1,500. Halves sequence length without adding a lot of parameters.
+Two Conv1D layers with kernel 3, both padded to preserve length: the first has stride 1, the second has stride 2. Only the second downsamples, so 3,000 frames become 1,500. Halves sequence length without adding a lot of parameters.
 
 ### Step 3 — encoder
 
-A 24-layer (for large) transformer encoder over 1,500 timesteps. Sinusoidal positional encoding, self-attention, GELU FFN. Produces 1,500 × 1,280 hidden states.
+A 32-layer (for large / large-v3) transformer encoder over 1,500 timesteps. Sinusoidal positional encoding, self-attention, GELU FFN. Produces 1,500 × 1,280 hidden states. (24 layers with d_model 1024 is the *medium* config — see the size table below.)
 
 ### Step 4 — decoder
 
-A 24-layer transformer decoder. It autoregressively produces tokens from a BPE vocabulary that is a superset of GPT-2's with a few audio-specific special tokens.
+A 32-layer transformer decoder — same depth as the encoder for every Whisper size except turbo, which keeps the 32-layer encoder and cuts the decoder to 4. It autoregressively produces tokens from a BPE vocabulary that is a superset of GPT-2's with a few audio-specific special tokens.
 
 ### Step 5 — task tokens
 
@@ -169,7 +169,7 @@ See `outputs/skill-asr-configurator.md`. The skill picks an ASR model, decoding 
 
 ## Exercises
 
-1. **Easy.** Run `code/main.py`. Confirm the frame count for a 1-second signal at 16 kHz with 10 ms hop is ~100 frames. For 30 seconds: ~3,000 frames.
+1. **Easy.** Run `code/main.py`. Confirm the frame count for a 1-second signal at 16 kHz with a 400-sample window and 160-sample hop is 98 frames, not 100: the last full window must fit inside the signal, so you get `(n - frame_size) // hop + 1`, not `n // hop`. For 30 seconds the same formula gives 2,998 rather than a round 3,000 — that two-frame gap is exactly why `pad_or_clip` exists: Whisper's encoder expects a fixed 3,000-frame input, so the real implementation pads the signal before framing and we pad the frame list after.
 2. **Medium.** Build the full log-mel spectrogram using `numpy.fft`. Verify 80 mel bins match `librosa.feature.melspectrogram(n_mels=80)` within numerical error.
 3. **Hard.** Implement streaming inference: chunk audio into 10 s windows with 2 s overlap, run Whisper on each chunk, merge transcripts. Measure word-error rate vs single-pass on a 5-minute podcast sample.
 

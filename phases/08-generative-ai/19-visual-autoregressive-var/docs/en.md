@@ -3,13 +3,13 @@
 > Diffusion models sample iteratively in time (denoising steps). VAR samples iteratively in scale — it predicts a 1x1 token, then 2x2, then 4x4, up to the final resolution, each scale conditioning on the previous. The 2024 paper showed VAR matches GPT-style scaling laws for image generation and beats DiT at the same compute budget. This lesson builds the core mechanism.
 
 **Type:** Build
-**Languages:** Python (with PyTorch)
+**Languages:** Python (stdlib + numpy)
 **Prerequisites:** Phase 7 Lesson 03 (Multi-Head Attention), Phase 8 Lesson 06 (DDPM)
 **Time:** ~90 minutes
 
 ## The Problem
 
-Autoregressive generation dominated language modeling because it scales predictably: more compute, more parameters, lower perplexity, better outputs. Image generation had two main AR attempts before 2024: PixelRNN/PixelCNN (pixel-by-pixel) and DALL-E 1 / Parti / MuseGAN (token-by-token on VQ-VAE codes).
+Autoregressive generation dominated language modeling because it scales predictably: more compute, more parameters, lower perplexity, better outputs. Image generation had two main AR attempts before 2024: PixelRNN/PixelCNN (pixel-by-pixel) and DALL-E 1 / Parti / Make-A-Scene (token-by-token on VQ-VAE codes).
 
 Both suffered from a generation-order problem. Pixels and tokens are arranged in a 2D grid, but the AR model has to visit them in a 1D raster order. An early corner pixel has no idea what the image eventually becomes. Generation quality scaled worse than GPT-on-text and never reached diffusion-model quality at matched compute.
 
@@ -50,7 +50,7 @@ Input sequence structure:
 [START, z_1 tokens, z_2 tokens, z_3 tokens, ..., z_K tokens]
 ```
 
-Position embeddings encode both scale index and spatial position within the scale. Attention is causal in scale order: token at scale k, position (i, j) can attend to all tokens at scales 1..k and to tokens at scale k itself that come earlier in whatever intra-scale order is used (VAR uses fixed positional attention with no intra-scale causality — all positions within a scale are predicted in parallel).
+Position embeddings encode both scale index and spatial position within the scale. Attention is causal in scale order only: a token being predicted at scale k, position (i, j), attends to **all** tokens of scales 1..k-1 and to **none** of the tokens at scale k itself. There is no intra-scale causality and no intra-scale ordering — every position of scale k is predicted in the same forward pass, in parallel, from exactly the same context. (`code/main.py` prints this: scale k attends to `sum(s*s for s in SCALES[:k])` prior tokens.)
 
 Training loss: at each scale k, predict the tokens z_k given all prior-scale tokens. Cross-entropy loss on the discrete VQ codes. Same structure as GPT except the "sequence" is now scale-structured.
 
@@ -127,7 +127,7 @@ This lesson produces `outputs/skill-var-tokenizer-designer.md` — a skill for d
 | Multi-scale VQ tokenizer | "Residual VQ" | VQ-VAE that produces K token grids of increasing resolution, with decoder summing all scales |
 | Scale k | "Pyramid level k" | One of K resolution levels, from 1x1 at k=1 up to (H/p)x(W/p) at k=K |
 | Parallel-within-scale | "One forward per scale" | All tokens at scale k are predicted in one transformer pass, not autoregressively |
-| Causal-across-scales | "Scale-ordered attention" | Token at scale k can attend to all of scales 1..k but not scales k+1..K |
+| Causal-across-scales | "Scale-ordered attention" | Token at scale k can attend to all of scales 1..k-1, but not to scale k itself nor to scales k+1..K |
 | Residual VQ | "Additive tokenization" | Each scale's tokens encode the residual left by lower scales; decoder sums all scale embeddings |
 | VAR scaling law | "Image GPT scaling" | FID follows a predictable power law in compute, like language models' perplexity |
 | HART | "Hybrid VAR + text" | Text-conditional VAR variant combining MaskGIT-style iterative decoding with VAR's scale structure |

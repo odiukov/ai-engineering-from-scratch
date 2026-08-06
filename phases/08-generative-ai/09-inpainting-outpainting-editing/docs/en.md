@@ -88,7 +88,9 @@ def inpaint_step(x_t, mask, clean_image, alpha_bars, t, rng):
     # ...then run the normal reverse step on x_t
 ```
 
-This is the naive approach and it works on toy 1-D data. Real image inpainting uses the 9-channel input because texture coherence matters more.
+**This is exactly the naive approach the section above calls wrong — and on this toy it is still enough.** Be clear about why, or you will draw the wrong conclusion from the output. Here the only thing the pinned dims have to communicate is *which cluster we are in* (a single global bit), the masked dims have no neighbours to be continuous with, and there is no such thing as a "seam" in 5 unordered scalars. So the reinjected context carries all the information the denoiser needs, and the filled dims land on the right cluster.
+
+On images none of that holds. The pinned pixels must agree with the generated ones at the mask boundary *pixel by pixel* — matching texture, grain, lighting gradient and edge continuity — and the model never sees the clean context, only a re-noised copy of it that is destroyed at high `t`, exactly when the global layout is being decided. The denoiser therefore commits to content that does not line up with its surroundings, and clamping the outside back in at the end leaves the visible seam. That is why real inpainting feeds the clean encoded source and the mask as extra input channels (the 9-channel U-Net), or re-noises periodically as RePaint does. Read the toy's "coherent with the surroundings" as "picked the right cluster", not "seamless".
 
 ### Step 4: outpainting
 

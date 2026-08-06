@@ -84,9 +84,15 @@ transformer-residual
 See `code/main.py`. The function `create_mlm_batch` takes a list of token IDs, a vocab size, and a mask probability. Returns input IDs (with masks applied) and labels (only at masked positions, -100 elsewhere — PyTorch's ignore index convention).
 
 ```python
+import random
+
+MASK_ID = 0        # in this toy vocab, id 0 is reserved for [MASK]
+IGNORE_INDEX = -100
+
 def create_mlm_batch(tokens, vocab_size, mask_prob=0.15, rng=None):
+    rng = rng or random.Random(0)   # seeded, so the default run is reproducible
     input_ids = list(tokens)
-    labels = [-100] * len(tokens)
+    labels = [IGNORE_INDEX] * len(tokens)
     for i, t in enumerate(tokens):
         if rng.random() < mask_prob:
             labels[i] = t
@@ -99,9 +105,11 @@ def create_mlm_batch(tokens, vocab_size, mask_prob=0.15, rng=None):
     return input_ids, labels
 ```
 
+`code/main.py` adds one detail this snippet skips: it never selects `[MASK]`, `[CLS]` or `[SEP]` for prediction.
+
 ### Step 2: run MLM prediction on a tiny corpus
 
-Train a 2-layer encoder + MLM head on a vocabulary of 20 words, 200 sentences. No gradient — we do forward-pass sanity checks. Full training needs PyTorch.
+Wire a 2-layer encoder + MLM head over a vocabulary of 20 words. No gradients anywhere in this lesson — we only do forward-pass and distribution sanity checks. Real training needs PyTorch (see the Hard exercise).
 
 ### Step 3: compare mask types
 
@@ -109,7 +117,7 @@ Show how the three-way rule keeps the model usable without `[MASK]`. Predict on 
 
 ### Step 4: fine-tune head
 
-Replace the MLM head with a classification head on a toy sentiment dataset. Only the head trains; the encoder is frozen. This is the pattern every BERT application follows.
+Swap the MLM head for a classification head over a toy sentiment dataset and check the shapes line up — still forward-pass only, same as Step 2. The pattern this stands in for is the one every BERT application follows: freeze (or barely move) the encoder, train the head. Doing the actual training is the Hard exercise below.
 
 ## Use It
 

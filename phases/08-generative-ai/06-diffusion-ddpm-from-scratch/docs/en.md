@@ -23,7 +23,7 @@ Sohl-Dickstein et al. (2015) had a theoretical answer: define a Markov chain `q(
 q(x_t | x_0) = N( sqrt(α̅_t) · x_0,  (1 - α̅_t) · I )
 ```
 
-where `α̅_t = ∏_{s=1..t} (1 - β_s)` for a schedule of `β_t`. Pick `β_t` from 1e-4 to 0.02 linearly over T=1000 steps and `x_T` is approximately `N(0, I)`.
+where `α̅_t = ∏_{s=1..t} (1 - β_s)` for a schedule of `β_t`. Pick `β_t` from 1e-4 to 0.02 linearly over T=1000 steps and `x_T` is approximately `N(0, I)` (`α̅_T ≈ 4e-5`, so `x_T = 0.006·x_0 + 1.00·ε`). The β range and `T` are tied together: keeping 1e-4..0.02 but shrinking `T` leaves `α̅_T` far from zero. Our toy runs `T=40`, where `α̅_T ≈ 0.667` — `x_T = 0.82·x_0 + 0.58·ε`, i.e. still two-thirds signal. `code/main.py` prints this number. If you shorten `T` and want `x_T` to actually be noise, scale the top of the range too (`β_end ≈ 0.02 · 1000/T`).
 
 **Reverse process `p_θ`.** Learn a neural net `ε_θ(x_t, t)` that predicts the noise that was added. Given `x_t`, denoise by:
 

@@ -79,5 +79,5 @@
   <text x="660" y="408" text-anchor="middle" class="caption">v2: weight demodulation, no droplets</text>
   <text x="660" y="428" text-anchor="middle" class="caption">v3: alias-free conv, no texture sticking</text>
   <text x="660" y="448" text-anchor="middle" class="caption">XL: conditional ImageNet</text>
-  <text x="660" y="468" text-anchor="middle" class="caption">R3GAN (2024): minimal recipe, 20x fewer params</text>
+  <text x="660" y="468" text-anchor="middle" class="caption">R3GAN (2025): minimal recipe, 20x fewer params</text>
 </svg>

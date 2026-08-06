@@ -2,7 +2,7 @@ import math
 import random
 
 
-def sin_embed(t, T, dim=8):
+def sin_embed(t, dim=8):
     out = []
     half = dim // 2
     for i in range(half):
@@ -142,7 +142,7 @@ def main():
         z_t = math.sqrt(alpha_bars[t]) * z0 + math.sqrt(1 - alpha_bars[t]) * eps
         use_c = NULL_CLASS if rng.random() < 0.1 else c
         c_emb = one_hot(use_c, num_classes_inc_null)
-        t_emb = sin_embed(t, T, t_dim)
+        t_emb = sin_embed(t, t_dim)
         out, cache = forward([z_t], t_emb, c_emb, net)
         grads = backward([eps], out, cache, net)
         apply(net, grads, 0.01)
@@ -152,7 +152,7 @@ def main():
     def sample(c_target, w):
         z = rng.gauss(0, 1)
         for t in range(T - 1, -1, -1):
-            t_emb = sin_embed(t, T, t_dim)
+            t_emb = sin_embed(t, t_dim)
             eps_c, _ = forward([z], t_emb, one_hot(c_target, num_classes_inc_null), net)
             eps_u, _ = forward([z], t_emb, one_hot(NULL_CLASS, num_classes_inc_null), net)
             eps_cfg = (1 + w) * eps_c[0] - w * eps_u[0]

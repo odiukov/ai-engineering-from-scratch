@@ -67,11 +67,13 @@ score-matching
 ### Step 1: synthetic audio tokens
 
 ```python
-def make_tokens(style, length, vocab_size, rng):
-    if style == 0:  # "speech-like": alternating
-        return [i % vocab_size for i in range(length)]
-    # "music-like": ramp
-    return [(i * 3) % vocab_size for i in range(length)]
+VOCAB = 16  # module-level codebook size
+
+def make_tokens(style, length, rng):
+    if style == 0:  # "speech-like": alternating, with a bit of jitter
+        return [(i + rng.randint(0, 1)) % VOCAB for i in range(length)]
+    # "music-like": ramp, same jitter
+    return [(i * 3 + rng.randint(0, 1)) % VOCAB for i in range(length)]
 ```
 
 ### Step 2: train a tiny token predictor
@@ -134,6 +136,7 @@ Audio is the one output modality users expect to arrive *as it is generated*, no
 Two architectural consequences:
 
 - **Flow-matching audio models cannot stream trivially.** Stable Audio 2.5 and AudioCraft 2 render a fixed clip length in one pass. To stream, you chunk the clip and overlap boundaries — think sliding-window diffusion — adding 100-300ms of latency overhead vs a codec AR model.
+- **Codec AR models stream natively, but TPOT becomes a floor, not an average.** A token-AR generator emits codec tokens one step at a time behind a KV cache, so the vocoder can start playing after the first few tokens. The catch: averaging ≥75 tokens/sec is not enough — one 200ms stall mid-clip is an audible dropout, whereas in a text stream it is just a pause nobody notices. Production servers therefore size for 2-3× the playback token rate and cap concurrent streams per GPU, instead of maximizing batch size the way an offline image server would.
 
 If the product is "live voice chat" or "real-time music continuation", pick the codec AR path. If it is "render a 30-second clip on submit", flow-matching wins on quality and total latency.
 

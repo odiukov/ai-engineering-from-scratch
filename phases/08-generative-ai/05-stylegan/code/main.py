@@ -53,12 +53,14 @@ def stylegan_forward(w, const, synth, noise_sigma, rng, adain_on=True):
         b = synth[f"b{i}"]
         pre = add(matmul(W, h), b)
         h = [leaky(x) for x in pre]
+        # Noise first, THEN AdaIN: the normalization downstream of the noise is
+        # what keeps the noise from moving the block's mean/std (see docs).
+        if noise_sigma > 0:
+            h = [x + noise_sigma * rng.gauss(0, 1) for x in h]
         if adain_on:
             scale = sum(synth[f"scale{i}"][j] * w[j] for j in range(len(w)))
             bias = sum(synth[f"bias{i}"][j] * w[j] for j in range(len(w)))
             h = adain(h, scale, bias)
-        if noise_sigma > 0:
-            h = [x + noise_sigma * rng.gauss(0, 1) for x in h]
     return h
 
 
@@ -118,11 +120,14 @@ def main():
     for seed in range(3):
         rng_local = random.Random(seed)
         h = stylegan_forward(w_fixed, const, synth, 0.1, rng_local, adain_on=True)
-        print(f"  seed {seed}: {[f'{v:+.2f}' for v in h]}")
+        m, s = mean_std(h)
+        print(f"  seed {seed}: {[f'{v:+.2f}' for v in h]}  mean {m:+.3f} std {s:.3f}")
 
     print()
-    print("notice: with the same w, outputs vary slightly with noise seed.")
-    print("         that is the stochastic-detail vs global-style split.")
+    print("notice: with the same w, outputs vary slightly with noise seed,")
+    print("        but mean/std are identical across seeds - the last AdaIN")
+    print("        re-pins them to w. that is the stochastic-detail vs")
+    print("        global-style split.")
 
 
 if __name__ == "__main__":

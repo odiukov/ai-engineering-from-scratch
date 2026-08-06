@@ -74,16 +74,19 @@ v4-controlnet-zero
 
 `code/main.py` simulates the two mechanisms on 1-D:
 
-1. **LoRA.** A pretrained linear layer `W`. Freeze it. Train a low-rank `B @ A` such that `W + BA` matches a target linear layer. Show that `r = 1` is enough to learn a rank-1 correction perfectly.
+1. **LoRA.** A pretrained linear layer `W`. Freeze it. Train a low-rank `B @ A` such that `W + BA` matches a target linear layer. The target delta is built as a sum of 2 outer products (rank 2), so `r = 1` cannot fit it and `r = 2` matches it exactly.
 
 2. **ControlNet-lite.** A "frozen base" predictor and a "side network" that reads an extra signal. The side network's output is gated by a learnable scalar initialized to zero (our version of zero-conv). Train and watch the gate ramp up.
 
 ### Step 1: LoRA math
 
 ```python
-def lora(W, A, B, x, alpha=1.0):
-    # W is frozen; A, B are the trainable low-rank factors.
-    return [W[i][j] * x[j] for i, j in ...] + alpha * (B @ (A @ x))
+def lora_forward(W_frozen, A, B, x, alpha=1.0):
+    """Compute (W + alpha * B @ A) @ x. W is frozen; A (r×d) and B (d×r) train."""
+    base = matmul_mat_vec(W_frozen, x)          # W @ x
+    Ax = matmul_mat_vec(A, x)                   # r-dim bottleneck
+    BAx = matmul_mat_vec(B, Ax)                 # back up to d dims
+    return [base[i] + alpha * BAx[i] for i in range(len(base))]
 ```
 
 ### Step 2: zero-init side network

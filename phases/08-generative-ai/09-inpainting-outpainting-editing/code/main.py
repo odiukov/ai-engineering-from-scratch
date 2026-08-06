@@ -2,7 +2,7 @@ import math
 import random
 
 
-def sin_embed(t, T, dim=8):
+def sin_embed(t, dim=8):
     out = []
     half = dim // 2
     for i in range(half):
@@ -116,7 +116,7 @@ def train(net, alpha_bars, T, steps, lr, t_dim, d, rng):
         eps = [rng.gauss(0, 1) for _ in range(d)]
         a_bar = alpha_bars[t]
         x_t = [math.sqrt(a_bar) * x0[i] + math.sqrt(1 - a_bar) * eps[i] for i in range(d)]
-        t_emb = sin_embed(t, T, t_dim)
+        t_emb = sin_embed(t, t_dim)
         out, cache = forward(x_t, t_emb, net)
         grads = backward(eps, out, cache, net)
         apply(net, grads, lr)
@@ -125,7 +125,7 @@ def train(net, alpha_bars, T, steps, lr, t_dim, d, rng):
 def sample_unconditional(net, alphas, alpha_bars, T, t_dim, d, rng):
     x = [rng.gauss(0, 1) for _ in range(d)]
     for t in range(T - 1, -1, -1):
-        t_emb = sin_embed(t, T, t_dim)
+        t_emb = sin_embed(t, t_dim)
         eps_hat, _ = forward(x, t_emb, net)
         beta_t = 1 - alphas[t]
         mean = [(x[i] - beta_t / math.sqrt(1 - alpha_bars[t]) * eps_hat[i]) / math.sqrt(alphas[t])
@@ -145,7 +145,7 @@ def inpaint(net, alphas, alpha_bars, T, t_dim, d, clean, mask, rng):
         for i in range(d):
             if not mask[i]:
                 x[i] = math.sqrt(a_bar) * clean[i] + math.sqrt(1 - a_bar) * rng.gauss(0, 1)
-        t_emb = sin_embed(t, T, t_dim)
+        t_emb = sin_embed(t, t_dim)
         eps_hat, _ = forward(x, t_emb, net)
         beta_t = 1 - alphas[t]
         mean = [(x[i] - beta_t / math.sqrt(1 - alpha_bars[t]) * eps_hat[i]) / math.sqrt(alphas[t])
@@ -190,7 +190,9 @@ def main():
 
     print()
     print("takeaway: the filled dims match the cluster sign of the pinned dims.")
-    print("          that is why inpainting looks coherent with the surroundings.")
+    print("          reinjecting the noised context is enough to carry that one global bit.")
+    print("          it is NOT enough on images: there the mask has a boundary, and this")
+    print("          naive reinjection is what leaves seams -- hence the 9-channel U-Net.")
 
 
 if __name__ == "__main__":

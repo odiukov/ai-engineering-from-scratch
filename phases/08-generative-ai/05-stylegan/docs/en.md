@@ -21,7 +21,9 @@ The result: `W` has roughly orthogonal axes for "high-level style" (pose, identi
 
 **Mapping network.** `f: Z → W`, an 8-layer MLP. `Z = N(0, I)^512`. `W` is not forced to be Gaussian — it learns a data-adapted shape.
 
-**Synthesis network.** Starts from a learned constant `4×4×512`. Each resolution block: `upsample → conv → AdaIN(w_i) → noise → conv → AdaIN(w_i) → noise`. Resolutions double: 4, 8, 16, 32, 64, 128, 256, 512, 1024.
+**Synthesis network.** Starts from a learned constant `4×4×512`. Each resolution block: `upsample → conv → noise → AdaIN(w_i) → conv → noise → AdaIN(w_i)`. Resolutions double: 4, 8, 16, 32, 64, 128, 256, 512, 1024.
+
+Note the order: noise goes in *before* the AdaIN that follows it, exactly as in Figure 1b of the paper. This is what makes the next bullet's claim true rather than aspirational — the AdaIN downstream of the noise re-pins the feature map's mean and variance to `w`, so the noise can only redistribute detail within those statistics. Add the noise *after* the last AdaIN instead and you shift the block's output statistics by roughly `σ_noise`, which is a global change, not a stochastic one.
 
 **AdaIN.**
 
@@ -43,7 +45,7 @@ where `y_scale` and `y_bias` come from affine projections of `w`. Normalize per 
 | StyleGAN2 | 2020 | Weight demodulation replaces AdaIN (fixes droplet artifacts); skip/residual architecture; path-length regularization. |
 | StyleGAN3 | 2021 | Alias-free convolution + equivariant kernels; eliminates texture sticking to pixel grid. |
 | StyleGAN-XL | 2022 | Class-conditional, 1024², ImageNet. |
-| R3GAN | 2024 | Rebrands with stronger reg; closes gap to diffusion on FFHQ-1024 with 20x fewer params. |
+| R3GAN | 2025 | Rebrands with stronger reg; closes gap to diffusion on FFHQ-1024 with 20x fewer params. |
 
 In 2026 StyleGAN3 remains the default for (a) narrow-domain photorealism at high FPS, (b) few-shot domain adaptation (train on a new dataset with 100 images, freeze mapping), (c) inversion-based editing (find the `w` that reconstructs a real photo, then edit that `w`). For open-domain text-to-image, it is not the tool — diffusion is.
 
@@ -70,10 +72,12 @@ def mapping(z, M):
 ```python
 def adain(x, w_scale, w_bias):
     mu = mean(x)
-    sd = std(x)
-    x_norm = [(xi - mu) / (sd + 1e-8) for xi in x]
+    sd = math.sqrt(var(x) + 1e-8)   # eps goes UNDER the sqrt
+    x_norm = [(xi - mu) / sd for xi in x]
     return [w_scale * xi + w_bias for xi in x_norm]
 ```
+
+The `1e-8` belongs under the square root, matching `mean_std` in `code/main.py`. Adding it to `sd` afterwards is a *different* guard, not a cosmetic variant: under the root the divisor is floored at `sqrt(1e-8) = 1e-4`, while `sd + 1e-8` floors it at `1e-8`. PyTorch's norm layers put eps under the root, so match that — otherwise a constant (zero-variance) feature map divides by `1e-8` instead of `1e-4` and its activations come out 10⁴× larger than you expect.
 
 Per-feature-map scale and bias come from `w` via linear projection.
 
@@ -145,4 +149,4 @@ Two operational consequences:
 - [Karras et al. (2021). Alias-Free Generative Adversarial Networks](https://arxiv.org/abs/2106.12423) — StyleGAN3.
 - [Tov et al. (2021). Designing an Encoder for StyleGAN Image Manipulation](https://arxiv.org/abs/2102.02766) — e4e inversion.
 - [Sauer et al. (2022). StyleGAN-XL: Scaling StyleGAN to Large Diverse Datasets](https://arxiv.org/abs/2202.00273) — StyleGAN-XL.
-- [Huang et al. (2024). R3GAN: The GAN is dead; long live the GAN!](https://arxiv.org/abs/2501.05441) — modern minimal GAN recipe.
+- [Huang et al. (2025). R3GAN: The GAN is dead; long live the GAN!](https://arxiv.org/abs/2501.05441) — modern minimal GAN recipe.

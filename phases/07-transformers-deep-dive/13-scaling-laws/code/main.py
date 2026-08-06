@@ -17,7 +17,7 @@ def chinchilla_loss(N, D, A=A, B=B_CONST, alpha=ALPHA, beta=BETA, E=E_CONST):
     return A / N ** alpha + B / D ** beta + E
 
 
-def compute_optimal(C_flops, n_grid=200):
+def compute_optimal(C_flops, n_grid=4001):
     """Find (N, D) minimizing loss subject to 6ND = C by grid search over log N."""
     # 6ND = C => D = C / (6N)
     log_N_min = math.log10(1e5)
@@ -50,10 +50,13 @@ def main():
         N, D, L = compute_optimal(C)
         print(f"  {C:>10.0e}   {pretty(N):>9}   {pretty(D):>9}   {D / N:>6.1f}   {L:>6.3f}")
     print()
-    print("Hoffmann 2022 published D/N ≈ 20 as the headline. with the fitted")
-    print("constants above (alpha=0.34, beta=0.28) the optimum D/N grows with C.")
-    print("real scaling-law fits place optimum around 20 for the compute range")
-    print("Chinchilla studied (~1e22 to 1e23 FLOPs); extrapolation drifts.")
+    print("Hoffmann 2022 published D/N ≈ 20 as the headline, but that number came")
+    print("from their IsoFLOP sweeps, not from these parametric constants. with")
+    print("alpha=0.34, beta=0.28 the exponents are 0.452 (N) and 0.548 (D), so the")
+    print("optimum D/N is not constant -- it grows like C^0.097, as the table shows.")
+    print("Besiroglu et al. 2024 refit the same data (alpha≈0.35, beta≈0.37); with")
+    print("near-symmetric exponents D/N becomes nearly compute-independent, which is")
+    print("the version that actually supports the ≈20 headline.")
     print()
 
     print("=== over-training cost (Llama-style) ===")

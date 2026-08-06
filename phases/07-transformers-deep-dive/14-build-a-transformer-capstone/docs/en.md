@@ -69,9 +69,15 @@ shift-by-one cross-entropy            ◀── Lesson 07
 
 ### Target metrics
 
-On a Mac M2 laptop, a 4-layer, 4-head, d_model=128 GPT trained for 2,000 steps on `tinyshakespeare.txt`:
+`code/main.py` runs in two modes, and they have very different expectations. Know which one you are looking at before you judge a loss number.
 
-- Training loss converges from ~4.2 (random) to ~1.5 in about 6 minutes.
+**Default mode — no download, smoke test.** Out of the box the script trains a 3-layer, 4-head, `d_model=64`, `block_size=64` GPT (~155K parameters) for 500 steps on a ~1 KB Shakespeare excerpt embedded in the file itself. That excerpt has 46 distinct characters, so random-init loss is `ln(46) ≈ 3.83`, not 4.2. It finishes in well under a minute on CPU.
+
+What this mode proves: the forward pass, the causal mask, the shift-by-one loss, the optimizer, and the sampler are all wired up correctly. What it cannot prove: anything about language. There are ~900 training characters against 155K parameters, so training loss drops quickly while validation loss stalls and then climbs. The sample will have plausible capitalisation, `NAME:` line shapes, and no real words. Watching the train/val gap open up is the actual lesson of this mode.
+
+**Full mode — the numbers this lesson quotes.** Drop a copy of `tinyshakespeare.txt` (~1.1 MB, 65 distinct characters) next to `code/main.py` — the script picks it up automatically if it is there — and raise the config to `n_layers=4`, `d_model=128`, `block_size=128`, `max_steps=2000`. That is the ~800K-parameter model, the same one the `nano` row of the parameter table describes. On a Mac M2 laptop:
+
+- Training loss converges from ~4.2 (random over 65 characters, `ln(65) ≈ 4.17`) to ~1.5 in about 6 minutes.
 - Sampled output looks Shakespeare-shaped: archaic words, line breaks, proper names like "ROMEO:" emerge.
 - Val loss (held-out final 10% of text) tracks training loss closely; no overfitting at this size/budget.
 
@@ -83,7 +89,7 @@ n5-block-stack
 
 This lesson uses PyTorch. Install `torch` (CPU build is fine). See `code/main.py`. The script handles:
 
-- Downloading `tinyshakespeare.txt` if missing (or reading a local copy).
+- Reading `code/tinyshakespeare.txt` if you put it there, and otherwise falling back to the ~1 KB excerpt embedded in the script. It does not download anything.
 - Byte-level char tokenizer.
 - Train/val split at 90/10.
 - Training loop with bf16 autocast on supported hardware.
@@ -100,15 +106,15 @@ encode = lambda s: [stoi[c] for c in s]
 decode = lambda xs: "".join(itos[x] for x in xs)
 ```
 
-65 unique characters. Tiny vocabulary. Fits a 4-byte vocab_size. No BPE, no tokenizer drama.
+65 unique characters in the full corpus (46 in the embedded excerpt). Tiny vocabulary either way. No BPE, no tokenizer drama.
 
 ### Step 2: model
 
-See `code/main.py`. The block is textbook from Lesson 05 — pre-norm, RMSNorm, SwiGLU, causal MHA. Parameter count for 4/4/128: ~800K.
+See `code/main.py`. The block is textbook from Lesson 05 — pre-norm, RMSNorm, SwiGLU, causal MHA. Parameter count for 4/4/128: ~800K. The default 3/4/64 config the script actually ships with is ~155K.
 
 ### Step 3: training loop
 
-Get a random batch of length-256 token windows. Forward. Shift-by-one cross-entropy. Backward. AdamW step. Log. Repeat.
+Get a random batch of `block_size`-long token windows (64 by default, 128 in the full run). Forward. Shift-by-one cross-entropy. Backward. AdamW step. Log. Repeat.
 
 ```python
 for step in range(max_steps):
@@ -123,11 +129,11 @@ for step in range(max_steps):
 
 ### Step 4: sample
 
-Given a prompt, repeatedly forward, sample from top-p logits, append, and continue. Stop after 500 tokens.
+Given a prompt, repeatedly forward, sample from top-k logits, append, and continue. The script stops after 200 tokens.
 
 ### Step 5: read the output
 
-After 2,000 steps:
+After 2,000 steps in full mode (the 1.1 MB corpus, 4/4/128):
 
 ```
 ROMEO:
@@ -137,6 +143,8 @@ The chief that well shame and hath been his friends,
 ```
 
 Not Shakespeare. But Shakespeare-shaped. A clear win for ~800K parameters and 6 minutes on a laptop.
+
+The default 500-step run on the embedded 1 KB excerpt does *not* reach this. It reaches "characters in roughly the right places" — capitalisation, `NAME:` shapes, line breaks — and no real vocabulary. That is what 900 training characters buys you, and it is the correct result for that budget.
 
 ## Use It
 
@@ -154,7 +162,7 @@ See `outputs/skill-transformer-review.md`. The skill reviews a transformer-from-
 
 ## Exercises
 
-1. **Easy.** Run `code/main.py`. Verify your trained model's final-step validation loss is under 2.0. Change `max_steps` from 2,000 to 5,000 — does val loss keep improving?
+1. **Easy.** Run `code/main.py` as shipped. Confirm training loss falls well below the random baseline `ln(46) ≈ 3.83`, and that validation loss bottoms out and then starts *rising* — you have overfitted 900 characters, exactly as predicted in Target metrics. Then raise `max_steps` from 500 to 2,000 and confirm the train/val gap gets worse, not better. Under 2.0 *validation* loss is not reachable on the embedded excerpt at any step count; to get there you need the full 1.1 MB `tinyshakespeare.txt` and the 4/4/128 config from Target metrics. If you have the corpus, do that run too and check val loss lands near 1.5.
 2. **Medium.** Replace learned positional embeddings with RoPE. Apply the rotation to Q and K inside `MultiHeadAttention`. Train and verify val loss is at least as low.
 3. **Medium.** Implement a KV cache in the sampling loop. Generate 500 tokens with and without cache. Wall-clock should improve by 5–20× on a laptop.
 4. **Hard.** Add a second head to the model that predicts the next-plus-one token (MTP — Multi-Token Prediction from DeepSeek-V3). Train jointly. Does it help?

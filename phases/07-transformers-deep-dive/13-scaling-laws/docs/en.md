@@ -40,15 +40,19 @@ L(N, D) = A / N^α + B / D^β + E
 - `E ≈ 1.69`, the irreducible loss ceiling.
 - `A ≈ 406`, `B ≈ 411`.
 
-Two terms trade against each other as you scale. Take the derivative w.r.t. `N` at fixed compute (C = 6ND) and solve:
+Two terms trade against each other as you scale. Substitute `D = C / (6N)`, take the derivative w.r.t. `N`, set it to zero:
 
 ```
-N_opt ≈ 0.6 × (C/6)^0.5
-D_opt ≈ 0.6 × (C/6)^0.5
-D_opt / N_opt ≈ 20
+N_opt = [(α·A) / (β·B)]^(1/(α+β)) × (C/6)^(β/(α+β))  ≈ 1.34 × (C/6)^0.452
+D_opt = (C/6) / N_opt                               ≈ 0.74 × (C/6)^0.548
+D_opt / N_opt                                       ≈ 0.55 × (C/6)^0.097
 ```
 
-Compute-optimal: 20 tokens per parameter.
+The two exponents must sum to 1 — that is just `C = 6ND` — so they are only equal when `α = β`. With the paper's reported `α = 0.34`, `β = 0.28` they are *not* equal, and tokens-per-parameter therefore drifts upward with compute: about 40 at `C = 10^20`, 63 at `10^22`, 153 at `10^26`. `code/main.py` solves the same optimization numerically and prints exactly this drift.
+
+So where does "20 tokens per parameter" come from? It is an **empirical rule of thumb**, not a consequence of the equation above. Hoffmann et al. read it off their IsoFLOP sweeps in the neighbourhood of Chinchilla's own compute budget (~10^23 FLOPs, 70B params, 1.4T tokens) — and near that scale a fixed ratio is a fine approximation. Besiroglu et al. (2024) replicated the fit and showed that the parametric constants as published are internally inconsistent with the ≈20 rule; their refit gives `α ≈ 0.35`, `β ≈ 0.37`, which are near-symmetric, push both exponents close to 0.5, and make tokens-per-parameter nearly compute-independent — the version that actually supports the headline.
+
+Practical reading: use ≈20 tokens per parameter as the Chinchilla-scale rule of thumb. Do not extrapolate it across six orders of magnitude of compute without re-fitting.
 
 ### Why over-training anyway
 
@@ -103,7 +107,7 @@ Plot `L` as a contour over `(N, D)` at fixed `C = 6ND`. Find the minimum.
 
 ### Step 2: compute-optimal frontier
 
-For compute budgets from `1e17` to `1e25` FLOPs, find `(N, D)` that minimize loss subject to `6ND = C`. Verify the ratio `D/N ≈ 20`.
+For compute budgets from `1e18` to `1e25` FLOPs, find `(N, D)` that minimize loss subject to `6ND = C`. Do **not** expect the `D/N` column to sit at 20 — it runs from ~26 to ~122 across that sweep. That drift is the point: it is the numerical confirmation of the `C^0.097` term derived in the Hoffmann law section above. If your grid search prints a flat 20, your solver is wrong.
 
 ### Step 3: over-training cost
 
@@ -154,6 +158,7 @@ See `outputs/skill-training-budget-estimator.md`. The skill picks `(N, D, hours,
 
 - [Kaplan et al. (2020). Scaling Laws for Neural Language Models](https://arxiv.org/abs/2001.08361) — the first scaling law paper; undertrained.
 - [Hoffmann et al. (2022). Training Compute-Optimal Large Language Models](https://arxiv.org/abs/2203.15556) — Chinchilla.
+- [Besiroglu et al. (2024). Chinchilla Scaling: A Replication Attempt](https://arxiv.org/abs/2404.10102) — shows the published parametric constants are inconsistent with the ≈20-tokens-per-parameter headline, and refits them to `α ≈ 0.35`, `β ≈ 0.37`. Read this right after the Hoffmann law section.
 - [Schaeffer et al. (2023). Are Emergent Abilities of Large Language Models a Mirage?](https://arxiv.org/abs/2304.15004) — emergence as measurement artifact.
 - [Sardana, Frankle (2024). Beyond Chinchilla-Optimal: Accounting for Inference in Language Model Scaling Laws](https://arxiv.org/abs/2401.00448) — why Llama's over-training is right for its workload.
 - [Jordan et al. (2024). Muon: An optimizer for hidden layers in neural networks](https://kellerjordan.github.io/posts/muon/) — 2× compute multiplier.

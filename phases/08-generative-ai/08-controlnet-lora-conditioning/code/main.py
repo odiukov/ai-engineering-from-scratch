@@ -82,17 +82,18 @@ def main():
     rng = random.Random(17)
     d = 6
     W_frozen = randn_matrix(d, d, rng, scale=0.5)
-    delta = rng.choice([1, 2, 3])
+    true_rank = 2                      # build the target delta as a sum of `true_rank` outer products
     delta_matrix = zeros(d, d)
-    u = [rng.gauss(0, 1) for _ in range(d)]
-    v = [rng.gauss(0, 1) for _ in range(d)]
-    for i in range(d):
-        for j in range(d):
-            delta_matrix[i][j] = u[i] * v[j] * 0.5
+    for _ in range(true_rank):
+        u = [rng.gauss(0, 1) for _ in range(d)]
+        v = [rng.gauss(0, 1) for _ in range(d)]
+        for i in range(d):
+            for j in range(d):
+                delta_matrix[i][j] += u[i] * v[j] * (0.5 / true_rank)
     W_target = [[W_frozen[i][j] + delta_matrix[i][j] for j in range(d)] for i in range(d)]
 
-    print("=== LoRA: approximate a known rank-1 delta ===")
-    for r in [1, 2, 4]:
+    print(f"=== LoRA: approximate a known rank-{true_rank} delta ===")
+    for r in [1, 2, 3, 4]:
         err = train_lora(W_frozen, W_target, r=r, rng=random.Random(2 * r))
         print(f"  rank r={r}: residual MSE {err:.5f}")
 

@@ -56,7 +56,7 @@ def encode(x, enc):
     return mu, log_sigma2
 ```
 
-`log σ²` instead of `σ` so the network output is unconstrained (softplus of σ is a trap — gradients die at σ ≈ 0).
+`log σ²` instead of `σ` so the network output is unconstrained: every real number is a valid `log σ²`, whereas a head that emits `σ` directly needs a positivity constraint bolted on. A softplus head is a perfectly safe way to impose that constraint — the real argument for `log σ²` is the loss, not the activation: in these coordinates the Gaussian KL is closed-form with a trivially simple gradient, `∂KL/∂(log σ²_i) = (σ_i² - 1)/2`, and `σ = exp(0.5·log σ²)` can never hit exactly 0 and divide-by-zero the reparameterization.
 
 ### Step 2: reparameterize and decode
 
@@ -97,7 +97,7 @@ That is the generative model. Five lines.
 - **Posterior collapse.** KL term drives `q(z|x) → N(0, I)` so aggressively that `z` carries no info about `x`. Fix: β-annealing (start β=0, ramp to 1), free bits, or skip the KL on inactive dimensions.
 - **Blurry samples.** The Gaussian decoder likelihood implies MSE reconstruction, which is Bayes-optimal for L2 (the mean) — the mean of a set of plausible digits is a fuzzy digit. Fix: discrete decoder (VQ-VAE, NVAE), or use the VAE only as an encoder and stack diffusion on the latents (this is what Stable Diffusion does).
 - **β too large, too early.** See posterior collapse. Start at β≈0.01 and ramp.
-- **Latent dim too small.** 16-D works for MNIST, 256-D for ImageNet 256², 2048-D for ImageNet 1024². Stable Diffusion's VAE compresses 512×512×3 → 64×64×4 (32x downsample factor in spatial area, 32x in channels).
+- **Latent dim too small.** 16-D works for MNIST, 256-D for ImageNet 256², 2048-D for ImageNet 1024². Stable Diffusion's VAE compresses 512×512×3 → 64×64×4: 8× downsample per spatial axis, so **64× fewer spatial positions** (`512² = 262,144 → 64² = 4,096`) and **48× fewer numbers in the tensor** once you count channels (`786,432 → 16,384`). Note that channels go 3 → 4, i.e. *up* — all of the compression is spatial, which is also why the diffusion U-Net gets ~64× cheaper per step (conv and attention cost tracks positions, not the channel change). Lesson 07 uses the same three numbers.
 
 ## Use It
 

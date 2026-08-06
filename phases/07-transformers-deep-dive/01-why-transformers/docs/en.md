@@ -62,7 +62,7 @@ We time both on sequences up to 100,000 elements. The RNN version is O(N) and a 
 
 ### Step 2: count theoretical operations
 
-Both algorithms do N adds. The difference is *dependency depth*: how many operations must happen sequentially before the next can start. RNN depth = N. Attention depth = log(N) with a tree reduction, or 1 with a parallel scan. Depth, not op count, decides GPU time.
+Both algorithms do N adds. The difference is *dependency depth*: how many operations must happen sequentially before the next can start. RNN depth = N. Attention depth = log(N) with a binary tree reduction — or 1 if you let a single op sum all N inputs at once (unbounded fan-in). A parallel prefix scan (Hillis-Steele) is also log(N) deep, not 1: each of its log(N) rounds needs the previous round's output. Depth, not op count, decides GPU time.
 
 ### Step 3: empirical scaling on long sequences
 

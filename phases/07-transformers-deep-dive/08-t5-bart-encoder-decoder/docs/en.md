@@ -102,13 +102,19 @@ See `code/main.py`. We implement T5-style span corruption for a toy corpus — t
 ### Step 1: span corruption
 
 ```python
+DEFAULT_SEED = 0  # seeded default: corruption must be reproducible for Step 2
+
 def corrupt_spans(tokens, mask_rate=0.15, mean_span=3.0, rng=None):
-    """Pick spans summing to ~mask_rate of tokens. Return (corrupted_input, target)."""
+    """Pick spans summing to exactly mask_rate of tokens. Return (corrupted_input, target)."""
+    if rng is None:
+        rng = random.Random(DEFAULT_SEED)   # not random.Random() — that is unseeded
     n = len(tokens)
-    n_mask = max(1, int(n * mask_rate))
+    n_mask = max(1, int(round(n * mask_rate)))
     n_spans = max(1, int(round(n_mask / mean_span)))
     ...
 ```
+
+Two details that are easy to get wrong. First, `n_spans` is a *target*, not a cap: a span that runs into an already-masked neighbour gets truncated, so you keep placing spans until the whole `n_mask` budget is spent — otherwise the realized mask fraction silently lands below `mask_rate`. Second, default to a *seeded* `random.Random(DEFAULT_SEED)`; an unseeded default makes the round-trip check in Step 2 unreproducible, which is the one thing this lesson's build step relies on.
 
 The target format is the T5 convention: `<sent0> span0 <sent1> span1 ...`. The corrupted input interleaves unchanged tokens with the sentinel tokens at span locations.
 

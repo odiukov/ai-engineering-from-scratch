@@ -87,9 +87,16 @@ def pos_2d(H, W, d_model):
     return pe
 
 
-def param_count_vit(d_model, n_layers, n_heads, ffn_expansion, num_patches, num_classes):
-    """Approximate ViT parameter count (patch embed + transformer + head)."""
-    # Patch embedding: (patch_flat_size, d_model) — ignore patch_size here, caller scales.
+def param_count_vit(d_model, n_layers, ffn_expansion, num_patches, num_classes,
+                    patch_size, in_channels=3):
+    """Approximate ViT parameter count: patch embed + transformer + head.
+
+    No `n_heads` argument on purpose: Q/K/V/O are each d_model x d_model no
+    matter how many heads that matrix is split across, so the head count does
+    not move the parameter total.
+    """
+    # Patch embedding: (patch_size^2 * in_channels, d_model) + bias
+    patch_embed = patch_size * patch_size * in_channels * d_model + d_model
     # Self-attention per layer: 4 * d_model^2 (Q,K,V,O)
     # FFN per layer: 2 * d_model * (ffn_expansion * d_model)
     # Norms: 2 * d_model per layer (LayerNorm gamma+beta)
@@ -100,7 +107,7 @@ def param_count_vit(d_model, n_layers, n_heads, ffn_expansion, num_patches, num_
     # Classifier head: d_model * num_classes
     head = d_model * num_classes
     # Final layer norm: 2 * d_model
-    return per_layer * n_layers + pos_emb + d_model + head + 2 * d_model
+    return patch_embed + per_layer * n_layers + pos_emb + d_model + head + 2 * d_model
 
 
 def main():
@@ -133,9 +140,7 @@ def main():
         ("ViT-Huge/14",  1280, 32, 16, 4, 14),
     ]:
         grid_n = (224 // patch) ** 2
-        params = param_count_vit(d, L, H_heads, exp, grid_n, num_classes=1000)
-        # Add patch embed: (P*P*3) * d_model
-        params += patch * patch * 3 * d
+        params = param_count_vit(d, L, exp, grid_n, num_classes=1000, patch_size=patch)
         print(f"  {name:<14}  d={d:<5}  L={L:<3}  heads={H_heads:<3}  patches={grid_n:<4}  ~{params / 1e6:.1f}M params")
 
     print()

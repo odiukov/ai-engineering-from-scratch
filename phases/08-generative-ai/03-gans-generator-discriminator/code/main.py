@@ -154,6 +154,42 @@ def mean(xs):
     return sum(xs) / max(len(xs), 1)
 
 
+def logit_grad_vanilla(p):
+    """d/ds of the vanilla G loss log(1 - sigmoid(s)), where p = sigmoid(s)."""
+    return -p
+
+
+def logit_grad_nonsat(p):
+    """d/ds of the non-saturating G loss -log sigmoid(s). This is `p - 1` in update_g."""
+    return -(1.0 - p)
+
+
+def prob_grad_vanilla(p):
+    """d/dp of log(1 - p). Looks perfectly healthy at p -> 0. That is the trap."""
+    return -1.0 / (1.0 - p)
+
+
+def gradient_table():
+    """Pure arithmetic, no training: show which derivative actually saturates."""
+    print("=== why the vanilla G loss saturates (arithmetic only) ===")
+    print("  p=D(G(z))    d/ds log(1-D)    d/ds -log D    d/dp log(1-D)")
+    for p in (0.5, 0.1, 0.01, 0.001):
+        print(f"  {p:<12.3f} {logit_grad_vanilla(p):+13.4f}    "
+              f"{logit_grad_nonsat(p):+11.4f}    {prob_grad_vanilla(p):+13.4f}")
+    print("  as D gets confident (p -> 0) the vanilla gradient through the logit")
+    print("  dies like p, while the non-saturating one heads for -1. look at the")
+    print("  last column: in p alone nothing vanishes, so the saturation is not in")
+    print("  the log, it is the dp/ds = p(1-p) factor inside the sigmoid.")
+
+
+def measure_g_gradients(G, D, rng, z_dim, n=200):
+    """Mean |dLoss/d logit| that G would actually receive, under both loss forms."""
+    ps = [forward_d(forward_g(z, G)[0], D)[0] for z in sample_noise(n, z_dim, rng)]
+    return (mean(ps),
+            mean([abs(logit_grad_vanilla(p)) for p in ps]),
+            mean([abs(logit_grad_nonsat(p)) for p in ps]))
+
+
 def main():
     rng = random.Random(1)
     z_dim, hidden = 4, 16
@@ -161,6 +197,8 @@ def main():
     D = init_mlp(1, hidden, 1, rng)
 
     batch, g_lr, d_lr = 32, 0.02, 0.01
+    gradient_table()
+    print()
     print("=== training 1-D GAN on two-mode Gaussian mixture ===")
     for step in range(1, 801):
         reals = sample_real(batch, rng)
@@ -185,6 +223,26 @@ def main():
     print("=== final 10 generator samples ===")
     for z in sample_noise(10, z_dim, rng):
         print(f"  G(z) = {forward_g(z, G)[0][0]:+.2f}")
+
+    print()
+    print("=== failure mode 2: vanishing gradient, measured ===")
+    print("the canonical setup: D races ahead while G is still bad. we freeze a")
+    print("fresh untrained G and train only D, then measure the gradient G would get.")
+    G2 = init_mlp(z_dim, hidden, 1, rng)
+    D2 = init_mlp(1, hidden, 1, rng)
+    for d_steps in (0, 50, 200):
+        for _ in range(d_steps):
+            reals = sample_real(batch, rng)
+            fakes = [forward_g(z, G2)[0] for z in sample_noise(batch, z_dim, rng)]
+            update_d(reals, fakes, D2, 0.5)     # D only, G frozen
+        p_bar, van, ns = measure_g_gradients(G2, D2, rng, z_dim)
+        total = sum(s for s in (0, 50, 200) if s <= d_steps)
+        print(f"  after {total:4d} D-only steps: mean D(G(z))={p_bar:.4f}   "
+              f"|grad| vanilla={van:.4f}   non-saturating={ns:.4f}")
+    print("  same G, same fakes, only D got stronger. the vanilla gradient decays")
+    print("  with D(G(z)) - that is G going dead - while the non-saturating one")
+    print("  climbs toward 1. this is the whole reason update_g computes")
+    print("  `dL_dpre2 = p - 1.0` and not `p`.")
 
 
 if __name__ == "__main__":

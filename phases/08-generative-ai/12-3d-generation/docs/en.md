@@ -24,7 +24,7 @@ The 2026 stack separates the two problems. First, generate *2D multi-view images
 
 ### Representation: 3D Gaussian Splatting (Kerbl et al., 2023)
 
-Represent a scene as a cloud of ~1M 3D Gaussians. Each has 59 parameters: position (3), covariance (6, or quaternion 4 + scale 3), opacity (1), spherical-harmonics color (48 at degree 3, 3 at degree 0).
+Represent a scene as a cloud of ~1M 3D Gaussians. Each has 59 parameters: position (3), rotation quaternion (4), scale (3), opacity (1), spherical-harmonics color (48 at degree 3; only 3 at degree 0). That is 3 + 4 + 3 + 1 + 48 = 59. The quaternion + scale pair *is* the covariance, stored factored as `Σ = R S Sᵀ Rᵀ` — a raw symmetric 3×3 covariance would be 6 numbers and give 58, but nobody stores it that way, because gradient descent on 6 free numbers does not keep the matrix positive semi-definite.
 
 Rendering = projection + alpha-compositing. Fast (~100 fps at 1080p on a 4090). Differentiable. Fit by gradient descent against ground-truth photos. A scene fits in 5-30 minutes on a consumer GPU.
 
@@ -65,7 +65,7 @@ v4-3d-multiview
 
 ## Build It
 
-`code/main.py` implements a toy 2D "Gaussian splatting" fit: represent a synthetic target image (a smooth gradient) as a sum of 2D Gaussian splats. Optimize positions, colors, and covariances by gradient descent to match the target. You see the two core operations: forward render (splat + alpha-composite) and fit by gradient descent.
+`code/main.py` implements a toy 2D "Gaussian splatting" fit: represent a synthetic target image (two soft Gaussian blobs — a bright one upper-left, a dimmer one lower-right) as a sum of 2D Gaussian splats. Optimize positions, colors, and covariances by gradient descent to match the target. You see the two core operations: forward render (splat + alpha-composite) and fit by gradient descent.
 
 ### Step 1: 2D Gaussian splat
 
@@ -80,11 +80,13 @@ def gaussian_at(x, y, gaussian):
 ### Step 2: render by summing splats
 
 ```python
-def render(image_size, gaussians):
-    img = [[0.0] * image_size for _ in range(image_size)]
-    for g in gaussians:
-        for y in range(image_size):
-            for x in range(image_size):
+SIZE = 12  # module-level grid size
+
+def render(gaussians):
+    img = [[0.0] * SIZE for _ in range(SIZE)]
+    for y in range(SIZE):
+        for x in range(SIZE):
+            for g in gaussians:
                 img[y][x] += g["color"] * gaussian_at(x, y, g)
     return img
 ```
@@ -95,7 +97,7 @@ Real 3D Gaussian splatting sorts Gaussians by depth and alpha-composites in orde
 
 ```python
 for step in range(steps):
-    pred = render(size, gaussians)
+    pred = render(gaussians)
     loss = mse(pred, target)
     gradients = compute_grads(pred, target, gaussians)
     update(gaussians, gradients, lr)
@@ -129,7 +131,7 @@ Save `outputs/skill-3d-pipeline.md`. Skill takes a 3D brief (input: text / one i
 
 ## Exercises
 
-1. **Easy.** Run `code/main.py` with 4, 16, 64 Gaussians. Report final MSE vs target.
+1. **Easy.** Run `code/main.py` as shipped — it fits 2, 4, and 8 Gaussians on a 12×12 target in turn. Report the final MSE for each and say which jump buys the most.
 2. **Medium.** Extend to color Gaussians (RGB). Confirm reconstruction matches the target color pattern.
 3. **Hard.** Using gsplat or Nerfstudio, reconstruct a real object from a 50-photo capture. Report fit time and final SSIM on held-out views.
 

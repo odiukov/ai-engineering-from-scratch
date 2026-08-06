@@ -77,9 +77,17 @@ The generator must match the real distribution *for the given condition*, not th
 ```python
 for c in [0, 1]:
     samples = [G(noise, c) for noise in batch]
-    mean_c = mean(samples)
-    assert_near(mean_c, real_mean_for_class_c)
+    assert_near(mean(samples), real_mean_for_class_c)
+
+    # The mean alone cannot see a per-class collapse: a G that ignores z and
+    # emits the single point real_mean_for_class_c passes the line above with
+    # a perfect score. So also check the spread inside the class.
+    assert_near(stdev(samples), real_std_for_class_c)
+    assert stdev(samples) > 0.3 * real_std_for_class_c   # hard floor
+    assert len(set(round(s, 3) for s in samples)) > len(samples) // 2
 ```
+
+Two numbers, two different failures. A wrong mean means the condition is being ignored (G marginalized over classes). A collapsed spread with the right mean means mode collapse *within* the class — the pitfall below — and it is invisible to a mean-only check.
 
 ## Pitfalls
 

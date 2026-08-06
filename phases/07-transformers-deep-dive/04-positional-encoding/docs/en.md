@@ -17,7 +17,7 @@ The fix is to inject position into the embeddings somehow. Three eras of answers
 
 1. **Absolute sinusoidal** (Vaswani 2017). Add `sin/cos` of position to the embedding. Simple, learnable-free, extrapolates poorly beyond trained lengths.
 2. **RoPE — Rotary Position Embeddings** (Su 2021). Rotate Q and K vectors by an angle proportional to position. Encodes *relative* position directly in the dot product. Dominant in 2026.
-3. **ALiBi — Attention with Linear Biases** (Press 2022). Skip embeddings entirely; add a per-head linear penalty to attention scores based on distance. Excellent length extrapolation.
+3. **ALiBi — Attention with Linear Biases** (Press 2021). Skip embeddings entirely; add a per-head linear penalty to attention scores based on distance. Excellent length extrapolation.
 
 As of 2026, essentially every frontier open model uses RoPE: Llama 2/3/4, Qwen 2/3, Mistral, Mixtral, DeepSeek-V3, Kimi. A handful of long-context models use ALiBi or its modern variants. Absolute sinusoidal is historical.
 
@@ -119,7 +119,8 @@ Crucial: apply the same function to Q at position `m` and K at position `n`. The
 
 ```python
 def alibi_bias(n_heads, seq_len):
-    # slope_h = 2 ** (-8 * h / n_heads) for h = 1..n_heads
+    # head h is 0-based, so its slope is 2 ** (-8 * (h + 1) / n_heads):
+    # a geometric sequence 2^(-8/H), 2^(-16/H), ..., 2^-8
     slopes = [2 ** (-8 * (h + 1) / n_heads) for h in range(n_heads)]
     bias = []
     for m in slopes:
@@ -136,7 +137,7 @@ Pick two random vectors `a, b`. Rotate by `(pos_a, pos_b)`. Then by `(pos_a + k,
 
 ## Use It
 
-PyTorch 2.5+ ships RoPE utilities in `torch.nn.functional`. Most production code uses `flash_attn` or `xformers` where RoPE is applied inside the attention kernel.
+There is no RoPE op in `torch.nn.functional` — PyTorch core never shipped one. RoPE lives one level up: in each model's own code (HF `transformers` centralizes the scaling schemes in `modeling_rope_utils.py`), in `torchtune.modules.RotaryPositionalEmbeddings`, or fused inside the attention kernel when you use `flash_attn` or `xformers`. Production code almost always takes one of those, not a hand-rolled version.
 
 ```python
 from transformers import AutoModel

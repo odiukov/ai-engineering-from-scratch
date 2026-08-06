@@ -3,8 +3,13 @@
 Uses PyTorch. If torch is not installed, prints a friendly message and
 degrades to a parameter-count estimator so the script still runs cleanly.
 
-Default: 4 layers, 4 heads, d_model=128, seq_len=128, 500 steps on a
-tiny built-in Shakespeare excerpt. Finishes in ~2 minutes on a laptop.
+Default: 3 layers, 4 heads, d_model=64, block_size=64, 500 steps on the
+~1 KB Shakespeare excerpt embedded below (~155K parameters). That is a
+smoke test, not a language model -- it finishes in well under a minute and
+overfits its 900 training characters. To reproduce the numbers the lesson
+quotes (loss 4.2 -> 1.5, Shakespeare-shaped samples), drop a copy of
+tinyshakespeare.txt next to this file -- it is picked up automatically --
+and set n_layers=4, d_model=128, block_size=128, max_steps=2000.
 """
 
 import math
@@ -66,7 +71,12 @@ def param_count(vocab_size, d_model, n_layers, n_heads, ffn_expansion=2.67, bloc
 
 
 def run_param_preview():
-    print("=== parameter counts for capstone configs ===")
+    """Reference table only -- for scale intuition. None of these rows is the
+    config trained below, and 'base' (GPT-2 sized, BPE vocab) is far past what
+    this script is meant to run. See the SHIPPED DEFAULT row for what actually
+    trains when you execute this file.
+    """
+    print("=== parameter counts: reference table (not trained here) ===")
     print(f"{'name':<16}  {'V':>5}  {'L':>3}  {'H':>3}  {'d':>5}  {'~params':>10}")
     configs = [
         ("nano",    65,   4,  4,  128),
@@ -77,6 +87,9 @@ def run_param_preview():
     for name, V, L, H, d in configs:
         p = param_count(V, d, L, H)
         print(f"  {name:<14}  {V:>5}  {L:>3}  {H:>3}  {d:>5}  {p:>10}")
+    print("  'nano' is the 4/4/128 config the lesson's Target metrics quote;")
+    print("  reach it by supplying tinyshakespeare.txt and editing the config.")
+    print("  'base' is GPT-2 scale, listed for contrast only.")
 
 
 def try_train():
@@ -86,8 +99,10 @@ def try_train():
         import torch.nn.functional as F
     except ImportError:
         print("torch not installed. install with: pip install torch")
-        print("once installed, rerunning will train a 4-layer char-level GPT")
-        print("on the embedded Shakespeare excerpt and sample from it.")
+        print("once installed, rerunning trains the SHIPPED DEFAULT: a 3-layer,")
+        print("4-head, d_model=64, block_size=64 char-level GPT (~155K params) for")
+        print("500 steps on the embedded ~1 KB excerpt, then samples from it.")
+        print("that is a smoke test. see the module docstring for the full run.")
         return
 
     torch.manual_seed(42)

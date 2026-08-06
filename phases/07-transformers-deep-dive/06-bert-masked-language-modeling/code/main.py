@@ -13,16 +13,23 @@ CLS_ID = 1
 SEP_ID = 2
 SPECIAL_IDS = {MASK_ID, CLS_ID, SEP_ID}
 IGNORE_INDEX = -100
+DEFAULT_SEED = 0  # so a call without an rng is still reproducible
 
 
-def create_mlm_batch(tokens, vocab_size, mask_prob=0.15, rng=None):
+def create_mlm_batch(tokens, vocab_size, mask_prob=0.15, rng=None, decisions=None):
     """Apply BERT masking.
 
     Returns (input_ids, labels). labels[i] = original token if position was
     selected for prediction, IGNORE_INDEX otherwise.
+
+    If `decisions` is a list, one of "mask" / "random" / "unchanged" is
+    appended for every selected position. That records which branch actually
+    fired, which is the only honest way to audit the 80/10/10 split — you
+    cannot recover it by comparing input_ids to labels, because a random
+    replacement can land on the original token.
     """
     if rng is None:
-        rng = random.Random()
+        rng = random.Random(DEFAULT_SEED)
     input_ids = list(tokens)
     labels = [IGNORE_INDEX] * len(tokens)
     for i, t in enumerate(tokens):
@@ -34,11 +41,17 @@ def create_mlm_batch(tokens, vocab_size, mask_prob=0.15, rng=None):
         r = rng.random()
         if r < 0.8:
             input_ids[i] = MASK_ID
+            kind = "mask"
         elif r < 0.9:
-            rand_id = t
-            while rand_id in SPECIAL_IDS or rand_id == t:
+            rand_id = MASK_ID
+            while rand_id in SPECIAL_IDS:
                 rand_id = rng.randrange(vocab_size)
             input_ids[i] = rand_id
+            kind = "random"
+        else:
+            kind = "unchanged"
+        if decisions is not None:
+            decisions.append(kind)
     return input_ids, labels
 
 
@@ -48,7 +61,7 @@ def whole_word_mlm(tokens, word_spans, vocab_size, mask_prob=0.15, rng=None):
     word_spans: list of (start, end) half-open ranges into tokens.
     """
     if rng is None:
-        rng = random.Random()
+        rng = random.Random(DEFAULT_SEED)
     input_ids = list(tokens)
     labels = [IGNORE_INDEX] * len(tokens)
     for start, end in word_spans:
@@ -77,12 +90,17 @@ def whole_word_mlm(tokens, word_spans, vocab_size, mask_prob=0.15, rng=None):
 def distribution_check(n_tokens, vocab_size, mask_prob=0.15, seed=42):
     rng = random.Random(seed)
     tokens = [rng.randrange(3, vocab_size) for _ in range(n_tokens)]
-    input_ids, labels = create_mlm_batch(tokens, vocab_size, mask_prob, rng)
+    decisions = []
+    create_mlm_batch(tokens, vocab_size, mask_prob, rng, decisions=decisions)
 
-    selected = sum(1 for l in labels if l != IGNORE_INDEX)
-    masked = sum(1 for t, l in zip(input_ids, labels) if l != IGNORE_INDEX and t == MASK_ID)
-    randomized = sum(1 for t, l in zip(input_ids, labels) if l != IGNORE_INDEX and t != MASK_ID and t != l)
-    unchanged = sum(1 for t, l in zip(input_ids, labels) if l != IGNORE_INDEX and t == l)
+    # Count by which branch fired, not by comparing input_ids to labels:
+    # on a small vocab a "random" replacement hits the original token often
+    # enough (1/vocab_size) to visibly skew a token-comparison tally.
+    counts = Counter(decisions)
+    selected = len(decisions)
+    masked = counts["mask"]
+    randomized = counts["random"]
+    unchanged = counts["unchanged"]
 
     return {
         "tokens": n_tokens,

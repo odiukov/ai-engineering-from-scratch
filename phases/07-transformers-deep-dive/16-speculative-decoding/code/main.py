@@ -51,7 +51,20 @@ def spec_step_one_token(q, p, rng):
 
 def spec_step_n(q, p, N, rng):
     """Draft N tokens (same context), then verify in one pass.
-    Returns (final_token, n_accepted). Simplified: q and p are fixed per call.
+
+    Returns (final_token, n_accepted, is_bonus), where:
+      - n_accepted is how many DRAFT tokens the verifier accepted (0..N),
+      - final_token is the one extra token this step emits on top of those,
+      - is_bonus says which kind it is: True  -> all N drafts accepted, so the
+        extra token is the free bonus sampled from q;
+        False -> rejection at position n_accepted, so the extra token came from
+        the residual (q - p)_+ and the remaining drafts were discarded.
+
+    Either way the step emits exactly n_accepted + 1 tokens. Keeping the two
+    numbers apart is what makes that invariant readable -- folding the bonus
+    into the accept count would report N+1 "accepted" out of N drafts.
+
+    Simplified: q and p are fixed per call.
     """
     accepted = 0
     for _ in range(N):
@@ -62,9 +75,9 @@ def spec_step_n(q, p, N, rng):
         if u < min(1.0, q_prob / p_prob if p_prob > 0 else float("inf")):
             accepted += 1
         else:
-            return sample(residual(q, p), rng), accepted
+            return sample(residual(q, p), rng), accepted, False
     bonus = sample(q, rng)
-    return bonus, accepted + 1
+    return bonus, accepted, True
 
 
 def run_distribution_check(q, p, n_samples, rng):
@@ -131,6 +144,28 @@ def main():
     print(f"  direct counts (50000 samples): {direct_c}")
     print(f"  chi^2 = {chi:.2f}   (V-1 = {V-1} df; large means distributions differ)")
     print(f"  {'PASS' if chi < 30 else 'FAIL'}: spec-decoded tokens match verifier distribution")
+    print()
+
+    print("=== accepted drafts vs bonus token (N=5, good draft) ===")
+    N_draft = 5
+    trials = 20000
+    total_accepted = 0
+    total_emitted = 0
+    bonus_steps = 0
+    for _ in range(trials):
+        _, n_accepted, is_bonus = spec_step_n(q, p_good, N_draft, rng)
+        emitted = n_accepted + 1  # accepted drafts + exactly one extra token
+        assert 0 <= n_accepted <= N_draft
+        assert is_bonus == (n_accepted == N_draft)
+        total_accepted += n_accepted
+        total_emitted += emitted
+        bonus_steps += 1 if is_bonus else 0
+    print(f"  steps:                        {trials}")
+    print(f"  mean accepted DRAFT tokens:   {total_accepted / trials:.3f}  (of {N_draft})")
+    print(f"  mean tokens emitted per step: {total_emitted / trials:.3f}  (= accepted + 1)")
+    print(f"  steps that reached the bonus:  {bonus_steps / trials:.1%}")
+    print("  the '+1' is either the free bonus (all drafts accepted) or the")
+    print("  residual resample (first rejection). never both, always exactly one.")
     print()
 
     print("=== acceptance rate vs KL(q || p) ===")

@@ -2,7 +2,7 @@ import math
 import random
 
 
-def sin_embed(t, T, dim=8):
+def sin_embed(t, dim=8):
     """Sinusoidal timestep embedding."""
     out = []
     half = dim // 2
@@ -116,7 +116,7 @@ def train(net, alpha_bars, T, steps, lr, t_dim, rng):
         a_bar = alpha_bars[t]
         eps = rng.gauss(0, 1)
         x_t = math.sqrt(a_bar) * x0 + math.sqrt(1 - a_bar) * eps
-        t_emb = sin_embed(t, T, t_dim)
+        t_emb = sin_embed(t, t_dim)
         eps_hat, cache = forward([x_t], t_emb, net)
         grads = backward([eps], eps_hat, cache, net)
         apply_update(net, grads, lr)
@@ -128,7 +128,7 @@ def train(net, alpha_bars, T, steps, lr, t_dim, rng):
 def sample(net, alphas, alpha_bars, T, t_dim, rng):
     x = rng.gauss(0, 1)
     for t in range(T - 1, -1, -1):
-        t_emb = sin_embed(t, T, t_dim)
+        t_emb = sin_embed(t, t_dim)
         eps_hat, _ = forward([x], t_emb, net)
         beta_t = 1 - alphas[t]
         mean = (x - beta_t / math.sqrt(1 - alpha_bars[t]) * eps_hat[0]) / math.sqrt(alphas[t])
@@ -161,6 +161,14 @@ def main():
     _, alphas, alpha_bars = make_schedule(T)
     net = init_net(1, t_dim, hidden, rng)
 
+    # The 1e-4..0.02 beta range is DDPM's, and it is tuned for T=1000 (alpha_bar_T ~ 4e-5).
+    # We run T=40 to keep the toy fast, so alpha_bar_T stays far from 0: x_T still carries
+    # most of x_0. Print it so the gap with the "x_T ~ N(0, I)" claim is visible.
+    ab_T = alpha_bars[-1]
+    print(f"schedule: T={T}, beta in [1e-4, 0.02], alpha_bar_T={ab_T:.4f}")
+    print(f"  => x_T = {math.sqrt(ab_T):.2f}*x_0 + {math.sqrt(1 - ab_T):.2f}*eps "
+          f"(at T=1000 this would be 0.006*x_0 + 1.00*eps)")
+    print()
     print("=== training DDPM on two-mode 1-D mixture ===")
     train(net, alpha_bars, T, steps=4000, lr=0.01, t_dim=t_dim, rng=rng)
 

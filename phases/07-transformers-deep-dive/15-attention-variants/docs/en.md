@@ -39,11 +39,11 @@ positions 0-7          positions 0-7, W=4
 7 | x x x x x x x x  7 |          x x x x
 ```
 
-For `N = 8192` and `W = 1024`, the score matrix has 1024 × 8192 non-zero rows in expectation — an 8× reduction.
+For `N = 8192` and `W = 1024`, the score matrix has about 7.9M non-zero **cells** (`Σᵢ min(i+1, W)`), against 33.6M for full causal attention (`N(N+1)/2`) — a 4.3× reduction. You will often see "8×" quoted instead; that compares `N·W` to the full `N²` = 67M and quietly forgets that causal masking already threw away half the matrix.
 
 **KV cache shrinks with SWA.** Only the last `W` tokens of K and V need to be kept per layer. For a Gemma-3-ish config (1024 window, 128K context), KV cache drops 128×.
 
-**Quality cost.** SWA-only transformers struggle with long-range retrieval. The fix: interleave SWA layers with full-attention layers. Gemma 3 uses 5:1 SWA:global. Mistral 7B used a causal-SWA stack where information "flows forward" through overlapping windows — each layer extends effective receptive field by `W`, and after `L` layers the model can attend `L × W` tokens back.
+**Quality cost.** SWA-only transformers struggle with long-range retrieval. The fix: interleave SWA layers with full-attention layers. Gemma 3 uses 5:1 SWA:global. Mistral 7B used a causal-SWA stack where information "flows forward" through overlapping windows — each layer extends the effective receptive field by `W − 1`, so after `L` layers the model can reach `L·(W − 1) + 1` tokens back. Count it on the diagram above: 4 layers with `W = 4` reach 13 tokens, not 16.
 
 ### Sparse / Block Attention
 
@@ -129,6 +129,8 @@ def strided_mask(n, window, stride):
 
 Dense local window plus every `stride`-th token back to the start of the sequence. Receptive field grows in log steps with additional layers.
 
+**Note the side effect:** `range(0, i + 1, stride)` always starts at `j = 0`, because 0 is divisible by every stride. So *every* row attends to position 0 — this pattern smuggles in a Longformer-style global token for free. That is usually a good thing (it gives the attention sink somewhere legitimate to live), but it is a design decision, not an accident of the loop, and you should be aware you made it.
+
 ### Step 4: differential attention
 
 ```python
@@ -138,7 +140,9 @@ def diff_attention(Q1, K1, Q2, K2, V, lam):
     return (A1 - lam * A2) @ V
 ```
 
-Two attention passes, subtract with a learned mixing coefficient. In the code we compare the attention-sink heatmap of single vs differential and watch the sink collapse.
+Two attention passes, subtract with a learned mixing coefficient. In the code we compare the attention weights of single vs differential and watch the sink collapse — position 0 goes from 61% of the row to 11% at `λ = 0.8`.
+
+One caveat about that demo: the sink is **learned**, not automatic. Random Q/K give position 0 an ordinary random weight and no sink at all. So `code/main.py` builds the structure a trained model converges to by hand — a large-norm key at position 0 aligned with a bias direction that every query carries — and only then subtracts it away. If you run the demo on purely random tensors and see no sink, that is the correct result, not a broken script.
 
 ### Step 5: KV cache sizes
 
@@ -192,7 +196,7 @@ See `outputs/skill-attention-variant-picker.md`. The skill picks an attention to
 | Term | What people say | What it actually means |
 |------|-----------------|-----------------------|
 | Sliding window attention (SWA) | "Local attention" | Each query attends to its last `W` tokens; KV cache shrinks to `O(W)`. |
-| Effective receptive field | "How far back the model sees" | In an `L`-layer SWA stack with window `W`, up to `L × W` tokens. |
+| Effective receptive field | "How far back the model sees" | In an `L`-layer SWA stack with window `W`, up to `L·(W − 1) + 1` tokens. |
 | Longformer / BigBird | "Local + global + random" | Sparse patterns with a few always-attending global tokens; early long-context approach. |
 | Native Sparse Attention | "DeepSeek's kernel trick" | Learn block-level sparsity; skip zero blocks at the kernel level while keeping quality. |
 | Differential attention | "Two maps, one subtracts" | DIFF Transformer: subtract a learned `λ` times a second attention map from the first to cancel attention sinks. |

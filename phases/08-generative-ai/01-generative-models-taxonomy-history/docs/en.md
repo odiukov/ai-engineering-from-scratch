@@ -25,9 +25,9 @@ Five families have survived the last twelve years. Knowing which compromise each
 
 **3. Implicit density.** Skip density entirely; learn a generator `G(z)` that produces samples and a discriminator `D(x)` that tells real from fake. GANs (Goodfellow 2014). Fast at inference (one forward pass) but notoriously unstable during training. StyleGAN 1/2/3 remain state of the art for fixed-domain photorealism (faces, bedrooms) even in 2026.
 
-**4. Score-based / continuous-time.** Learn the gradient of the log-density `∇_x log p(x)` (the score) directly. Song & Ermon (2019) showed score matching generalizes diffusion to an SDE. Flow matching (Lipman 2023) is the 2024-2026 hotness: simulate-free training, straighter paths, 4-10x faster sampling than DDPM. Stable Diffusion 3, Flux, AudioCraft 2 all use flow matching.
+**4. Score-based / continuous-time. Explicit density, but only reachable by integration.** Learn the gradient of the log-density `∇_x log p(x)` (the score) directly. You never write `log p(x)` down, yet you can recover it exactly by integrating the probability-flow ODE — expensive, but exact, which is what separates this bucket from bucket 3. Song & Ermon (2019) showed score matching generalizes diffusion to an SDE. Flow matching (Lipman 2023) is the 2024-2026 hotness: simulate-free training, straighter paths, 4-10x faster sampling than DDPM. Stable Diffusion 3, Flux, AudioCraft 2 all use flow matching. Note that SD3 and Flux run their flow-matching objective *inside* a VAE latent space: "latent diffusion" in a marketing sentence names the VAE front-end, not the training objective, so these models belong here and not in bucket 2.
 
-**5. Token-based autoregressive over discrete codes.** Compress high-dim data with a VQ-VAE or residual quantizer into a short sequence of discrete tokens, then use a Transformer to model the token sequence. Parti, MuseNet, AudioLM, VALL-E, Sora's patch tokenizer all use this. This is bucket 1 plus a learned tokenizer.
+**5. Token-based autoregressive over discrete codes. Explicit and tractable — in token space.** Compress high-dim data with a VQ-VAE or residual quantizer into a short sequence of discrete tokens, then use a Transformer to model the token sequence. `log p(tokens)` is exact and tractable, exactly as in bucket 1; `log p(x)` in the original pixel or waveform space is *not*, because the tokenizer is lossy and non-invertible. That is why these papers report bits-per-token, not bits-per-dim. Parti, MuseNet, AudioLM, VALL-E, Sora's patch tokenizer all use this. This is bucket 1 plus a learned tokenizer.
 
 ## A brief history
 
@@ -71,10 +71,12 @@ The code for this lesson is a lightweight visualization: fit a 1-D mixture-of-Ga
 Run `code/main.py`. It draws 2000 samples from a two-mode Gaussian mixture, then prints:
 
 ```
-explicit density (histogram): p(x in [-0.5, 0.5]) ≈ 0.38
-approximate density (KDE):     p(x in [-0.5, 0.5]) ≈ 0.41
-implicit (nearest-sample gen): 20 new samples printed, no p(x)
+explicit density (histogram): p(x in [-0.5, 0.5]) ≈ 0.025
+approximate density (KDE):     p(x in [-0.5, 0.5]) ≈ 0.033
+implicit (nearest-sample gen): 10 new samples printed, no p(x)
 ```
+
+Both numbers are small on purpose: the two modes sit at `-2` (σ 0.6) and `+2` (σ 0.9), so the band `[-0.5, 0.5]` is the valley between them and holds only a couple of percent of the mass. The KDE reads slightly higher than the histogram because its 0.3-wide Gaussian kernel smears mass from the modes into the valley.
 
 Notice: the first two let you ask "how likely is this point?" The third cannot. This is the *explicit vs implicit* distinction that will matter for every future lesson.
 
@@ -85,7 +87,7 @@ Which family, for which task, in 2026?
 | Task | Best family | Why |
 |------|-------------|-----|
 | Photoreal faces, narrow domain | StyleGAN 2/3 | Still sharpest, fastest inference. |
-| General text-to-image | Latent diffusion + flow matching | SD3, Flux.1, DALL-E 3. |
+| General text-to-image | Flow matching in a VAE latent space (bucket 4) | SD3, Flux.1. DALL-E 3 is latent diffusion (bucket 2). |
 | Fast text-to-image | Rectified flow + distillation | SDXL-Turbo, SD3-Turbo, LCM. |
 | Text-to-video | Diffusion Transformer + flow matching | Sora, Veo 2, Kling. |
 | Speech + music | Token-based AR (AudioLM, VALL-E, MusicGen) or flow matching (AudioCraft 2) | Discrete tokens scale cheaply. |
