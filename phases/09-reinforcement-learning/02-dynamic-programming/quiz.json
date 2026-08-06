@@ -1,0 +1,78 @@
+{
+  "lesson": "02-dynamic-programming",
+  "title": "Dynamic Programming — Policy Iteration & Value Iteration",
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "You can query P(s' | s, a) and R for every state-action pair of a small MDP. What is the most direct route to the optimal policy?",
+      "options": [
+        "Run Q-learning until the return curve plateaus",
+        "Iterate the Bellman equation over the known model to convergence",
+        "Collect thousands of episodes and average the returns per state",
+        "Train a policy network with gradient ascent on the expected return over sampled episodes"
+      ],
+      "correct": 1,
+      "explanation": "With a model in hand, sampling only adds variance to something you can compute. This is why the DP answer is what the sampling methods are measured against."
+    },
+    {
+      "stage": "check",
+      "question": "What does value iteration collapse relative to policy iteration?",
+      "options": [
+        "The inner evaluation loop — one max backup does both jobs",
+        "The discount factor, which it no longer needs",
+        "The transition model, which it estimates from samples instead",
+        "The greedy extraction step, which it performs during evaluation"
+      ],
+      "correct": 0,
+      "explanation": "The max in the optimality backup performs improvement inline, so each sweep is cheap. The price is that it usually needs more sweeps than policy iteration needs outer iterations."
+    },
+    {
+      "stage": "check",
+      "question": "Why does the lesson insist on γ < 1 for the convergence guarantee?",
+      "options": [
+        "It keeps rewards inside a numerically safe range",
+        "It makes the state space effectively finite",
+        "It makes the Bellman operator a γ-contraction in sup-norm",
+        "It stops the greedy policy from oscillating when two actions have equal Q-value"
+      ],
+      "correct": 2,
+      "explanation": "Contraction is the entire argument: it delivers both uniqueness of V* and geometric convergence to it. Without it you need a finite horizon or an absorbing terminal instead."
+    },
+    {
+      "stage": "check",
+      "question": "Your stopping test uses the average |V_new − V| over states and it fires while one state is still far off. What is wrong?",
+      "options": [
+        "Nothing — average and max agree once you are near convergence",
+        "The guarantee is stated in sup-norm, so the test has to use the max",
+        "The tolerance should be relative to |V| rather than absolute",
+        "The average should be weighted by how often each state is visited"
+      ],
+      "correct": 1,
+      "explanation": "A single lagging state hides easily behind a small average. The contraction bound only ever controls the largest per-state change."
+    },
+    {
+      "stage": "post",
+      "question": "On a toy tabular MDP your Q-learning agent reports V(s_0) that is 30% off from what value iteration computes on the same model. What follows?",
+      "options": [
+        "Value iteration needs a tighter tolerance",
+        "Nothing — Q-learning is off-policy, so a gap is expected",
+        "The two must be using different discount factors",
+        "Q-learning has a bug; DP defines the correct answer here"
+      ],
+      "correct": 3,
+      "explanation": "On a tabular MDP with a known model the DP fixed point is ground truth by definition. That is precisely the debugging use the lesson recommends it for."
+    },
+    {
+      "stage": "post",
+      "question": "Value iteration gives V*(0,0) = -6.43 on the 4×4 grid with slip probability 0.1, against -5.85 on the deterministic grid. Why is the slippery number worse?",
+      "options": [
+        "Slips lengthen the expected path, and every step costs -1",
+        "The slip makes the process non-Markovian",
+        "The optimal policy is no longer greedy with respect to V*",
+        "The contraction factor shrinks once transitions become stochastic"
+      ],
+      "correct": 0,
+      "explanation": "The reward is paid per step, so anything that raises the expected number of steps lowers the value. The operator is still a γ-contraction and the greedy policy is still optimal."
+    }
+  ]
+}
