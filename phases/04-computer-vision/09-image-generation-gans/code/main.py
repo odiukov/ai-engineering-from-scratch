@@ -53,6 +53,7 @@ class Discriminator(nn.Module):
 
 def train_step(G, D, real, z, opt_g, opt_d, device):
     real = real.to(device)
+    z = z.to(device)
 
     opt_d.zero_grad()
     d_real = D(real)

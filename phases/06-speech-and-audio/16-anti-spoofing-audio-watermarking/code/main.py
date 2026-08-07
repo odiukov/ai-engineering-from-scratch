@@ -91,13 +91,14 @@ def main():
 
     print()
     print("=== Step 3: sweep threshold → EER ===")
-    candidates = sorted(set(real_scores + fake_scores))
-    best = (1.0, 0.0, 0.0, 0.0)
+    candidates = sorted(set(real_scores) | set(fake_scores))
+    best = None
     for t in candidates:
         far = sum(1 for s in fake_scores if s >= t) / len(fake_scores)
         frr = sum(1 for s in real_scores if s < t) / len(real_scores)
-        if abs(far - frr) < best[0]:
-            best = (abs(far - frr), t, far, frr)
+        gap = abs(far - frr)
+        if best is None or gap < best[0]:
+            best = (gap, t, far, frr)
     gap, t, far, frr = best
     print(f"  EER ≈ {(far + frr) * 50:.2f}%  at threshold {t:.4f}")
     print(f"    (on toy data — real AASIST on ASVspoof 2019 LA: 0.42% EER)")

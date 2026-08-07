@@ -21,12 +21,24 @@ def insert_needle(filler, needle, depth_ratio):
     return " ".join(words[:pos] + [needle] + words[pos:])
 
 
+NEEDLE_PHRASES = {
+    "magic word": r"the magic word is",
+    "secret code": r"the secret code is",
+    "pass phrase": r"the pass phrase is",
+}
+
+
 def mock_retrieval_model(context, question, effective_capacity):
-    needle_pattern = re.compile(r"(?:the magic word is|the secret code is|the pass phrase is|x1\s*=|x2\s*=|x3\s*=) [A-Z0-9a-z_]+", re.IGNORECASE)
+    # The question selects which needle phrase to look for; if it names none,
+    # fall back to every known phrase plus the variable-tracing assignments.
+    low = question.lower()
+    wanted = [pattern for key, pattern in NEEDLE_PHRASES.items() if key in low]
+    if not wanted:
+        wanted = list(NEEDLE_PHRASES.values()) + [r"x[123]\s*="]
+    needle_pattern = re.compile(rf"(?:{'|'.join(wanted)}) [A-Z0-9a-z_]+", re.IGNORECASE)
     matches = list(needle_pattern.finditer(context))
     if not matches:
         return "no answer"
-    total_len = len(context.split())
     for m in matches:
         before = len(context[:m.start()].split())
         if before <= effective_capacity:
@@ -41,7 +53,6 @@ def score_single_needle(context, expected, effective_capacity):
 
 
 def score_multi_needle(context, expected_list, effective_capacity):
-    total_len = len(context.split())
     needle_pattern = re.compile(r"the magic word is ([A-Za-z0-9_]+)", re.IGNORECASE)
     found = []
     for m in needle_pattern.finditer(context):

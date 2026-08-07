@@ -46,8 +46,12 @@ bpe-merge
 See `code/main.py`. The loop:
 
 ```python
-def train_bpe(corpus, num_merges):
-    vocab = {tuple(word) + ("</w>",): count for word, count in corpus.items()}
+def word_counts(text):
+    return Counter(re.findall(r"[a-zA-Z]+", text.lower()))
+
+
+def train_bpe(text, num_merges):
+    vocab = {tuple(word) + ("</w>",): count for word, count in word_counts(text).items()}
     merges = []
     for _ in range(num_merges):
         pairs = Counter()
@@ -56,13 +60,22 @@ def train_bpe(corpus, num_merges):
                 pairs[(a, b)] += freq
         if not pairs:
             break
-        best = pairs.most_common(1)[0][0]
+        # highest count wins; ties broken lexicographically, never by dict order
+        best = min(pairs.items(), key=lambda kv: (-kv[1], kv[0]))[0]
         merges.append(best)
-        vocab = apply_merge(vocab, best)
+        vocab = merge_pair(vocab, best)
     return merges
 ```
 
 Three facts the algorithm encodes. `</w>` marks word end so "low" (suffix) and "lower" (prefix) stay distinct. Frequency weighting makes high-frequency pairs win early. The merge list is ordered — inference applies merges in training order.
+
+Three things the listing makes explicit that most write-ups leave implicit:
+
+**The tie-break.** `pairs.most_common(1)` looks equivalent and is not. `Counter.most_common` is stable, so among pairs with equal counts it returns whichever was inserted first — which depends on the order words came out of the corpus. On a small corpus ties are the common case, not the edge case, and a merge list that changes when you reorder your input files is not reproducible. Sorting on `(-count, pair)` makes the winner a function of the data alone.
+
+**The pre-tokenizer.** `word_counts` is where "text" becomes `{word: frequency}`, and its regex is the whole whitespace policy of the tokenizer: `[a-zA-Z]+` drops digits and punctuation and discards the space before a word, so this trainer cannot learn `" hello"` as distinct from `"hello"` (see Pitfalls). Real trainers keep the boundary — SentencePiece rewrites the space as `▁`, GPT-2-style byte-level BPE keeps it as a byte. Whatever splitter you train with must run at inference too, because Step 2 encodes one word at a time and never sees the original spacing.
+
+**Characters, not bytes.** `tuple(word)` splits into Unicode characters, so the base vocabulary is "every character in the corpus" and a character never seen in training has no token. The byte-level variant from The Concept is this same loop with the base symbols taken from `word.encode("utf-8")`, one symbol per byte — kept as `bytes` objects so `a + b` still concatenates — which fixes the base alphabet at 256 symbols and is where the zero-`[UNK]` guarantee comes from. The character version is kept here because the merges stay readable.
 
 ### Step 2: encode with the learned merges
 

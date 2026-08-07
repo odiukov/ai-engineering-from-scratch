@@ -52,34 +52,61 @@ f3-reality-gap
 
 ## Build It
 
-This lesson's code is a tiny demonstration of domain randomization on a GridWorld with *noisy* transitions. We train a policy that experiences randomized slip probabilities in "sim" and evaluate on "real" with a slip level it never saw during training. The shape maps directly to MuJoCo-to-hardware transfer.
+This lesson's code is a tiny demonstration of domain randomization on a cliff-walking GridWorld with *noisy* transitions. We train policies that experience randomized slip probabilities in "sim" and evaluate on "real" with slip levels they never saw during training. The shape maps directly to MuJoCo-to-hardware transfer.
 
-### Step 1: parameterized sim
+### Step 1: a sim where risk has a price
+
+```
+      col  0  1  2  3  4  5
+    row 0  .  .  .  .  .  .
+    row 1  .  .  .  .  .  .
+    row 2  .  .  .  .  .  .
+    row 3  S  X  X  X  X  G
+```
+
+Every move costs `-1`. Stepping into a cliff cell `X` costs `-20` and teleports the agent back to `S` *without* ending the episode. The shortest safe route is 7 moves along row 2 — directly above the cliff — for a return of `-7`.
+
+The cliff is the whole reason this demo can prove anything. On a plain grid the shortest path is also the safest one, so a brittle policy has nothing to lose and both policies score the same. Here, walking the edge is only optimal while the motors are perfect.
 
 ```python
-def step(state, action, slip):
-    if rng.random() < slip:
+def step(state, action, slip, rng):
+    if rng.random() < slip:            # rolled unconditionally, even at slip=0
         action = random_perpendicular(action)
     ...
+    if next_state in CLIFF:
+        return START, -20.0, False     # fall, restart, keep the debt
 ```
 
 `slip` is a parameter the simulator exposes. In real robotics it could be friction, mass, motor gain — anything that shifts between sim and real.
 
 ### Step 2: train with DR
 
-At the start of each episode, sample `slip ~ Uniform[0.0, 0.3]`. Train PPO / Q-learning / anything. Do this for many episodes.
+At the start of each episode, sample `slip ~ Uniform[0.0, 0.3]`. Train PPO / Q-learning / anything. Do this for many episodes. In `code/main.py` this is `train_dr(0.0, 0.3)`; `train_fixed(slip)` is the same learner with a zero-width range, so the *only* difference between the two runs is the width of the distribution.
 
 ### Step 3: evaluate zero-shot on "real" slips
 
-Evaluate on `slip ∈ {0.0, 0.1, 0.2, 0.3, 0.5, 0.7}`. The first four are within training support; `0.5` and `0.7` are outside. A DR-trained policy should stay near-optimal inside support and degrade gracefully outside. A fixed-slip-trained policy will be brittle outside its training slip.
+Evaluate on `slip ∈ {0.0, 0.1, 0.2, 0.3, 0.5, 0.7}`. The first four are within training support; `0.5` and `0.7` are outside. A DR-trained policy should stay usable inside support and degrade gracefully outside. A fixed-slip-trained policy will be brittle outside its training slip.
 
 ### Step 4: compare to narrow training
 
-Train a second policy with `slip = 0.0` only. Evaluate on the same `slip` sweep. You should see a catastrophic drop as soon as real slip > 0.
+Train a second policy with `slip = 0.0` only, and a third with the over-wide `slip ~ Uniform[0.0, 0.9]`. Evaluate all three on the same sweep. The routes alone tell the story: the fixed-slip policy takes the 7-step edge route, the DR policy pays 9 steps to stay a row away from the cliff, and the over-randomized policy is so scared it never leaves `S` at all.
+
+| slip | A fixed (slip=0) | B DR (U[0, 0.3]) | C over-DR (U[0, 0.9]) |
+|------|------------------|------------------|-----------------------|
+| 0.0  | **-7.00**        | -9.00            | -100.00               |
+| 0.1  | -16.39           | **-12.19**       | -32.91                |
+| 0.2  | -32.32           | **-15.11**       | -22.43                |
+| 0.3  | -52.66           | **-19.95**       | -21.33                |
+| 0.5  | -159.84          | **-35.95**       | -28.99                |
+| 0.7  | -345.70          | -69.89           | **-45.55**            |
+
+Read it as three failure modes, not two. **A** is perfect at home and collapses the instant the motors slip: every misfire on the edge route is a 20-point fall, and by `slip = 0.5` it spends most of its 100-step budget falling into the cliff and restarting. **B** pays two extra steps at `slip = 0` and is still 4.4× better than A at `slip = 0.5`, well outside the range it trained on (3–5× across training seeds, so the gap is the mechanism, not the seed). **C** shows the price of the opposite mistake: `-100.00` at `slip = 0` is the step cap, because standing next to the start beats any route when the sim insists the motors might be 90% unreliable. C only wins where reality really is that bad.
+
+The DR range you want is the one that brackets the reality you expect — not the widest one you can type.
 
 ## Pitfalls
 
-- **Too much randomization.** Train on `slip ∈ [0, 0.9]` and your policy is so risk-averse it never tries the optimal path. Match the *expected* real-world distribution, not "anything could happen."
+- **Too much randomization.** Train on `slip ∈ [0, 0.9]` and your policy is so risk-averse it never tries the optimal path — column C above literally refuses to leave the start. Match the *expected* real-world distribution, not "anything could happen."
 - **Too little randomization.** Train on a thin slice and the policy can't generalize at all. Use adaptive curriculum (Automatic Domain Randomization) that widens the distribution as the policy improves.
 - **Misidentified parameter space.** Randomize the wrong thing (camera hue when the real gap is motor delay) and DR does not help. Profile the real robot first.
 - **Privileged info leakage.** A teacher that uses global state for actions, not just observations, can produce a student that cannot catch up. Ensure the teacher's policy is realizable by the student given observation history.
@@ -128,9 +155,9 @@ Refuse to deploy without (a) a zero-shot sim-variant test, (b) a safety shield, 
 
 ## Exercises
 
-1. **Easy.** Train a Q-learning agent on the fixed-slip GridWorld (slip=0.0). Evaluate on slip ∈ {0.0, 0.1, 0.3, 0.5}. Plot return vs slip.
-2. **Medium.** Train a DR Q-learning agent sampling `slip ~ Uniform[0, 0.3]`. Evaluate the same sweep. How much does DR buy at slip=0.5 (out-of-distribution)?
-3. **Hard.** Implement a curriculum: start with slip=0.0, widen the DR range every time the policy hits 90% of optimal. Measure total environment steps to reach slip=0.3 zero-shot vs. a fixed DR baseline.
+1. **Easy.** Train a Q-learning agent on the fixed-slip cliff walk (slip=0.0). Evaluate on slip ∈ {0.0, 0.1, 0.3, 0.5}. Plot return vs slip. It should start at the optimal `-7` and be worse than `-100` by slip=0.5; print the greedy route and confirm it runs along row 2, flush against the cliff.
+2. **Medium.** Train a DR Q-learning agent sampling `slip ~ Uniform[0, 0.3]`. Evaluate the same sweep. DR costs 2 steps at slip=0 (`-9` vs `-7`) and buys a 3–5× better return at slip=0.5 depending on the seed (`-36` vs `-160` on the lesson's seed). Reproduce both halves of that trade, then separate the two causes: re-score the DR route with the cliff penalty set to `-1` instead of `-20`. Whatever advantage survives is just path length; the rest was the margin.
+3. **Hard.** Implement a curriculum: start with slip=0.0, widen the DR range every time the policy hits 90% of optimal. The trap is that "optimal" moves: `-7` is reachable only at slip=0, so a threshold pinned to `-7.8` stalls the curriculum after one widening. Recompute the target for the current range, then measure total environment steps to reach slip=0.3 zero-shot vs. a fixed DR baseline.
 
 ## Key Terms
 

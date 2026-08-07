@@ -46,10 +46,12 @@ def sentence_split(text):
 
 
 def similarity(s1, s2):
-    w1 = Counter(s1.lower().split())
-    w2 = Counter(s2.lower().split())
-    intersection = sum((w1 & w2).values())
-    denom = math.log(len(w1) + 1) + math.log(len(w2) + 1)
+    t1 = s1.lower().split()
+    t2 = s2.lower().split()
+    intersection = sum((Counter(t1) & Counter(t2)).values())
+    # Mihalcea and Tarau normalize by sentence length in words, not by
+    # vocabulary size. len(Counter(...)) would count distinct words instead.
+    denom = math.log(len(t1) + 1) + math.log(len(t2) + 1)
     if denom == 0:
         return 0.0
     return intersection / denom
@@ -75,10 +77,10 @@ def textrank(text, top_k=3, damping=0.85, iterations=50, epsilon=1e-4):
             for j in range(n):
                 if sim[i][j] > 0:
                     new_scores[j] += damping * sim[i][j] / total_out * scores[i]
-        if max(abs(s - ns) for s, ns in zip(scores, new_scores)) < epsilon:
-            scores = new_scores
-            break
+        converged = max(abs(s - ns) for s, ns in zip(scores, new_scores)) < epsilon
         scores = new_scores
+        if converged:
+            break
 
     ranked = sorted(range(n), key=lambda k: scores[k], reverse=True)[:top_k]
     ranked.sort()

@@ -38,7 +38,7 @@ SH coefficients  c_lm       (3 * (L+1)^2,)   view-dependent colour
 
 Rotation + scale build a 3x3 covariance: `Sigma = R S S^T R^T`. That is the shape of the Gaussian in 3D. Spherical harmonics let the colour change with viewing direction — specular highlights, subtle sheen, view-dependent glow — without storing per-view textures. With SH degree 3 you get 16 coefficients per colour channel, 48 floats per Gaussian for colour alone.
 
-A scene typically has 1-5 million Gaussians. Each stores roughly 60 floats (3 + 4 + 3 + 1 + 48 + misc). That is 240 MB for a five-million-Gaussian scene — far smaller than the equivalent point cloud with per-point texture, and an order of magnitude smaller than a NeRF's MLP weights re-rendered at high resolution.
+A scene typically has 1-5 million Gaussians. Each stores roughly 60 floats (3 + 4 + 3 + 1 + 48 + misc). At 4 bytes per float that is 240 bytes per Gaussian, so about 1.2 GB for a five-million-Gaussian scene in float32 — which is why shipped scenes are almost always quantised (half precision, or a truncated SH degree) down to a few hundred MB.
 
 ### Rasterisation, not ray marching
 
@@ -101,7 +101,7 @@ Densification runs every N iterations. A scene typically grows from ~100k initia
 
 ### Spherical harmonics in one paragraph
 
-View-dependent colour is a function `c(direction)` on the unit sphere. Spherical harmonics are the sphere's Fourier basis. Truncate at degree `L` and you get `(L+1)^2` basis functions per channel. Evaluating the colour for a new view is a dot product between the learned SH coefficients and the basis evaluated at the viewing direction. Degree 0 = one coefficient = constant colour. Degree 3 = 16 coefficients = enough to capture Lambertian shading, specular, and mild reflection. SD Gaussian Splatting papers use degree 3 by default.
+View-dependent colour is a function `c(direction)` on the unit sphere. Spherical harmonics are the sphere's Fourier basis. Truncate at degree `L` and you get `(L+1)^2` basis functions per channel. Evaluating the colour for a new view is a dot product between the learned SH coefficients and the basis evaluated at the viewing direction. Degree 0 = one coefficient = constant colour. Degree 3 = 16 coefficients = enough to capture Lambertian shading, specular, and mild reflection. 3D Gaussian Splatting papers use degree 3 by default.
 
 ### The 2026 production stack
 
@@ -131,6 +131,8 @@ cv3-gaussian-splat
 We first build a 2D rasteriser. The 3D case reduces to it after projection.
 
 ```python
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -234,7 +236,6 @@ class Splats2D(nn.Module):
 ### Step 4: Fit 2D Gaussians to a target image
 
 ```python
-import math
 import numpy as np
 
 def make_target(size=64):
@@ -277,12 +278,12 @@ Every production implementation (`gsplat`, `inria/gaussian-splatting`, `nerfstud
 
 ### Step 6: Spherical harmonics evaluation
 
-The SH basis up to degree 3 has 16 terms per channel. Evaluation:
+The SH basis up to degree 3 has 16 terms per channel. The listing below spells out the first three bands (degrees 0, 1, 2 — coefficients 0 to 8); the complete 16-term version is `eval_sh_degree_3` in `code/main.py`.
 
 ```python
 def eval_sh_degree_3(sh_coeffs, dirs):
     """
-    sh_coeffs: (..., 16, 3)   last dim is RGB channels
+    sh_coeffs: (..., 16, 3)   full degree-3 set; this listing consumes only the first 9
     dirs:      (..., 3)       unit vectors
     returns:   (..., 3)
     """
@@ -306,7 +307,9 @@ def eval_sh_degree_3(sh_coeffs, dirs):
     result = result + C2[3] * xz[..., None] * sh_coeffs[..., 7, :]
     result = result + C2[4] * (x2 - y2)[..., None] * sh_coeffs[..., 8, :]
 
-    # degree 3 terms omitted here for brevity; full 16-coefficient version in the code file
+    # The seven degree-3 terms (coefficients 9..15) are omitted here for brevity.
+    # Copied as-is this function silently ignores sh_coeffs[..., 9:, :] and returns a
+    # degree-2 colour; use the full version in code/main.py for real work.
     return result
 ```
 

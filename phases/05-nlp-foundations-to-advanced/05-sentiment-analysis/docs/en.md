@@ -62,6 +62,8 @@ from collections import Counter
 
 
 def train_nb(docs_by_class, vocab, alpha=1.0):
+    if alpha <= 0:
+        raise ValueError("alpha must be > 0; alpha=0 leaves zero probabilities and predict_nb logs them")
     class_priors = {}
     class_word_probs = {}
     total_docs = sum(len(d) for d in docs_by_class.values())
@@ -72,7 +74,7 @@ def train_nb(docs_by_class, vocab, alpha=1.0):
         for doc in docs:
             for token in doc:
                 counts[token] += 1
-        total = sum(counts.values()) + alpha * len(vocab)
+        total = sum(counts[w] for w in vocab) + alpha * len(vocab)
         class_word_probs[cls] = {
             w: (counts[w] + alpha) / total for w in vocab
         }
@@ -90,7 +92,9 @@ def predict_nb(doc, class_priors, class_word_probs):
     return max(scores, key=scores.get)
 ```
 
-Additive smoothing (alpha=1.0) is Laplace smoothing. Without it, a word unseen in a class has probability zero and the log explodes. `alpha=0.01` is common in practice. `alpha=1.0` is the teaching default.
+Additive smoothing (alpha=1.0) is Laplace smoothing. Without it, a word unseen in a class has probability zero and the log explodes — which is why `train_nb` rejects `alpha=0` outright instead of letting `predict_nb` die on `math.log(0)` at inference time. `alpha=0.01` is common in practice. `alpha=1.0` is the teaching default.
+
+Watch the denominator. It sums counts over `vocab` only, not `sum(counts.values())`. The two are the same only when the vocabulary covers every training token; the moment you drop rare words with a min-count cutoff, `counts` still holds those dropped tokens, and using the full sum makes `class_word_probs[cls]` add up to less than 1. A distribution that is not a distribution is a bug you will not see in the accuracy number, only in the calibration.
 
 ### Step 3: logistic regression from scratch
 
@@ -177,9 +181,9 @@ def evaluate(y_true, y_pred):
     fp = sum(1 for t, p in zip(y_true, y_pred) if t == 0 and p == 1)
     fn = sum(1 for t, p in zip(y_true, y_pred) if t == 1 and p == 0)
     tn = sum(1 for t, p in zip(y_true, y_pred) if t == 0 and p == 0)
-    precision = tp / (tp + fp) if tp + fp else 0
-    recall = tp / (tp + fn) if tp + fn else 0
-    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
     return {"tp": tp, "fp": fp, "tn": tn, "fn": fn, "precision": precision, "recall": recall, "f1": f1}
 ```
 

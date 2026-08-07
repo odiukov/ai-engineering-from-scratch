@@ -114,13 +114,22 @@ detected = sc.detect(watermarked, sr=24000)   # returns payload bytes
 ### Step 5: consent gate
 
 ```python
+class ConsentError(RuntimeError):
+    """Refusal, not a bug — surface it to the caller."""
+
+
 def cloned_inference(text, ref_audio, consent_record):
-    assert verify_signature(consent_record), "Signed consent required"
-    assert consent_record["speaker_id"] == hash_speaker(ref_audio)
+    # consent_record = {"consent_id": ..., "speaker_id": ..., "signature": ...}
+    if not verify_signature(consent_record):
+        raise ConsentError("signed consent required")
+    if consent_record["speaker_id"] != hash_speaker(ref_audio):
+        raise ConsentError("consent does not cover this voice")
     wav = tts.infer(ref_file=ref_audio, gen_text=text)
-    wav = watermark(wav, payload=consent_record["id"])
+    wav = watermark(wav, payload=consent_record["consent_id"])
     return wav
 ```
+
+Never write this gate with `assert`. Python strips every assertion under `-O` (and `PYTHONOPTIMIZE`), so the one check you are legally obliged to run is also the one check that silently disappears the day someone adds an optimization flag to the production entrypoint. Assertions are for invariants you believe can't fail; consent is an input you expect to be wrong sometimes. The `consent_id` is what goes into the watermark payload, matching the `consent_id:...` format from Step 4 — it ties every emitted waveform back to a row in the consent log.
 
 ## Use It
 

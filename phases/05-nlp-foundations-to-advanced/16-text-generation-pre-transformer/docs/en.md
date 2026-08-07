@@ -114,14 +114,12 @@ Add 1 to every count. Smooths but over-allocates mass to unseen events, hurting 
 
 ```python
 def kneser_ney_bigram_model(corpus_tokens, discount=0.75):
-    unigrams = Counter()
     bigrams = Counter()
     unigram_contexts = defaultdict(set)
 
     for sentence in corpus_tokens:
         padded = ["<s>"] + sentence + ["</s>"]
         for i, w in enumerate(padded):
-            unigrams[w] += 1
             if i > 0:
                 prev = padded[i - 1]
                 bigrams[(prev, w)] += 1
@@ -140,7 +138,8 @@ def kneser_ney_bigram_model(corpus_tokens, discount=0.75):
     for (prev, w) in bigrams:
         unique_follow[prev].add(w)
 
-    def prob(prev, w):
+    def prob(context, w):
+        prev = context[-1]
         count = bigrams.get((prev, w), 0)
         denom = context_totals.get(prev, 0)
         if denom == 0:
@@ -152,7 +151,9 @@ def kneser_ney_bigram_model(corpus_tokens, discount=0.75):
     return prob
 ```
 
-Three moving parts. `continuation_prob` captures "how many different contexts does this word appear in?" (the Kneser-Ney innovation). `lambda_prev` is the mass freed by the discount, used to weight the backoff. The final probability is the discounted main term plus the weighted continuation term.
+Three moving parts. `continuation_prob` captures "how many different contexts does this word appear in?" (the Kneser-Ney innovation). `lambda_prev` is the mass freed by the discount, used to weight the backoff. The final probability is the discounted main term plus the weighted continuation term. There is no raw unigram counter anywhere in this function, and that is the point: KN's lower-order model is continuation probability, not frequency.
+
+The returned `prob` takes the same `(context, word)` shape as `raw_probability` and `laplace_probability` from Steps 1-2 — `context` is a tuple of the previous `n-1` tokens, here a 1-tuple. Keeping one signature across all three models is what lets Steps 4 and 5 accept any of them.
 
 ### Step 4: generating text with sampling
 
@@ -160,11 +161,12 @@ Three moving parts. `continuation_prob` captures "how many different contexts do
 import random
 
 
-def generate(prob_fn, vocab, prefix, max_len=30, seed=0):
+def generate(prob_fn, vocab, prefix, n=2, max_len=30, seed=0):
     rng = random.Random(seed)
     tokens = list(prefix)
     for _ in range(max_len):
-        candidates = [(w, prob_fn(tokens[-1], w)) for w in vocab]
+        context = tuple(tokens[-(n - 1):])
+        candidates = [(w, prob_fn(context, w)) for w in vocab]
         total = sum(p for _, p in candidates)
         r = rng.random() * total
         acc = 0.0
@@ -186,17 +188,33 @@ Sampling proportional to probability. Always gives different output per seed. Fo
 import math
 
 
-def perplexity(prob_fn, sentences):
+def perplexity(prob_fn, sentences, n=2):
     total_log_prob = 0.0
     total_tokens = 0
     for sentence in sentences:
-        padded = ["<s>"] + sentence + ["</s>"]
-        for i in range(1, len(padded)):
-            p = prob_fn(padded[i - 1], padded[i])
+        padded = ["<s>"] * (n - 1) + sentence + ["</s>"]
+        for i in range(n - 1, len(padded)):
+            context = tuple(padded[i - n + 1:i])
+            p = prob_fn(context, padded[i])
             total_log_prob += math.log(max(p, 1e-12))
             total_tokens += 1
     return math.exp(-total_log_prob / total_tokens)
 ```
+
+`n` must match the order of the model behind `prob_fn`, because the padding and the context width have to be the same at train and test time. Any of the three models from Steps 1-3 plugs straight in — that is Exercise 2:
+
+```python
+ngrams, contexts = train_ngram(train, n=3)
+vocab_size = len({w for s in train for w in s} | {"<s>", "</s>"})
+
+kn = kneser_ney_bigram_model(train)
+laplace = lambda ctx, w: laplace_probability(ngrams, contexts, vocab_size, ctx, w)
+
+print(perplexity(kn, test, n=2))
+print(perplexity(laplace, test, n=3))
+```
+
+Compare only models scored on the same tokens: a bigram and a trigram model see the same test tokens here, but a comparison across different tokenizations is meaningless.
 
 Lower is better. For Brown corpus, a well-tuned 4-gram KN model hits perplexity around 140. A transformer LM hits 15-30 on the same test set. The gap is about 10x. That gap is why the field moved on.
 

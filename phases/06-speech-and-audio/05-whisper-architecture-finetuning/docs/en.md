@@ -23,12 +23,12 @@ But Whisper is not a pipeline you can treat as a black box forever. Domain shift
 
 **Architecture.** Standard transformer encoder-decoder.
 
-- Input: 30-second log-mel spectrogram, 80 mels, 10 ms hop → 3000 frames. Clips shorter are zero-padded, clips longer are chunked.
+- Input: 30-second log-mel spectrogram, 80 mels up to Large-v2 and 128 mels for Large-v3 and Turbo, 10 ms hop → 3000 frames. Clips shorter are zero-padded, clips longer are chunked.
 - Encoder: conv-downsample (stride 2) + `N` transformer blocks. For Large-v3: 32 layers, 1280-dim, 20 heads.
 - Decoder: `N` transformer blocks with causal self-attn + cross-attn to encoder output. Same size as encoder.
 - Output: BPE tokens over a 51,865-token vocab.
 
-Large-v3 has 1.55B params. Turbo uses a 4-layer decoder (from 32), cutting latency 8× with a <1% WER hit.
+Large-v3 has 1.55B params. Turbo uses a 4-layer decoder (from 32), cutting latency 8× at near-parity WER on English read speech — see the table below: 1.58% vs 1.8% on LibriSpeech test-clean.
 
 **The prompt format.** Whisper is a multitask model steered by special tokens in the decoder prompt:
 
@@ -36,15 +36,15 @@ Large-v3 has 1.55B params. Turbo uses a 4-layer decoder (from 32), cutting laten
 <|startoftranscript|><|en|><|transcribe|><|notimestamps|> Hello world.<|endoftext|>
 ```
 
-- `<|en|>` — language tag; forces translation-vs-transcription behavior.
-- `<|transcribe|>` or `<|translate|>` — translate English output from any-language input, or verbatim.
+- `<|en|>` — language tag; declares the spoken language of the audio.
+- `<|transcribe|>` or `<|translate|>` — transcribe verbatim in the spoken language, or translate the speech into English.
 - `<|notimestamps|>` — skip word-level timestamps (faster).
 
 The prompt is what lets one model do many tasks. Change `<|en|>` to `<|fr|>` and it transcribes French.
 
 **30-second window.** Everything is pinned to 30 seconds. Longer clips need chunking; shorter clips are padded. Windows are not streamed natively — this is why WhisperX, Whisper-Streaming, and faster-whisper exist.
 
-**Log-mel normalization.** `(log_mel - mean) / std` where the stats come from Whisper's own training corpus. You *must* use Whisper's preprocessing (`whisper.audio.log_mel_spectrogram`), not `librosa.feature.melspectrogram`.
+**Log-mel normalization.** No corpus statistics are involved. `whisper.audio.log_mel_spectrogram` takes `log10` of the mel power, clamps the dynamic range per clip (`log_spec = max(log_spec, log_spec.max() - 8.0)`), then applies the fixed affine map `(log_spec + 4.0) / 4.0` to land roughly in `[-1, 1]`. You *must* use Whisper's preprocessing, not `librosa.feature.melspectrogram`.
 
 ### Variants in 2026
 
@@ -158,7 +158,7 @@ The 2026 stack:
 - **Hallucinated text on silence.** Whisper trained on captions includes "Thanks for watching!", "Subscribe!", song lyrics. Always VAD-gate before calling.
 - **`condition_on_previous_text` cascade.** One hallucination pollutes subsequent windows. Set `False` unless you need fluency across chunks.
 - **Short-clip padding.** A 2-second clip padded to 30 seconds can hallucinate in the trailing silence. Use `pad=False` or VAD-gate.
-- **Wrong mel stats.** Using librosa's mels instead of Whisper's produces near-random output. Use `whisper.audio.log_mel_spectrogram`.
+- **Wrong mel preprocessing.** Using librosa's mels instead of Whisper's clamp-and-affine routine produces near-random output. Use `whisper.audio.log_mel_spectrogram`.
 
 ## Ship It
 
@@ -177,7 +177,7 @@ Save as `outputs/skill-whisper-tuner.md`. Design a Whisper fine-tune or inferenc
 | 30-sec window | Whisper's limit | Hard input cap; chunk longer audio. |
 | SOT | Start-of-transcript | `<\|startoftranscript\|>` kicks off the decoder prompt. |
 | Timestamps token | Temporal alignment | Every 0.02 s offset is a special token in the 51k vocab. |
-| Turbo | The fast variant | 4-decoder layers, 8× faster, <1% WER regression. |
+| Turbo | The fast variant | 4-decoder layers, 8× faster, near-parity WER on English. |
 | WhisperX | The long-form wrapper | VAD + Whisper + wav2vec alignment + diarization. |
 | LoRA fine-tune | Efficient tuning | Add low-rank adapters to attention; train ~0.3% of params. |
 | Hallucination | The silent failure | Whisper produces fluent English from noise/silence. |

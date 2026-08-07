@@ -131,7 +131,7 @@ Moshi wins:
 Moshi does not win:
 
 - Tool calling (not trained for it; you need a separate LLM path).
-- Long reasoning (Moshi is an 8B-ish dialogue model, not Claude/GPT-4).
+- Long reasoning (Moshi is a 7B-scale dialogue model, not Claude/GPT-4).
 - Factual accuracy on niche topics.
 - Most production enterprise use cases (still use pipelines in 2026).
 
@@ -177,7 +177,7 @@ Save as `outputs/skill-duplex-pipeline.md`. Pick pipeline vs full-duplex archite
 ## Further Reading
 
 - [Défossez et al. (2024). Moshi — speech-text foundation model](https://arxiv.org/html/2410.00037v2) — the paper.
-- [Kyutai Labs (2026). Hibiki-Zero](https://arxiv.org/abs/2602.12345) — streaming translation without aligned data.
+- Kyutai Labs (2026). Hibiki-Zero — streaming translation without aligned data. **Citation needed:** look the paper up on [kyutai.org](https://kyutai.org/) before quoting an arXiv id; the one previously printed here was a placeholder.
 - [Sesame (2025). Crossing the uncanny valley of voice](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice) — CSM spec.
 - [Kyutai — Moshi repo](https://github.com/kyutai-labs/moshi) — install + server.
 - [OpenAI — Realtime API](https://platform.openai.com/docs/guides/realtime) — closed commercial peer.

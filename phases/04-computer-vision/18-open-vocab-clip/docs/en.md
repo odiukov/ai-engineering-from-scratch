@@ -28,8 +28,8 @@ That capability — zero-shot transfer — is why every modern vision system sta
 
 ```mermaid
 flowchart LR
-    IMG["Image"] --> IENC["Image encoder<br/>(ViT-L/14)"] --> IEMB["Image embedding<br/>(1024,)"]
-    TXT["Caption"] --> TENC["Text encoder<br/>(transformer)"] --> TEMB["Text embedding<br/>(1024,)"]
+    IMG["Image"] --> IENC["Image encoder<br/>(ViT-L/14)"] --> IEMB["Image embedding<br/>(768,)"]
+    TXT["Caption"] --> TENC["Text encoder<br/>(transformer)"] --> TEMB["Text embedding<br/>(768,)"]
     IEMB --> SIM["Cosine similarity"]
     TEMB --> SIM
 
@@ -38,7 +38,7 @@ flowchart LR
     style SIM fill:#dcfce7,stroke:#16a34a
 ```
 
-Both encoders end with a linear projection to the same embedding dimension (512 for CLIP-B/32, 1024 for CLIP-L/14). L2-normalise and compute cosine similarity.
+Both encoders end with a linear projection to the same embedding dimension (512 for CLIP-B/32, 768 for CLIP-L/14, 1024 for the larger OpenCLIP ViT-H/14 and ViT-g/14). L2-normalise and compute cosine similarity.
 
 ### The objective
 
@@ -59,11 +59,12 @@ Symmetric because both image-to-text and text-to-image retrieval should work. `t
 SigLIP (Zhai et al., 2023) replaced the softmax with per-pair sigmoid:
 
 ```
-loss = mean over pairs of log(1 + exp(-y_ij * sim_ij))
+loss = mean over pairs of log(1 + exp(-y_ij * (s * sim_ij + b)))
 y_ij = +1 if matching, -1 otherwise
+s    = learned scale (positive), b = learned bias, initialised strongly negative
 ```
 
-Per-pair loss removes the batch-level normalisation that CLIP requires. SigLIP trains better at small batch sizes and matches or exceeds CLIP at equal data.
+Per-pair loss removes the batch-level normalisation that CLIP requires. The learned bias `b` is not decoration: an NxN batch has N positives against N^2 - N negatives, so a bias initialised strongly negative stops that imbalance from swamping the early gradient. Without it the loss does not train well at the small batch sizes SigLIP is meant to fix. SigLIP matches or exceeds CLIP at equal data.
 
 ### Zero-shot classification
 
@@ -215,7 +216,7 @@ This lesson produces:
 | Temperature / logit_scale | "tau" | Learned scalar that scales the similarity matrix before softmax |
 | Prompt template | "A photo of a {}" | Natural-language wrapper around class names; averaging many templates boosts zero-shot accuracy |
 | CLIP | "Image+text model" | The 2021 OpenAI model; vocabulary of the field in 2026 |
-| SigLIP | "Sigmoid CLIP" | Swaps softmax for per-pair sigmoid; trains better at small batches |
+| SigLIP | "Sigmoid CLIP" | Swaps softmax for per-pair sigmoid, plus a learned bias that offsets the negative/positive imbalance; trains better at small batches |
 | OpenCLIP | "Open reproduction" | Community-trained CLIP variants on LAION; production default for open-source pipelines |
 | VLM | "Vision-language model" | A CLIP-family encoder plus an LLM, trained to answer questions about images |
 

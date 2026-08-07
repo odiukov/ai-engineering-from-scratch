@@ -179,7 +179,11 @@ def count_parameters(vocab: int, hidden: int, ff: int, n_layers: int,
     attn = 4 * hidden * hidden
     mlp = 3 * hidden * ff
     main = emb + n_layers * (attn + mlp) + hidden
-    per_mtp = hidden * hidden + attn + mlp
+    # M_k in DeepSeek-V3 is h x 2h: it projects the concatenation of two
+    # RMSNorm'd h-vectors, so it costs 2h^2, not h^2. (The toy forward pass
+    # above folds the concat into an addition, but the accounting here is for
+    # the real module.) 2h^2 + 4h^2 + 8h^2 = ~14h^2 at ff = 8h/3.
+    per_mtp = 2 * hidden * hidden + attn + mlp
     mtp_total = D * per_mtp
     return ParamReport(
         embedding=emb, head_shared=True,

@@ -69,6 +69,9 @@ def glove_train(vocab, pair_counts, dim=16, epochs=100, lr=0.05, x_max=100, alph
         for (i, j), x_ij in pair_counts.items():
             weight = (x_ij / x_max) ** alpha if x_ij < x_max else 1.0
             diff = W[i] @ W_tilde[j] + b[i] + b_tilde[j] - np.log(x_ij)
+            # The exact derivative of f(x) * diff^2 carries a factor of 2.
+            # It is folded into `lr` here, so `coef` is the gradient up to
+            # that constant, not the gradient itself.
             coef = weight * diff
 
             grad_W_i = coef * W_tilde[j]
@@ -97,8 +100,10 @@ def char_ngrams(word, n_min=3, n_max=6):
 
 ```python
 >>> char_ngrams("where")
-{'<where>', '<wh', 'whe', 'her', 'ere', 're>', '<whe', 'wher', 'here', 'ere>', '<wher', 'where', 'here>'}
+{'<where>', '<wh', 'whe', 'her', 'ere', 're>', '<whe', 'wher', 'here', 'ere>', '<wher', 'where', 'here>', '<where', 'where>'}
 ```
+
+Fifteen pieces for a five-letter word: the whole wrapped form plus every 3-, 4-, 5-, and 6-gram of `<where>`. Note that `where` (the 5-gram inside the brackets) and `<where>` (the whole word) are different entries — that is deliberate, since FastText wants a slot for the word itself on top of its parts.
 
 Each word is represented by its set of n-grams (typically 3 to 6 characters). The word embedding is the sum of its n-gram embeddings. For skip-gram training, plug this in where Word2Vec used a single vector.
 
@@ -130,7 +135,10 @@ def learn_bpe(corpus, k_merges):
                 pair_freq[(a, b)] += freq
         if not pair_freq:
             break
-        best = pair_freq.most_common(1)[0][0]
+        # Most frequent pair, ties broken lexicographically. `most_common(1)`
+        # would break ties by insertion order, so the same corpus in a
+        # different order would learn a different vocabulary.
+        best = min(pair_freq.items(), key=lambda kv: (-kv[1], kv[0]))[0]
         merges.append(best)
 
         new_vocab = Counter()
@@ -172,7 +180,7 @@ def apply_bpe(word, merges):
 ['low', 'est</w>']
 ```
 
-First iteration merges the most common adjacent pair. After enough iterations, frequent substrings (`low`, `est`, `tion`) become single tokens and rare words break cleanly.
+First iteration merges the most common adjacent pair. Ties are common on small corpora, so the tie-break has to be explicit — otherwise your merge list depends on the order your corpus happened to be read in, and the vocabulary is not reproducible. After enough iterations, frequent substrings (`low`, `est`, `tion`) become single tokens and rare words break cleanly.
 
 The real GPT / BERT / T5 tokenizers learn 30k-100k merges. Result: any text tokenizes into a bounded-length sequence of known IDs, no OOV ever.
 

@@ -62,6 +62,12 @@ SLOT_EXTRACTORS = {
 
 
 def is_correction(utterance):
+    """Flag a turn as a correction.
+
+    This is a routing signal, not a state edit: the extractors already overwrite
+    the slot the correction names. Use the flag to ask for confirmation, or to
+    hand the turn to an LLM that regenerates the whole state from history.
+    """
     return any(cue in utterance.lower() for cue in CORRECTION_CUES)
 
 
@@ -123,7 +129,8 @@ def main():
         print(f"\ndialogue {i}:")
         for turn in d["turns"]:
             state = update_state(state, turn)
-            print(f"  user: {turn}")
+            tag = "  (correction cue)" if is_correction(turn) else ""
+            print(f"  user: {turn}{tag}")
             print(f"  state: {state}")
         ok = state == d["gold"]
         jga_correct += int(ok)

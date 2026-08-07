@@ -69,8 +69,9 @@ PATTERNS = [
     RulePattern(r"my name is (\w+)", "Nice to meet you, {0}."),
     RulePattern(r"i (need|want) (.+)", "Why do you {0} {1}?"),
     RulePattern(r"i feel (.+)", "Why do you feel {0}?"),
-    RulePattern(r"(.*)", "Tell me more about that."),
 ]
+
+FALLBACK = "Tell me more about that."
 
 
 def rule_based_respond(user_input):
@@ -78,10 +79,12 @@ def rule_based_respond(user_input):
         m = pattern.regex.match(user_input.strip())
         if m:
             return pattern.template.format(*m.groups())
-    return "I don't understand."
+    return FALLBACK
 ```
 
 ELIZA in 20 lines. The reflection trick ("I feel sad" → "Why do you feel sad") is the canonical psychotherapist demo from Weizenbaum 1966. Still instructive.
+
+The catch-all lives outside `PATTERNS` on purpose. Write it as a trailing `r"(.*)"` rule instead and it matches every input, including the empty string, so any code after the loop is dead — a rule list with a catch-all in it has exactly one reachable failure branch, and it is not the one you wrote last.
 
 ### Step 2: retrieval-based (FAQ)
 
@@ -150,7 +153,10 @@ def agent_loop(user_message, tools, llm, max_steps=5):
                 history.append({"role": "tool", "name": tool_name, "content": f"error: arguments must be a dict, got {type(args).__name__}"})
                 continue
             fn = tools[tool_name]
-            result = fn(**args)
+            try:
+                result = fn(**args)
+            except Exception as exc:
+                result = f"error: tool {tool_name!r} failed: {type(exc).__name__}: {exc}"
             history.append({"role": "assistant", "tool_call": tool_call})
             history.append({"role": "tool", "name": tool_name, "content": result})
         else:
@@ -159,6 +165,8 @@ def agent_loop(user_message, tools, llm, max_steps=5):
 ```
 
 Three things to name. Tools are callable functions the LLM can invoke. The loop terminates when the LLM returns a final answer instead of a tool call. The step budget prevents infinite loops on ambiguous tasks.
+
+Every failure inside the loop turns into an observation the model can read, never an exception that escapes it — an unknown tool name, malformed arguments, and a tool that raises are all handled the same way. A raised exception is a normal outcome of calling a real API: it means timeout, auth failure, or bad input, and the model can retry or reroute if it is told. Let it propagate and one flaky tool ends the conversation.
 
 Real production adds: retrieval-first grounding (inject relevant docs before each LLM call), guardrails (refuse destructive actions without confirmation), observability (log every step), and evaluations (automated checks that agent behavior stays on-spec).
 
@@ -170,7 +178,7 @@ def hybrid_chat(user_input):
         return structured_flow(user_input)
 
     faq_answer = faq_respond(user_input, threshold=0.6)
-    if faq_answer:
+    if faq_answer is not None:
         return faq_answer
 
     return agent_loop(user_input, tools, llm)
@@ -182,6 +190,8 @@ def is_destructive_action(text):
 ```
 
 The pattern: deterministic rules for anything destructive, retrieval for canned FAQs, LLM agents for everything else. This is what ships in 2026 customer-support systems.
+
+`is not None`, not truthiness. `faq_respond` signals "no confident match" with `None`; an empty-string answer is a curated FAQ entry that happens to be blank, and a truthiness check silently escalates it to the LLM. Routing decisions read the sentinel, not the falsiness of the payload.
 
 ## Use It
 

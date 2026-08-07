@@ -11,7 +11,7 @@
 
 - Design a production vision pipeline that detects objects, classifies them, and emits structured JSON — with every failure path handled
 - Plug a detector (Mask R-CNN or YOLO), a classifier (ConvNeXt-Tiny), and a data contract (Pydantic) into one service
-- Benchmark the end-to-end pipeline and identify the first bottleneck (usually preprocessing, then the detector)
+- Benchmark the end-to-end pipeline and identify the first bottleneck (the detector on CPU; preprocessing once the models run on GPU)
 - Ship a minimal FastAPI service that accepts an image upload, runs the pipeline, and returns detections with classifications
 
 ## The Problem
@@ -54,7 +54,7 @@ Detection(
     box: tuple[float, float, float, float],   # (x1, y1, x2, y2), absolute pixels
     score: float,                              # [0, 1]
     class_id: int,                             # from detector's label map
-    mask: Optional[list[list[int]]],           # RLE-encoded if present
+    mask_rle: Optional[str],                   # RLE-encoded mask, if present
 )
 
 PipelineResult(
@@ -71,7 +71,7 @@ When a detector returns boxes in `(cx, cy, w, h)` instead of `(x1, y1, x2, y2)`,
 
 Three truths hold in nearly every vision pipeline:
 
-1. **Preprocessing is often the biggest single block.** Decoding JPEGs, converting colour spaces, resizing — these are CPU-bound and easy to forget.
+1. **Preprocessing is easy to underestimate.** Decoding JPEGs, converting colour spaces, resizing — these are CPU-bound and easy to forget. On a CPU-only box the detector still dwarfs them (see the numbers in Step 5); once the models move to GPU, preprocessing frequently becomes the biggest single block of wall-clock time.
 2. **The detector dominates GPU time.** 70-90% of GPU time is in the detection forward pass.
 3. **Postprocessing (NMS, RLE encode/decode) is cheap on GPU, expensive on CPU.** Always profile with the actual target.
 
@@ -175,10 +175,13 @@ class VisionPipeline:
         crops = []
         detections = []
         valid_indices = []
+        H, W = tensor.shape[-2], tensor.shape[-1]
         for i, (box, score, cls) in enumerate(zip(det["boxes"], det["scores"], det["labels"])):
-            x1, y1, x2, y2 = [max(0, int(b)) for b in box.tolist()]
-            x2 = min(x2, tensor.shape[-1])
-            y2 = min(y2, tensor.shape[-2])
+            x1, y1, x2, y2 = [int(b) for b in box.tolist()]
+            # clamp on both sides, so a box entirely outside the frame
+            # degenerates to zero area instead of an inverted (x1 > x2) box
+            x1, y1 = min(max(x1, 0), W), min(max(y1, 0), H)
+            x2, y2 = min(max(x2, x1), W), min(max(y2, y1), H)
             detections.append(Detection(
                 box=(x1, y1, x2, y2),
                 score=float(score),
@@ -239,18 +242,22 @@ print(result.model_dump_json(indent=2)[:500])
 ### Step 4: FastAPI service
 
 ```python
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, HTTPException
 from io import BytesIO
 
-app = FastAPI()
 pipe = None  # initialised on startup
 
-@app.on_event("startup")
-def load():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     global pipe
     detector = maskrcnn_resnet50_fpn_v2(weights="DEFAULT").eval()
     classifier = convnext_tiny(weights="DEFAULT").eval()
     pipe = VisionPipeline(detector, classifier, class_names=[f"c{i}" for i in range(1000)])
+    yield
+    # shutdown work (close pools, flush metrics) goes after the yield
+
+app = FastAPI(lifespan=lifespan)
 
 @app.post("/detect")
 async def detect_endpoint(file: UploadFile):
@@ -284,10 +291,11 @@ def benchmark(pipe, num_runs=20, image_size=(400, 600)):
         det = pipe.detect(tensor)
         t2 = time.perf_counter()
         crops = []
+        H, W = tensor.shape[-2], tensor.shape[-1]
         for box in det["boxes"]:
-            x1, y1, x2, y2 = [max(0, int(b)) for b in box.tolist()]
-            x2 = min(x2, tensor.shape[-1])
-            y2 = min(y2, tensor.shape[-2])
+            x1, y1, x2, y2 = [int(b) for b in box.tolist()]
+            x1, y1 = min(max(x1, 0), W), min(max(y1, 0), H)
+            x2, y2 = min(max(x2, x1), W), min(max(y2, y1), H)
             if (x2 - x1) >= pipe.min_crop and (y2 - y1) >= pipe.min_crop:
                 crop = tensor[:, y1:y2, x1:x2]
                 crop = torch.nn.functional.interpolate(

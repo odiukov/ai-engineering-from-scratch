@@ -68,7 +68,7 @@ def chunk_fixed(text, size=512, overlap=0):
 def chunk_recursive(text, size=512, seps=("\n\n", "\n", ". ", " ")):
     if len(text) <= size:
         return [text]
-    for sep in seps:
+    for i, sep in enumerate(seps):
         if sep not in text:
             continue
         parts = text.split(sep)
@@ -79,7 +79,9 @@ def chunk_recursive(text, size=512, seps=("\n\n", "\n", ". ", " ")):
                 if buf:
                     chunks.append(buf)
                     buf = ""
-                chunks.extend(chunk_recursive(p, size=size, seps=seps[1:] or (" ",)))
+                # seps[i + 1:], not seps[1:] — recurse on the separators we have
+                # not tried yet, otherwise we re-offer ones already rejected.
+                chunks.extend(chunk_recursive(p, size=size, seps=seps[i + 1:] or (" ",)))
                 continue
             candidate = buf + sep + p if buf else p
             if len(candidate) <= size:
@@ -111,6 +113,11 @@ def chunk_semantic(text, encoder, threshold=0.6, min_chars=200, max_chars=2048):
         else:
             chunks[-1].append(sentences[i])
 
+    # The loop only guards the chunk being left behind, never the one being
+    # started — so the final chunk can end up under min_chars. Fold it back.
+    if len(chunks) > 1 and sum(len(s) for s in chunks[-1]) < min_chars:
+        chunks[-2].extend(chunks.pop())
+
     result = []
     for group in chunks:
         text_group = " ".join(group)
@@ -126,6 +133,9 @@ Tune `threshold` on your domain. Too high → fragments. Too low → one giant c
 ### Step 3: parent-document
 
 ```python
+import numpy as np
+
+
 def chunk_parent_child(text, parent_size=2048, child_size=256):
     parents = chunk_recursive(text, size=parent_size)
     mapping = []
@@ -136,11 +146,11 @@ def chunk_parent_child(text, parent_size=2048, child_size=256):
     return mapping
 
 
-def retrieve_parent(child_query, mapping, encoder, top_k=3):
+def retrieve_parent(child_query, mapping, encoder, child_top_k=3):
     child_embs = encoder.encode([m["child"] for m in mapping], normalize_embeddings=True)
     q_emb = encoder.encode([child_query], normalize_embeddings=True)[0]
     scores = child_embs @ q_emb
-    top = np.argsort(-scores)[:top_k]
+    top = np.argsort(-scores)[:child_top_k]
     seen, parents = set(), []
     for i in top:
         if mapping[i]["parent_idx"] not in seen:
@@ -149,7 +159,7 @@ def retrieve_parent(child_query, mapping, encoder, top_k=3):
     return parents
 ```
 
-Key insight: dedupe parents. Multiple children can map to the same parent; returning all would waste context.
+Key insight: dedupe parents. Multiple children can map to the same parent; returning all would waste context. Note what the cutoff counts — `child_top_k` bounds the *children* scored, so you get at most that many parents and often fewer. If you need a guaranteed number of parents, widen the child pool and stop once the parent set is full.
 
 ### Step 4: contextual retrieval (Anthropic pattern)
 

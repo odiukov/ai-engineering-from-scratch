@@ -27,7 +27,7 @@ Mel spectrograms push further. Humans perceive pitch logarithmically: 100 Hz vs 
 
 **Mel filterbank.** A set of triangular filters spaced equally on the mel scale. Each filter is a weighted sum of adjacent FFT bins. Multiplying the STFT magnitude by the filterbank matrix gives the mel spectrogram in one matmul.
 
-**Log-mel spectrogram.** `log(mel_spec + 1e-10)`. Whisper's input. Parakeet's input. SeamlessM4T's input. The universal 2026 audio frontend.
+**Log-mel spectrogram.** `log(mel_spec + 1e-10)`. Whisper's input (80 bins up to Large-v2, 128 bins for Large-v3 and Turbo). Parakeet's input. SeamlessM4T's input. The universal 2026 audio frontend.
 
 **MFCCs.** Take the log-mel spectrogram, apply a DCT (type II), keep the first 13 coefficients. Decorrelates the features and compresses further. Dominant feature until about 2015 when CNNs/Transformers on raw log-mels caught up. Still used in speaker recognition (x-vectors, ECAPA).
 
@@ -55,6 +55,8 @@ A 10-second 16 kHz clip with `frame_len=400, hop=160` yields 998 frames.
 import math
 
 def hann(N):
+    if N == 1:
+        return [1.0]  # N-1 would be a zero divide
     return [0.5 * (1 - math.cos(2 * math.pi * n / (N - 1))) for n in range(N)]
 ```
 
@@ -95,12 +97,18 @@ def mel_filterbank(n_mels, n_fft, sr, fmin=0, fmax=None):
     return fb
 ```
 
-80 mels covering 0–8 kHz with `n_fft=400` gives an `(80, 201)` matrix. Multiply the `(n_frames, 201)` STFT magnitude by the transpose to get `(n_frames, 80)` mel spectrogram.
+80 mels covering 0–8 kHz with `n_fft=400` gives an `(80, 201)` matrix. Multiply the `(n_frames, 201)` STFT magnitude by the transpose to get `(n_frames, 80)` mel spectrogram:
+
+```python
+def apply_filterbank(stft_mag, fb):
+    return [[sum(spec[k] * w for k, w in enumerate(f) if w) for f in fb]
+            for spec in stft_mag]
+```
 
 ### Step 5: log-mel
 
 ```python
-def log_mel(mel_spec, eps=1e-10):
+def log_transform(mel_spec, eps=1e-10):
     return [[math.log(max(v, eps)) for v in frame] for frame in mel_spec]
 ```
 
@@ -125,7 +133,7 @@ The 2026 stack:
 
 | Task | Features |
 |------|----------|
-| ASR (Whisper, Parakeet, SeamlessM4T) | 80 log-mels, 10 ms hop, 25 ms window |
+| ASR (Whisper, Parakeet, SeamlessM4T) | 80 log-mels (128 for Whisper Large-v3 / Turbo), 10 ms hop, 25 ms window |
 | TTS acoustic model (VITS, F5-TTS, Kokoro) | 80 mels, 5–12 ms hop for fine temporal control |
 | Audio classification (AST, PANNs, BEATs) | 128 log-mels, 10 ms hop |
 | Speaker embedding (ECAPA-TDNN, WavLM) | 80 log-mels or raw-waveform SSL |

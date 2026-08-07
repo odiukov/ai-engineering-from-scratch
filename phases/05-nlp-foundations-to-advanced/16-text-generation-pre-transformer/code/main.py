@@ -39,23 +39,25 @@ def laplace_prob(bigrams, unigrams, vocab_size, prev, w):
     return num / den
 
 
-def perplexity(prob_fn, sentences):
+def perplexity(prob_fn, sentences, n=2):
+    """prob_fn(context, word), context a tuple of the previous n - 1 tokens."""
     total_log = 0.0
     total = 0
     for sentence in sentences:
-        padded = ["<s>"] + sentence + ["</s>"]
-        for i in range(1, len(padded)):
-            p = prob_fn(padded[i - 1], padded[i])
+        padded = ["<s>"] * (n - 1) + sentence + ["</s>"]
+        for i in range(n - 1, len(padded)):
+            p = prob_fn(tuple(padded[i - n + 1:i]), padded[i])
             total_log += math.log(max(p, 1e-12))
             total += 1
     return math.exp(-total_log / total)
 
 
-def sample_sentence(prob_fn, vocab, max_len=15, seed=0):
+def sample_sentence(prob_fn, vocab, n=2, max_len=15, seed=0):
     rng = random.Random(seed)
     tokens = ["<s>"]
     for _ in range(max_len):
-        probs = [(w, prob_fn(tokens[-1], w)) for w in vocab if w != "<s>"]
+        context = tuple(tokens[-(n - 1):])
+        probs = [(w, prob_fn(context, w)) for w in vocab if w != "<s>"]
         total = sum(p for _, p in probs)
         r = rng.random() * total
         acc = 0.0
@@ -95,11 +97,11 @@ def main():
         unique_follow[prev].add(w)
     total_unique_bigrams = sum(len(ctx_set) for ctx_set in unigram_contexts.values())
 
-    def kn(prev, w):
-        return kneser_ney_prob(bigrams, unigram_contexts, context_totals, unique_follow, total_unique_bigrams, prev, w)
+    def kn(context, w):
+        return kneser_ney_prob(bigrams, unigram_contexts, context_totals, unique_follow, total_unique_bigrams, context[-1], w)
 
-    def lap(prev, w):
-        return laplace_prob(bigrams, unigrams, vocab_size, prev, w)
+    def lap(context, w):
+        return laplace_prob(bigrams, unigrams, vocab_size, context[-1], w)
 
     print(f"vocab size: {vocab_size}")
     print(f"train sentences: {len(train)}")

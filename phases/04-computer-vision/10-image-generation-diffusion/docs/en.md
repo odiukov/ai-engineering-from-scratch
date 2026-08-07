@@ -79,7 +79,7 @@ flowchart LR
 For every training step:
 
 1. Sample a real image `x_0`.
-2. Sample a timestep `t` uniformly from [1, T].
+2. Sample a timestep `t` uniformly from the T schedule indices — `[0, T-1]` in code, since the precomputed arrays are zero-indexed.
 3. Sample noise `epsilon ~ N(0, I)`.
 4. Compute `x_t = sqrt(alpha_bar_t) * x_0 + sqrt(1 - alpha_bar_t) * epsilon`.
 5. Predict `epsilon_theta(x_t, t)` with the network.
@@ -263,7 +263,8 @@ def sample_ddim(model, schedule, shape, steps=50, T=1000, device="cpu", eta=0.0)
     x = torch.randn(shape, device=device)
     alphas_cumprod = schedule["alphas_cumprod"].to(device)
 
-    ts = torch.linspace(T - 1, 0, steps + 1).long()
+    # the last entry is -1, the "clean image" step where alpha_bar = 1
+    ts = torch.linspace(T - 1, 0, steps).long().tolist() + [-1]
     for i in range(steps):
         t = ts[i]
         t_prev = ts[i + 1]
@@ -279,7 +280,7 @@ def sample_ddim(model, schedule, shape, steps=50, T=1000, device="cpu", eta=0.0)
     return x
 ```
 
-`eta=0` is fully deterministic (same noise input always produces the same output). `eta=1` recovers DDPM.
+`eta=0` is fully deterministic (same noise input always produces the same output). `eta=1` recovers DDPM. The `-1` sentinel at the end of `ts` matters: the final step must land on `alpha_bar = 1` (a fully clean image), not on `alphas_cumprod[0]`, which still carries one step's worth of noise.
 
 ## Use It
 

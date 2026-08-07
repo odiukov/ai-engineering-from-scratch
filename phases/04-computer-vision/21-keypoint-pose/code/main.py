@@ -44,8 +44,9 @@ def subpixel_refine(heatmaps):
             x, y = int(coords[n, k, 0]), int(coords[n, k, 1])
             if 0 < x < W - 1 and 0 < y < H - 1:
                 hm = heatmaps[n, k]
-                dx = 0.25 * (hm[y, x + 1] - hm[y, x - 1])
-                dy = 0.25 * (hm[y + 1, x] - hm[y - 1, x])
+                # Quarter-pixel step toward the larger neighbour (sign, not raw difference).
+                dx = 0.25 * torch.sign(hm[y, x + 1] - hm[y, x - 1])
+                dy = 0.25 * torch.sign(hm[y + 1, x] - hm[y - 1, x])
                 refined[n, k, 0] = x + dx
                 refined[n, k, 1] = y + dy
     return refined
@@ -73,6 +74,8 @@ def main():
         imgs = torch.from_numpy(np.stack([b[0] for b in batch]))
         hms = torch.from_numpy(np.stack([b[1] for b in batch]))
         pred = model(imgs)
+        # No-op when size is a multiple of 4 (the net already returns full resolution);
+        # kept as a guard for input sizes that are not.
         pred = F.interpolate(pred, size=hms.shape[-2:], mode="bilinear", align_corners=False)
         loss = F.mse_loss(pred, hms)
         opt.zero_grad(); loss.backward(); opt.step()

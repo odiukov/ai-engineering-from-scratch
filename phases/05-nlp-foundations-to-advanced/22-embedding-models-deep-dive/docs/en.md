@@ -82,13 +82,14 @@ print(sorted(enumerate(scores), key=lambda x: -x[1]))
 ```python
 def truncate(vectors, dim):
     out = vectors[:, :dim]
-    return out / np.linalg.norm(out, axis=1, keepdims=True)
+    norms = np.linalg.norm(out, axis=1, keepdims=True)
+    return out / np.maximum(norms, 1e-12)  # guard: a head slice can be all zeros
 
 emb_256 = truncate(emb, 256)
 emb_128 = truncate(emb, 128)
 ```
 
-Re-normalize after truncation. Nomic v1.5, OpenAI text-3, and Voyage-4 are trained so this is lossless for the first few levels. Non-Matryoshka models (original Sentence-BERT) degrade sharply when truncated.
+Re-normalize after truncation — and guard the norm. Nothing forces the first `dim` coordinates of a vector to be non-zero; the shorter the slice, the likelier it happens. A bare division then yields `nan` for the whole row, and NaNs propagate silently through the dot product, so the affected passage scores as unranked instead of erroring. Nomic v1.5, OpenAI text-3, and Voyage-4 are trained so this is lossless for the first few levels. Non-Matryoshka models (original Sentence-BERT) degrade sharply when truncated.
 
 ### Step 3: BGE-M3 multi-functionality
 
@@ -139,7 +140,7 @@ See `code/main.py`. Averaged Hashing Trick embeddings (stdlib-only). Not competi
 
 - **Same model for query and doc.** Some models (Voyage, Jina-ColBERT) use asymmetric encoding — query and document pass through different paths. Always check the model card.
 - **Missing prefix.** `bge-*` models need `"Represent this sentence for searching relevant passages: "` prepended to queries. 3-5 point recall gap if you forget.
-- **Over-trimming Matryoshka.** 1,536 → 256 is usually safe. 1,536 → 64 is not. Validate on your eval set.
+- **Over-trimming Matryoshka.** 1,536 → 256 is usually safe. 1,536 → 64 is not. Validate on your eval set, and check for zero-norm rows after truncation — an unguarded re-normalize turns them into NaNs.
 - **Context truncation.** Most models silently truncate inputs over their max length. Long docs need chunking (see lesson 23).
 - **Ignoring latency tail.** MTEB scores hide p99 latency. A 600M model might beat a 335M model by 2 points but cost 3× more per query.
 

@@ -16,14 +16,14 @@ def split_sentences(text):
 
 def faithfulness(answer, context):
     context_set = set(tokenize(context))
-    claims = split_sentences(answer)
+    # Drop claims with no content tokens: they can never be supported, so
+    # counting them in the denominator would deflate the score.
+    claims = [c for c in split_sentences(answer) if tokenize(c)]
     if not claims:
         return 0.0
     supported = 0
     for claim in claims:
         claim_tokens = tokenize(claim)
-        if not claim_tokens:
-            continue
         overlap = sum(1 for t in claim_tokens if t in context_set)
         if overlap / len(claim_tokens) >= 0.5:
             supported += 1
@@ -55,15 +55,13 @@ def context_recall(retrieved_chunks, gold_answer_tokens):
 
 
 def g_eval_correctness(actual, expected, threshold=0.5):
-    a_claims = split_sentences(actual)
+    a_claims = [c for c in split_sentences(actual) if tokenize(c)]
     e_set = set(tokenize(expected))
     if not a_claims:
         return 0.0
     supported = 0
     for c in a_claims:
         c_tokens = tokenize(c)
-        if not c_tokens:
-            continue
         overlap = sum(1 for t in c_tokens if t in e_set) / len(c_tokens)
         if overlap >= threshold:
             supported += 1

@@ -114,7 +114,7 @@ Each multiplicative term has magnitude roughly (weight magnitude) * (activation 
 Stack 100 of them with gains < 1 and the gradient is effectively zero.
 ```
 
-VGG worked at 19 layers because batch norm (published simultaneously) kept activations well-scaled. But even batch norm could not rescue depth beyond 30-ish layers.
+VGG reached 19 layers without batch norm at all — the authors trained the shallow 11-layer configuration first and used its weights to initialise the deeper ones, one stage at a time. Batch norm arrived after VGG and removed the need for that staging by keeping activations well-scaled. But even batch norm could not rescue depth beyond 30-ish layers.
 
 ### ResNet (2015)
 

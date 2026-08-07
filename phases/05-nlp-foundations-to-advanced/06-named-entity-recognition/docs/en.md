@@ -56,6 +56,11 @@ ner-bio-tagging
 def spans_to_bio(tokens, spans):
     labels = ["O"] * len(tokens)
     for start, end, label in spans:
+        if any(labels[i] != "O" for i in range(start, end)):
+            raise ValueError(
+                f"span ({start}, {end}, {label}) overlaps an existing span; "
+                "BIO gives each token exactly one label and cannot nest"
+            )
         labels[start] = f"B-{label}"
         for i in range(start + 1, end):
             labels[i] = f"I-{label}"
@@ -63,6 +68,8 @@ def spans_to_bio(tokens, spans):
 
 
 def bio_to_spans(tokens, labels):
+    if len(tokens) != len(labels):
+        raise ValueError("tokens and labels must be the same length")
     spans = []
     current = None
     for i, label in enumerate(labels):
@@ -87,6 +94,8 @@ def bio_to_spans(tokens, labels):
 >>> bio_to_spans(tokens, labels)
 [(0, 1, 'ORG'), (2, 3, 'ORG'), (4, 5, 'PRODUCT')]
 ```
+
+The overlap check in `spans_to_bio` is the honest part of this helper. BIO stores one label per token, so "Bank of America Tower" cannot be tagged ORG and FACILITY at the same time. Without the check, the second span quietly overwrites the first and you lose an annotation somewhere between your data loader and your training set. Better to fail at the point where the format runs out of room — see "Nested entities" under *Where it falls apart*.
 
 ### Step 2: hand-crafted features
 
@@ -143,6 +152,8 @@ def rule_based_ner(tokens):
             labels.append("O")
     return labels
 ```
+
+Note what this loop structurally cannot do: it only ever emits `B-` tags. Because the lookup is one token at a time, a two-token entity comes back as two separate one-token entities (`New` `B-GPE`, `York` `B-GPE`), and any multi-word gazetteer entry never matches at all. The cheap fix is to merge adjacent same-type hits into a `B-` / `I-` run; the real fix is longest-match phrase lookup over the gazetteer.
 
 Production gazetteers have millions of entries scraped from Wikipedia and DBpedia. Coverage is good. Disambiguation (`Apple` the company vs the fruit) is terrible. That is why statistical models won.
 

@@ -139,7 +139,7 @@ The 2026 stack:
 
 - **Buffering 500 ms to be safe.** The buffer *is* your latency floor. Shrink it.
 - **Not pinning threads.** Audio callback on a priority-lower-than-UI thread = glitches under load.
-- **TTS chunks too small.** Sub-200 ms chunks make vocoder artifacts audible. 320 ms chunks are the sweet spot.
+- **TTS chunks too small.** This one is about the *output* path, not the 20 ms frames you read off the mic. Synthesize less than ~200 ms of audio per chunk and the vocoder's chunk-boundary artifacts become audible; ~320 ms per chunk is the sweet spot. It does not contradict the 100 ms TTS line in the budget table above — that budget is *time until the first chunk starts playing*, not how much audio each chunk contains. You emit the first 320 ms of speech about 100 ms after the LLM's first token, then stay one chunk ahead of the speaker.
 - **No jitter buffer.** Real networks are jittery; without smoothing you get pops.
 - **Single-shot error handling.** Audio pipelines must be crash-proof. One exception kills the session.
 

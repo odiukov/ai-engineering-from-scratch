@@ -41,13 +41,18 @@ def cer(ref, hyp):
 
 
 def eer_from_scores(same, diff):
-    thresholds = sorted(set(same + diff))
-    best = (1.0, 0.0, 0.0, 0.0)
+    # list(...) first: `same + diff` concatenates only for lists, not for arrays
+    same, diff = list(same), list(diff)
+    thresholds = sorted(set(same) | set(diff))
+    best = None
     for t in thresholds:
         far = sum(1 for s in diff if s >= t) / max(1, len(diff))
         frr = sum(1 for s in same if s < t) / max(1, len(same))
-        if abs(far - frr) < best[0]:
-            best = (abs(far - frr), t, far, frr)
+        gap = abs(far - frr)
+        if best is None or gap < best[0]:
+            best = (gap, t, far, frr)
+    if best is None:                       # no scores at all — not "0% EER"
+        return 1.0, float("nan")
     gap, t, far, frr = best
     return (far + frr) / 2, t
 

@@ -87,22 +87,28 @@ def verify(enroll, test, threshold=0.75):
 
 ```python
 def eer(same_scores, diff_scores):
-    thresholds = sorted(set(same_scores + diff_scores))
-    best = (1.0, 1.0, 0.0)  # (fa, fr, threshold)
+    # set union, not `same + diff`: `+` concatenates lists but breaks on
+    # tuples-vs-lists and adds element-wise on numpy arrays.
+    thresholds = sorted(set(same_scores) | set(diff_scores))
+    best_gap = float("inf")
+    best = (1.0, 0.0, thresholds[0])  # (fa, fr, threshold)
     for t in thresholds:
         fr = sum(1 for s in same_scores if s < t) / len(same_scores)
         fa = sum(1 for s in diff_scores if s >= t) / len(diff_scores)
-        if abs(fa - fr) < abs(best[0] - best[1]):
+        if abs(fa - fr) < best_gap:
+            best_gap = abs(fa - fr)
             best = (fa, fr, t)
     return (best[0] + best[1]) / 2, best[2]
 ```
 
 Returns (eer, threshold_at_eer). Report both.
 
+Track the best gap in its own variable. The tempting shortcut — seeding `best = (1.0, 1.0, 0.0)` and testing `abs(fa - fr) < abs(best[0] - best[1])` — starts the comparison at a gap of *zero*, so no threshold ever wins and the function returns a fixed 100% EER whatever the data says.
+
 ### Step 4: production with SpeechBrain
 
 ```python
-from speechbrain.pretrained import EncoderClassifier
+from speechbrain.inference import EncoderClassifier  # `speechbrain.pretrained` pre-1.0
 
 clf = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb")
 
@@ -112,6 +118,8 @@ enroll = torch.stack([clf.encode_batch(load(x)) for x in enrollment_clips]).mean
 score = clf.similarity(enroll, clf.encode_batch(load("test.wav"))).item()
 verdict = score > 0.25   # ECAPA typical threshold; tune on your data
 ```
+
+The 0.25 here and the 0.75 back in Step 2 are not one knob at two settings — they belong to two different score distributions. The toy MFCC-stat embedding packs everything into the top of the cosine range (run `code/main.py`: same-speaker pairs average 0.995 and *different*-speaker pairs still average 0.558), so its decision boundary sits absurdly high. ECAPA is trained with an angular margin that pushes imposters down towards 0, which puts its operating point near 0.25. A threshold is a property of the embedding model and the domain, never a constant you carry between them — which is why Step 3 returns the threshold alongside the EER, and why the `0.75` in Step 2 is a placeholder rather than a recommendation.
 
 ### Step 5: diarize with pyannote
 

@@ -64,6 +64,11 @@ import torch
 tok = AutoTokenizer.from_pretrained("joeddav/xlm-roberta-large-xnli")
 model = AutoModelForSequenceClassification.from_pretrained("joeddav/xlm-roberta-large-xnli")
 
+# Never hardcode the entailment index. NLI checkpoints disagree on label order.
+ENTAILMENT_ID = next(
+    i for i, name in model.config.id2label.items() if name.lower().startswith("entail")
+)
+
 
 def classify(text, candidate_labels, hypothesis_template="This text is about {}."):
     scores = {}
@@ -72,7 +77,7 @@ def classify(text, candidate_labels, hypothesis_template="This text is about {}.
         inputs = tok(text, hypothesis, return_tensors="pt", truncation=True)
         with torch.no_grad():
             logits = model(**inputs).logits[0]
-        entail_score = torch.softmax(logits, dim=-1)[2].item()
+        entail_score = torch.softmax(logits, dim=-1)[ENTAILMENT_ID].item()
         scores[label] = entail_score
     return dict(sorted(scores.items(), key=lambda x: -x[1]))
 
@@ -83,6 +88,8 @@ print(classify("J'adore ce produit !", ["positive", "negative", "neutral"]))
 ```
 
 One model, three languages, same API. XLM-R trained on NLI data transfers well to classification via the entailment trick.
+
+The `id2label` lookup is not defensive padding. This checkpoint orders labels `contradiction, neutral, entailment`, so index 2 is right for it — but nothing forces that order on any other NLI checkpoint, and swapping the model name is the first edit everyone makes. A wrong index does not raise. It silently scores contradiction instead of entailment, and every prediction inverts.
 
 ### Step 2: multilingual embedding space
 
@@ -111,7 +118,7 @@ Translations land close in embedding space. A different English sentence lands f
 ### Step 3: few-shot fine-tuning strategy
 
 ```python
-from transformers import TrainingArguments, Trainer
+from transformers import DataCollatorWithPadding, TrainingArguments, Trainer
 from datasets import Dataset
 
 
@@ -123,7 +130,7 @@ def few_shot_finetune(base_model, base_tokenizer, examples):
         out["labels"] = ex["label"]
         return out
 
-    ds = ds.map(tokenize_fn)
+    ds = ds.map(tokenize_fn, remove_columns=ds.column_names)
     args = TrainingArguments(
         output_dir="out",
         per_device_train_batch_size=8,
@@ -131,12 +138,19 @@ def few_shot_finetune(base_model, base_tokenizer, examples):
         learning_rate=2e-5,
         save_strategy="no",
     )
-    trainer = Trainer(model=base_model, args=args, train_dataset=ds)
+    trainer = Trainer(
+        model=base_model,
+        args=args,
+        train_dataset=ds,
+        data_collator=DataCollatorWithPadding(base_tokenizer),
+    )
     trainer.train()
     return base_model
 ```
 
 For 100-500 target-language examples, `num_train_epochs=5` and `learning_rate=2e-5` are the safe defaults. Higher learning rates cause the multilingual alignment to collapse and you get an English-only model.
+
+The `data_collator` is required, not optional. Tokenizing with `truncation=True` and no `padding` leaves every example at its own length, and without a padding collator `Trainer` falls back to the default one, which stacks the batch tensors as-is and raises on the first batch of mixed lengths. `DataCollatorWithPadding` pads each batch to its own longest example — cheaper than padding everything to `max_length=128`.
 
 ## Evaluation that actually works
 

@@ -49,13 +49,12 @@ class SimpleTracker:
         cost = 1 - iou
         cost[iou < self.iou_threshold] = 1e6
 
-        matched_track, matched_det = set(), set()
+        matched_det = set()
         if cost.size > 0:
             row, col = linear_sum_assignment(cost)
             for r, c in zip(row, col):
                 if cost[r, c] < 1.0:
                     self.tracks[r].update(dets[c], frame)
-                    matched_track.add(r)
                     matched_det.add(c)
 
         for i, d in enumerate(dets):
@@ -63,6 +62,7 @@ class SimpleTracker:
                 self.tracks.append(Track(self.next_id, d, frame))
                 self.next_id += 1
 
+        # Unmatched tracks keep their stale last_frame; max_age retires them.
         self.tracks = [t for t in self.tracks if frame - t.last_frame <= self.max_age]
         return [(t.id, t.bbox.tolist()) for t in self.tracks]
 

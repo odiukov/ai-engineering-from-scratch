@@ -95,8 +95,10 @@ Max-pool over the sequence, not last-state pool. For classification, max-pooling
 A plain RNN without gating cannot learn long-range dependencies. Consider a toy task: predict whether token `A` appeared anywhere in a sequence. If `A` is at position 1 and the sequence is 100 tokens long, the gradient from the loss has to flow back through 99 multiplications of the recurrent weight. If the weight is less than 1, the gradient vanishes. If more than 1, it explodes.
 
 ```python
+import math
+
+
 def vanishing_gradient_sim(seq_len, recurrent_weight=0.9):
-    import math
     return math.pow(recurrent_weight, seq_len)
 
 
@@ -106,6 +108,31 @@ def vanishing_gradient_sim(seq_len, recurrent_weight=0.9):
 ```
 
 LSTMs fix this with a **cell state** that runs through the network with only additive interactions (the forget gate scales it multiplicatively, but gradients still flow along the "highway"). GRUs do something similar with fewer parameters. Both give you stable training through 100+ step sequences.
+
+Since that claim is the whole reason LSTMs exist, here is the cell it rests on. One step, no framework:
+
+```python
+import numpy as np
+
+
+def sigmoid(z):
+    return 1.0 / (1.0 + np.exp(-np.clip(z, -20, 20)))
+
+
+def lstm_cell(x_t, h_prev, c_prev, W, U, b):
+    """W: (4H, D), U: (4H, H), b: (4H,). Gates are stacked in the order i, f, g, o."""
+    hidden_dim = h_prev.shape[0]
+    z = W @ x_t + U @ h_prev + b
+    i = sigmoid(z[0:hidden_dim])                      # how much candidate to write
+    f = sigmoid(z[hidden_dim:2 * hidden_dim])         # how much old cell to keep
+    g = np.tanh(z[2 * hidden_dim:3 * hidden_dim])     # candidate values
+    o = sigmoid(z[3 * hidden_dim:])                   # how much cell to expose
+    c_t = f * c_prev + i * g
+    h_t = o * np.tanh(c_t)
+    return h_t, c_t
+```
+
+One line carries the argument: `c_t = f * c_prev + i * g`. The cell state moves forward by **addition**. A plain RNN puts a matrix multiply and a squashing nonlinearity between every pair of steps, and the product of those is the `0.9 ** 100` above. Here, when the forget gate sits near 1, the path along `c` is close to multiplication by 1 no matter how long the sequence — so a gradient from step 100 still arrives at step 1 with something left. The gates are learned, so the network decides per token what to keep, and that is the part no amount of careful initialization gives a plain RNN.
 
 ### Step 4: why this still was not enough
 
@@ -142,7 +169,10 @@ class BertCNN(nn.Module):
         with torch.no_grad():
             out = self.encoder(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
         x = out.transpose(1, 2)
-        pooled = [F.max_pool1d(F.relu(conv(x)), kernel_size=conv(x).size(2)).squeeze(2) for conv in self.convs]
+        pooled = []
+        for conv in self.convs:
+            c = F.relu(conv(x))
+            pooled.append(F.max_pool1d(c, kernel_size=c.size(2)).squeeze(2))
         return self.fc(torch.cat(pooled, dim=1))
 ```
 

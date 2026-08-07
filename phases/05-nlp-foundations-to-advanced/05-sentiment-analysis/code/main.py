@@ -38,6 +38,8 @@ def build_vocab(docs):
 
 
 def train_nb(docs_by_class, vocab, alpha=1.0):
+    if alpha <= 0:
+        raise ValueError("alpha must be > 0; alpha=0 leaves zero probabilities and predict_nb logs them")
     class_priors = {}
     class_word_probs = {}
     total_docs = sum(len(d) for d in docs_by_class.values())
@@ -47,7 +49,7 @@ def train_nb(docs_by_class, vocab, alpha=1.0):
         for doc in docs:
             for token in doc:
                 counts[token] += 1
-        total = sum(counts.values()) + alpha * len(vocab)
+        total = sum(counts[w] for w in vocab) + alpha * len(vocab)
         class_word_probs[cls] = {w: (counts[w] + alpha) / total for w in vocab}
     return class_priors, class_word_probs
 
@@ -68,9 +70,9 @@ def evaluate(y_true, y_pred):
     fp = sum(1 for t, p in zip(y_true, y_pred) if t == "-" and p == "+")
     fn = sum(1 for t, p in zip(y_true, y_pred) if t == "+" and p == "-")
     tn = sum(1 for t, p in zip(y_true, y_pred) if t == "-" and p == "-")
-    precision = tp / (tp + fp) if tp + fp else 0
-    recall = tp / (tp + fn) if tp + fn else 0
-    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
     return {"tp": tp, "fp": fp, "tn": tn, "fn": fn, "precision": round(precision, 3), "recall": round(recall, 3), "f1": round(f1, 3)}
 
 

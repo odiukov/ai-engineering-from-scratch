@@ -101,41 +101,48 @@ def train_batch(encoder, decoder, src, tgt, bos_id, optimizer, teacher_forcing_r
     return loss.item() / tgt_len
 ```
 
-Two knobs worth naming. `ignore_index=0` skips loss on padding tokens. `teacher_forcing_ratio` is the probability of using the true token vs. the model's prediction at each step. Start at 1.0 (full teacher forcing) and anneal down to ~0.5 over training to close the exposure-bias gap.
+Two knobs worth naming. `ignore_index=0` skips loss on padding tokens. `teacher_forcing_ratio` is the probability of using the true token vs. the model's prediction at each step. Start high — the `0.9` default above, or `1.0` for full teacher forcing — and anneal down to ~0.5 over training to close the exposure-bias gap.
 
 ### Step 4: inference loop (greedy)
 
 ```python
 @torch.no_grad()
-def greedy_decode(encoder, decoder, src, bos_id, eos_id, max_len=50):
+def greedy_decode(encoder, decoder, src, bos_id, eos_id, max_len=50, pad_id=0):
     _, hidden = encoder(src)
     batch_size = src.shape[0]
     input_token = torch.full((batch_size, 1), bos_id, dtype=torch.long)
+    finished = torch.zeros(batch_size, 1, dtype=torch.bool)
     output_ids = []
     for _ in range(max_len):
         logits, hidden = decoder(input_token, hidden)
         next_token = logits.argmax(dim=-1)
-        output_ids.append(next_token)
-        input_token = next_token
-        if (next_token == eos_id).all():
+        finished = finished | (next_token == eos_id)
+        if finished.all():
             break
+        output_ids.append(next_token.masked_fill(finished, pad_id))
+        input_token = next_token
+    if not output_ids:
+        return torch.zeros(batch_size, 0, dtype=torch.long)
     return torch.cat(output_ids, dim=1)
 ```
+
+Two details that are easy to get wrong on a batch. Update `finished` *before* appending, so the `<EOS>` token itself never lands in the returned tensor. And mask already-finished rows to `pad_id`, otherwise a sequence that ended at step 3 keeps emitting garbage until the slowest row in the batch also finishes. Without the mask, the only thing `.all()` buys you is a shorter loop, not a correct output.
 
 Greedy decoding picks the highest-probability token at every step. It can wander off: once you commit to a token, you cannot unsay it. **Beam search** keeps the top-`k` partial sequences alive and picks the highest-scoring complete one at the end. Beam width 3-5 is standard.
 
 ### Step 5: the bottleneck, demonstrated
 
-Train the model on a toy copy task: source `[a, b, c, d, e]`, target `[a, b, c, d, e]`. Increase sequence length. Observe accuracy.
+Train the model on a toy copy task: source `[a, b, c, d, e]`, target `[a, b, c, d, e]`. Increase sequence length. Observe accuracy. The numbers below are the output of `code/main.py`, which simulates the fixed-size context vector cheaply (no training required) by asking whether the true source scores higher than a random sequence of the same length.
 
 ```
-seq_len=5   copy accuracy: 98%
-seq_len=10  copy accuracy: 91%
-seq_len=20  copy accuracy: 62%
-seq_len=40  copy accuracy: 23%
+seq_len=5   copy accuracy: 89%
+seq_len=10  copy accuracy: 83%
+seq_len=20  copy accuracy: 69%
+seq_len=40  copy accuracy: 53%
+seq_len=80  copy accuracy: 51%
 ```
 
-A single GRU hidden state cannot losslessly memorize a 40-token input. The information is there at every encoder step, but the decoder only sees the last state. Attention fixes this directly.
+Chance on this task is 50%, so by length 80 the context vector carries essentially no usable signal. A single GRU hidden state cannot losslessly memorize a 40-token input. The information is there at every encoder step, but the decoder only sees the last state. Attention fixes this directly.
 
 ## Use It
 

@@ -105,13 +105,21 @@ class TurnDetector:
                 self.state = "speaking"
                 return "START"
         else:
-            self.silence_ms += chunk_ms
-            if self.state == "speaking" and self.silence_ms >= self.silence_hangover_ms:
-                self.state = "idle"
+            if self.state == "speaking":
+                self.silence_ms += chunk_ms
+                if self.silence_ms >= self.silence_hangover_ms:
+                    self.state = "idle"
+                    self.speech_ms = 0
+                    self.silence_ms = 0
+                    return "END"
+            else:
+                # while idle, speech must be *consecutive* to count — otherwise
+                # scattered coughs add up to min_speech_ms and fake a START
                 self.speech_ms = 0
-                return "END"
         return None
 ```
+
+Note the `self.speech_ms = 0` on idle silence. Without it the counter is cumulative over the whole session, so thirteen unrelated 20 ms coughs spread across a minute total 260 ms and trip `min_speech_ms`. Counting silence while idle is equally pointless — only the hangover inside `speaking` decides a turn end.
 
 ### Step 4: the flush trick skeleton
 

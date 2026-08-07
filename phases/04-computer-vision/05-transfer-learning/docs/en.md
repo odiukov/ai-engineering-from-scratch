@@ -251,7 +251,7 @@ def fine_tune(model, train_loader, val_loader, device, epochs=5, base_lr=1e-3, f
     return model
 ```
 
-Five epochs with the above recipe on CIFAR-10 takes `ResNet18-IMAGENET1K_V1` from ~70% zero-shot linear-probe accuracy to ~93% fine-tuned accuracy. The head alone would plateau around 86% without ever touching the backbone.
+Five epochs with the above recipe on CIFAR-10 takes `ResNet18-IMAGENET1K_V1` to ~93% accuracy. A linear probe — the same backbone frozen, only the head trained — plateaus around 86% however long you run it. Those last several points are exactly what unfreezing the backbone buys you.
 
 ### Step 6: Progressive unfreezing
 

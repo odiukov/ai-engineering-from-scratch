@@ -73,6 +73,10 @@ def chunk_semantic(text, threshold=0.3, min_chars=40):
             chunks.append([sentences[i]])
         else:
             chunks[-1].append(sentences[i])
+    # The loop guards the chunk being left behind, never the one being started,
+    # so the final chunk can land under min_chars. Fold the stub back in.
+    if len(chunks) > 1 and len(" ".join(chunks[-1])) < min_chars:
+        chunks[-2].extend(chunks.pop())
     return [" ".join(c) for c in chunks]
 
 

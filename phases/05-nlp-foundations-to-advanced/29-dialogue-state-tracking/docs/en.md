@@ -85,8 +85,8 @@ def update_state(state, utterance):
         value = extractor(utterance)
         if value is not None:
             new_state[slot] = value
-    for slot in NEGATION_CLEARS:
-        if is_negated(utterance, slot):
+            continue
+        if is_negation(utterance, slot):
             new_state[slot] = None
     return new_state
 ```
@@ -97,12 +97,16 @@ Three invariants:
 - Explicit negation ("never mind the cuisine") must clear.
 - User correction ("actually...") must overwrite, not append.
 
+Note the `continue`. Extraction wins over negation inside a single turn, because "never mind the cuisine, any food is fine" both retracts and re-fills the slot — clearing after extracting would throw away the value the user just gave you.
+
 ### Step 3: LLM-driven DST with structured output
 
 ```python
 from pydantic import BaseModel
 from typing import Literal, Optional
 import instructor
+from anthropic import Anthropic
+
 
 class RestaurantState(BaseModel):
     cuisine: Optional[Literal["italian", "chinese", "indian", "thai", "any"]] = None
@@ -112,24 +116,42 @@ class RestaurantState(BaseModel):
     day: Optional[str] = None
 
 
-def llm_dst(history, llm):
+client = instructor.from_anthropic(Anthropic())
+
+
+def render_dialog(turns):
+    return "\n".join(f"  user: {u}" for u in turns)
+
+
+def llm_dst(history):
     prompt = f"""You track the slot values of a restaurant booking across turns.
 Dialogue so far:
-{render(history)}
+{render_dialog(history)}
 
 Update the state based on the latest user turn. Output only the JSON state."""
-    return llm(prompt, response_model=RestaurantState)
+    return client.messages.create(
+        model="claude-opus-4-7",
+        max_tokens=512,
+        response_model=RestaurantState,
+        messages=[{"role": "user", "content": prompt}],
+    )
 ```
 
-Instructor + Pydantic guarantees a valid state object. No regex, no schema mismatches, no hallucinated slots.
+Instructor + Pydantic guarantees a valid state object. No regex, no schema mismatches, no hallucinated slots. The `response_model` argument is what instructor adds — it wraps the provider client, so the call itself stays the provider's normal `create`, and the return value is a validated `RestaurantState` instead of a raw message.
 
 ### Step 4: JGA evaluation
 
 ```python
 def joint_goal_accuracy(predicted_states, gold_states):
+    if len(predicted_states) != len(gold_states):
+        raise ValueError("predicted and gold must have the same length")
+    if not predicted_states:
+        return 0.0
     correct = sum(1 for p, g in zip(predicted_states, gold_states) if p == g)
     return correct / len(predicted_states)
 ```
+
+Both guards matter in a CI gate: an empty turn set is a `ZeroDivisionError` rather than a metric, and a length mismatch makes `zip` truncate silently to the shorter list — which reads as a perfect score on a run that dropped half its predictions.
 
 Calibrate: what fraction of turns does the system get ALL slots right? For MultiWOZ 2.4, top 2026 systems: 80-83%. Your in-domain system should exceed that on your narrow vocabulary or the LLM baseline beats you.
 
@@ -143,7 +165,7 @@ def is_correction(utterance):
     return any(cue in utterance.lower() for cue in CORRECTION_CUES)
 ```
 
-On a detected correction, overwrite the last-updated slot rather than appending. Hard to get right without LLM help. The modern pattern: always let the LLM regenerate the whole state from history rather than incrementally updating — this naturally handles corrections.
+Use this as a routing signal, not as a state edit. "Overwrite the last-updated slot" sounds like the fix, but the rule-based tracker above keeps no record of which slot was written when — you would have to log a per-slot "last updated at turn N" and hope the correction targets that slot rather than an older one. In practice a correction usually carries its own value ("actually make it moderate"), so the extractors already overwrite the right slot; the cue is worth logging so you can flag the turn for confirmation or route it to the LLM. That is the modern pattern: on a detected correction, let the LLM regenerate the whole state from history rather than patching one slot — regeneration handles corrections for free.
 
 ## Pitfalls
 

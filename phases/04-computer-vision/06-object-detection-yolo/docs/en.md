@@ -199,8 +199,13 @@ def encode(box_xyxy, cell_x, cell_y, stride, anchor_wh):
     cy = 0.5 * (y1 + y2)
     w = x2 - x1
     h = y2 - y1
-    tx = cx / stride - cell_x
-    ty = cy / stride - cell_y
+    # decode() applies a sigmoid to tx/ty, so encode has to apply its inverse:
+    # the logit. Clamp away from 0 and 1 first, or a box centred exactly on a
+    # cell edge sends log(off / (1 - off)) to +-inf.
+    off_x = np.clip(cx / stride - cell_x, 1e-6, 1 - 1e-6)
+    off_y = np.clip(cy / stride - cell_y, 1e-6, 1 - 1e-6)
+    tx = float(np.log(off_x / (1 - off_x)))
+    ty = float(np.log(off_y / (1 - off_y)))
     tw = np.log(w / anchor_wh[0] + 1e-8)
     th = np.log(h / anchor_wh[1] + 1e-8)
     return np.array([tx, ty, tw, th])
@@ -219,7 +224,7 @@ def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 ```
 
-Test: encode a box then decode — you should get back something very close to the original (up to the sigmoid inverse not being perfectly invertible when `tx` is not in the post-sigmoid range).
+Test: encode a box then decode — you get the original box back to floating-point precision, because `encode` and `decode` are exact inverses of each other: logit against sigmoid, log against exp. The only lossy step is the clamp, and it only bites for a centre sitting exactly on a cell boundary, where it shifts the result by well under a pixel. If you drop the logit and store the raw in-cell offset instead, `decode` will squash it through a sigmoid a second time and every box comes back wrong.
 
 ### Step 4: A minimal YOLO head
 
@@ -259,7 +264,11 @@ def assign_targets(boxes_xyxy, classes, anchors, stride, grid_size, num_classes)
     for box, cls in zip(boxes_xyxy, classes):
         x1, y1, x2, y2 = box
         cx, cy = 0.5 * (x1 + x2), 0.5 * (y1 + y2)
-        gx, gy = int(cx / stride), int(cy / stride)
+        gx_raw, gy_raw = int(cx / stride), int(cy / stride)
+        if not (0 <= gx_raw < grid_size and 0 <= gy_raw < grid_size):
+            continue
+        gx = min(gx_raw, grid_size - 1)
+        gy = min(gy_raw, grid_size - 1)
         bw, bh = x2 - x1, y2 - y1
 
         ious = np.array([
@@ -269,8 +278,12 @@ def assign_targets(boxes_xyxy, classes, anchors, stride, grid_size, num_classes)
         best = int(np.argmax(ious))
         aw, ah = anchors[best]
 
-        target[gy, gx, best, 0] = cx / stride - gx
-        target[gy, gx, best, 1] = cy / stride - gy
+        # Same logit trick as encode(): the network's raw tx/ty go through a
+        # sigmoid at decode time, so the target lives in logit space too.
+        off_x = np.clip(cx / stride - gx, 1e-6, 1 - 1e-6)
+        off_y = np.clip(cy / stride - gy, 1e-6, 1 - 1e-6)
+        target[gy, gx, best, 0] = np.log(off_x / (1 - off_x))
+        target[gy, gx, best, 1] = np.log(off_y / (1 - off_y))
         target[gy, gx, best, 2] = np.log(bw / aw + 1e-8)
         target[gy, gx, best, 3] = np.log(bh / ah + 1e-8)
         target[gy, gx, best, 4] = 1.0
@@ -279,7 +292,7 @@ def assign_targets(boxes_xyxy, classes, anchors, stride, grid_size, num_classes)
     return target, has_obj
 ```
 
-Anchor selection is "best shape IoU with the ground truth" — a cheap proxy that matches the YOLOv2/v3 assignment. v5 and later use more sophisticated strategies (task-aligned matching, dynamic k) that refine the same idea.
+The grid index is guarded, not trusted: a box whose centre sits exactly on the right or bottom image edge gives `int(cx / stride) == grid_size` and would index straight off the end of `target`. Anything genuinely outside the image is dropped, anything on the boundary is pulled back into the last cell. Anchor selection is "best shape IoU with the ground truth" — a cheap proxy that matches the YOLOv2/v3 assignment. v5 and later use more sophisticated strategies (task-aligned matching, dynamic k) that refine the same idea.
 
 ### Step 6: The three losses
 

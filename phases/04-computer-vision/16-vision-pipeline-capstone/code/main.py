@@ -110,12 +110,15 @@ class VisionPipeline:
         crops = []
         valid_indices = []
         detections = []
+        H, W = tensor.shape[-2], tensor.shape[-1]
         for i, (box, score, cls) in enumerate(
             zip(det["boxes"], det["scores"], det["labels"])
         ):
-            x1, y1, x2, y2 = [max(0, int(b)) for b in box.tolist()]
-            x2 = min(x2, tensor.shape[-1])
-            y2 = min(y2, tensor.shape[-2])
+            x1, y1, x2, y2 = [int(b) for b in box.tolist()]
+            # clamp on both sides, so a box entirely outside the frame
+            # degenerates to zero area instead of an inverted (x1 > x2) box
+            x1, y1 = min(max(x1, 0), W), min(max(y1, 0), H)
+            x2, y2 = min(max(x2, x1), W), min(max(y2, y1), H)
             detections.append(Detection(
                 box=(x1, y1, x2, y2),
                 score=float(score),
@@ -168,10 +171,11 @@ def benchmark(pipe, num_runs=10, image_size=(400, 600)):
         sync()
         t2 = time.perf_counter()
         crops = []
+        H, W = tensor.shape[-2], tensor.shape[-1]
         for box in det["boxes"]:
-            x1, y1, x2, y2 = [max(0, int(b)) for b in box.tolist()]
-            x2 = min(x2, tensor.shape[-1])
-            y2 = min(y2, tensor.shape[-2])
+            x1, y1, x2, y2 = [int(b) for b in box.tolist()]
+            x1, y1 = min(max(x1, 0), W), min(max(y1, 0), H)
+            x2, y2 = min(max(x2, x1), W), min(max(y2, y1), H)
             if (x2 - x1) >= pipe.min_crop and (y2 - y1) >= pipe.min_crop:
                 crop = tensor[:, y1:y2, x1:x2]
                 crop = F.interpolate(

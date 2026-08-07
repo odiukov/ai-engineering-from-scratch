@@ -147,7 +147,7 @@ Save as `outputs/skill-music-designer.md`. Pick model, license strategy, length 
 
 ## Exercises
 
-1. **Easy.** Run `code/main.py`. It produces a "generative" chord progression + drum pattern as ASCII symbols — a music-gen cartoon. Play it back via any MIDI renderer if you want.
+1. **Easy.** Run `code/main.py`. It prints a "generative" chord progression + drum pattern as ASCII symbols — a music-gen cartoon, text only, nothing playable. Turning those symbols into an actual MIDI file (`mido`, one note-on per chord tone, one drum track) is the natural extension if you want to hear it.
 2. **Medium.** Install `audiocraft`, generate 10-second clips across 4 genre prompts with MusicGen-small, measure FAD against a reference genre set.
 3. **Hard.** Using ACE-Step (or MusicGen-melody), generate three variations of the same tune with different timbre prompts. Compute CLAP similarity to the prompt to verify alignment.
 

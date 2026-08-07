@@ -104,7 +104,6 @@ def train_pair(W, W_prime, center_idx, context_idx, negative_indices, lr):
     for i, u in enumerate(u_negs):
         grad_center += neg_scores[i] * u
 
-    W[context_idx] = W[context_idx]
     W_prime[context_idx] -= lr * (pos_score - 1) * v_c
     for i, neg_idx in enumerate(negative_indices):
         W_prime[neg_idx] -= lr * neg_scores[i] * v_c
@@ -116,6 +115,16 @@ The magic formula: logistic loss on positive pair (want sigmoid near 1) plus log
 ### Step 4: train on a toy corpus
 
 ```python
+def sample_negatives(rng, vocab_size, k_neg, forbidden):
+    if vocab_size <= len(forbidden):
+        return []
+    negs = []
+    while len(negs) < k_neg:
+        draw = rng.integers(0, vocab_size, size=k_neg)
+        negs.extend(int(n) for n in draw if n not in forbidden)
+    return negs[:k_neg]
+
+
 def train(docs, dim=16, window=2, k_neg=5, epochs=100, lr=0.05, seed=0):
     vocab = build_vocab(docs)
     vocab_size = len(vocab)
@@ -128,11 +137,12 @@ def train(docs, dim=16, window=2, k_neg=5, epochs=100, lr=0.05, seed=0):
         for center, context in pairs:
             c_idx = vocab[center]
             ctx_idx = vocab[context]
-            negs = rng.integers(0, vocab_size, size=k_neg)
-            negs = [n for n in negs if n != ctx_idx and n != c_idx]
+            negs = sample_negatives(rng, vocab_size, k_neg, {c_idx, ctx_idx})
             train_pair(W, W_prime, c_idx, ctx_idx, negs, lr)
     return vocab, W
 ```
+
+`sample_negatives` draws until it has exactly `k_neg` of them. Sampling once and then filtering out the center and context words is the tempting shortcut, but it silently trains some pairs against four negatives, some against three, and occasionally none at all — so the `k_neg` you passed in is not the `k_neg` you got.
 
 After enough epochs on a large corpus, words that share contexts have similar center embeddings. On a toy corpus, you see the effect faintly. On billions of tokens, you see it dramatically.
 

@@ -71,6 +71,9 @@ chrF measures character-level F-score. More sensitive to morphologically rich la
 import sacrebleu
 
 hypotheses = ["Les chats courent."]
+# references is a list of *reference streams*, not a list-per-sentence.
+# references[r][i] is reference r for sentence i, so every inner list has
+# len(hypotheses) entries. One reference per sentence means one stream.
 references = [["Les chats courent."]]
 
 bleu = sacrebleu.corpus_bleu(hypotheses, references)
@@ -78,7 +81,7 @@ chrf = sacrebleu.corpus_chrf(hypotheses, references)
 print(f"BLEU: {bleu.score:.1f}  chrF: {chrf.score:.1f}")
 ```
 
-Always use `sacrebleu`. It normalizes tokenization so scores are comparable across papers. Rolling your own BLEU computation is how misleading benchmarks happen.
+Always use `sacrebleu`. It normalizes tokenization so scores are comparable across papers. Rolling your own BLEU computation is how misleading benchmarks happen. Get the `references` axis order wrong and `sacrebleu` will either raise on a length mismatch or, worse, silently score a two-sentence corpus against the wrong references.
 
 ### The three-tier evaluation hierarchy (2026)
 

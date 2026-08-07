@@ -21,7 +21,7 @@ This lesson builds each piece and names which failures each catches.
 
 Four layers. Pick the ones you need.
 
-1. **Sparse retrieval (BM25).** Fast, precise on exact matches, terrible on semantics. Run over an inverted index. Sub-10ms per query on millions of documents. Gets you statute references, product codes, error messages, named entities right.
+1. **Sparse retrieval (BM25).** Fast, precise on exact matches, terrible on semantics. Gets you statute references, product codes, error messages, named entities right. The sub-10ms-per-query-on-millions-of-documents figure people quote belongs to engines like Lucene, Elasticsearch, and OpenSearch, which serve BM25 from an inverted index. The from-scratch version in Step 1 scores every document in the corpus on every query — the right way to learn the formula, the wrong way to serve traffic.
 2. **Dense retrieval.** Encode query and documents into vectors. Nearest neighbor search. Captures paraphrases and semantic similarity. Misses exact keyword matches that differ by one character. 50-200ms per query with FAISS or a vector DB.
 3. **Fusion.** Merge the ranked lists from sparse and dense. Reciprocal Rank Fusion (RRF) is the easy default because it ignores raw scores (which live in different scales) and only uses rank positions. Weighted fusion is an option when you know one signal dominates for your domain.
 4. **Cross-encoder rerank.** Take the top-30 from fusion. Run a cross-encoder (query + document together, scoring each pair). Keep the top-5. Cross-encoders are slower per pair than bi-encoders but far more accurate. You amortize by only running them on the top-30.
@@ -57,6 +57,8 @@ class BM25:
         self.b = b
         self.n_docs = len(self.corpus)
         self.avg_dl = sum(len(d) for d in self.corpus) / self.n_docs
+        self.doc_freqs = [Counter(d) for d in self.corpus]
+        self.doc_lens = [len(d) for d in self.corpus]
         self.df = Counter()
         for doc in self.corpus:
             for term in set(doc):
@@ -66,11 +68,9 @@ class BM25:
         n = self.df.get(term, 0)
         return math.log(1 + (self.n_docs - n + 0.5) / (n + 0.5))
 
-    def score(self, query, doc_idx):
-        q_tokens = tokenize(query)
-        doc = self.corpus[doc_idx]
-        dl = len(doc)
-        freq = Counter(doc)
+    def _score_tokens(self, q_tokens, doc_idx):
+        freq = self.doc_freqs[doc_idx]
+        dl = self.doc_lens[doc_idx]
         score = 0.0
         for term in q_tokens:
             f = freq.get(term, 0)
@@ -81,13 +81,29 @@ class BM25:
             score += self.idf(term) * numerator / denominator
         return score
 
+    def score(self, query, doc_idx):
+        return self._score_tokens(tokenize(query), doc_idx)
+
     def rank(self, query, top_k=10):
-        scored = [(self.score(query, i), i) for i in range(self.n_docs)]
-        scored.sort(reverse=True)
+        q_tokens = tokenize(query)
+        scored = [
+            (s, i)
+            for s, i in ((self._score_tokens(q_tokens, i), i) for i in range(self.n_docs))
+            if s > 0.0
+        ]
+        scored.sort(key=lambda x: (-x[0], x[1]))
         return scored[:top_k]
 ```
 
 Two parameters worth knowing. `k1=1.5` controls term-frequency saturation; higher means more weight on term repetition. `b=0.75` controls length normalization; 0 ignores document length, 1 fully normalizes. The defaults are Robertson's recommendations from the original paper and rarely need tuning.
+
+Three implementation details that are not decoration:
+
+- **Term counts and lengths are precomputed in `__init__`.** Rebuilding `Counter(doc)` inside the scoring loop turns every query into a full re-tokenization of the corpus.
+- **The query is tokenized once per `rank` call**, not once per document.
+- **`rank` drops zero-score documents and breaks ties by ascending index.** Sorting `(score, idx)` tuples with `reverse=True` orders ties by *descending* index, which makes your top-k depend on the order documents happened to be loaded. And a document that shares no term with the query has nothing to say about it — returning it means padding your candidate pool with noise that later fusion stages will happily rank.
+
+This class is a linear scan over the corpus: fine for the teaching-scale corpora in this lesson, wrong above a few thousand documents. Production BM25 runs over an inverted index that only touches the documents containing a query term.
 
 ### Step 2: dense retrieval with a bi-encoder
 
@@ -130,10 +146,19 @@ The `k=60` constant comes from the original RRF paper. Higher `k` flattens the c
 ```python
 from sentence_transformers import CrossEncoder
 
-reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+_RERANKER = None
 
 
-def hybrid_search(query, bm25, encoder, dense_embeddings, corpus, top_k=5, pool_size=30, reranker=reranker):
+def get_reranker(model_id="cross-encoder/ms-marco-MiniLM-L-6-v2"):
+    global _RERANKER
+    if _RERANKER is None:
+        _RERANKER = CrossEncoder(model_id)
+    return _RERANKER
+
+
+def hybrid_search(query, bm25, encoder, dense_embeddings, corpus, top_k=5, pool_size=30, reranker=None):
+    if reranker is None:
+        reranker = get_reranker()
     sparse_ranking = bm25.rank(query, top_k=pool_size)
     dense_ranking = dense_search(encoder, dense_embeddings, query, top_k=pool_size)
     fused = reciprocal_rank_fusion([sparse_ranking, dense_ranking])[:pool_size]
@@ -145,6 +170,8 @@ def hybrid_search(query, bm25, encoder, dense_embeddings, corpus, top_k=5, pool_
 ```
 
 Three stages composed. BM25 finds lexical matches. Dense finds semantic matches. RRF merges the two rankings without needing score calibration. Cross-encoder rescores the top-30 using query-document pairs together, which captures fine-grained relevance the bi-encoder missed. Keep top-5.
+
+Note the lazy `get_reranker`. Default arguments are evaluated once, at function-definition time, so writing `reranker=CrossEncoder(...)` — or binding a module-level instance as the default — downloads and loads a cross-encoder the moment anything imports this module, including your test collector and any script that only wanted `tokenize`.
 
 ### Step 5: evaluation
 

@@ -120,13 +120,20 @@ def split_concepts(sentence):
     Heuristic splitter for multi-concept prompts.
     Returns list of short noun phrases.
     """
-    for sep in [",", ";", "and", "or", "&"]:
-        if sep in sentence:
-            parts = [p.strip() for p in sentence.replace("and ", ",").split(",")]
-            return [p for p in parts if p]
+    # Normalise every separator to a comma first, then split once.
+    # Note the spaces around "and" / "or": a bare "and" would also match inside
+    # "band", "brand", "headband", "thousand".
+    normalised = sentence
+    for sep in [" and ", " or ", "&", ";"]:
+        normalised = normalised.replace(sep, ",")
+    if "," in normalised:
+        parts = [p.strip() for p in normalised.split(",")]
+        return [p for p in parts if p]
     return [sentence.strip()]
 
-print(split_concepts("cats, dogs and balloons"))
+print(split_concepts("cats, dogs and balloons"))   # ['cats', 'dogs', 'balloons']
+print(split_concepts("mug; spoon & plate"))        # ['mug', 'spoon', 'plate']
+print(split_concepts("a red band and a hat"))      # ['a red band', 'a hat']
 ```
 
 SAM 3 accepts one concept per forward pass; for multi-concept queries, loop or batch them.
@@ -150,15 +157,18 @@ class ConceptDetection:
 
 def rle_encode(binary_mask):
     flat = binary_mask.flatten().astype("uint8")
+    if flat.size == 0:            # empty mask: flat[0] below would raise IndexError
+        return ""
     runs = []
-    prev, count = flat[0], 0
+    prev, count = int(flat[0]), 0
     for v in flat:
-        if v == prev:
+        iv = int(v)
+        if iv == prev:
             count += 1
         else:
-            runs.append((int(prev), count))
-            prev, count = v, 1
-    runs.append((int(prev), count))
+            runs.append((prev, count))
+            prev, count = iv, 1
+    runs.append((prev, count))
     return ";".join(f"{v}x{c}" for v, c in runs)
 ```
 

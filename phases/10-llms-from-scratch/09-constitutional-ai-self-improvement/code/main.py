@@ -114,7 +114,7 @@ def grpo_step(
     unclipped = ratios * advantages
     clipped = np.clip(ratios, 1 - clip_eps, 1 + clip_eps) * advantages
     policy_loss = -np.minimum(unclipped, clipped).mean()
-    kl = (ref_logprobs - policy_logprobs).mean()
+    kl = (policy_logprobs - ref_logprobs).mean()
     total_loss = policy_loss + beta * kl
     return {
         "policy_loss": float(policy_loss),

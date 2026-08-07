@@ -70,12 +70,16 @@ def mask_logits(logits, valid_token_ids):
     return mask
 
 
-def generate_constrained(model, tokenizer, prompt, fsm):
+def generate_constrained(model, tokenizer, prompt, fsm, sample, max_tokens=256):
     ids = tokenizer.encode(prompt)
     state = fsm.initial_state
-    while not fsm.is_accept(state):
+    for _ in range(max_tokens):
+        if fsm.is_accept(state):
+            break
         logits = model.next_token_logits(ids)
         valid = fsm.valid_tokens(state, tokenizer)
+        if not valid:
+            break
         logits = mask_logits(logits, valid)
         tok = sample(logits)
         ids.append(tok)
@@ -83,7 +87,9 @@ def generate_constrained(model, tokenizer, prompt, fsm):
     return tokenizer.decode(ids)
 ```
 
-The FSM tracks what parts of the grammar we have satisfied so far. `valid_tokens(state, tokenizer)` computes which vocabulary tokens can advance the FSM without leaving an accepting path.
+The FSM tracks what parts of the grammar we have satisfied so far. `valid_tokens(state, tokenizer)` computes which vocabulary tokens can advance the FSM without leaving an accepting path. `sample` is whatever sampler you already use — a function `(logits) -> token_id`.
+
+The `max_tokens` cap and the empty-`valid` check are not decoration. A grammar with a cycle (or an FSM whose accepting state is unreachable from the current one) never satisfies `is_accept`, and an unbounded `while` loop turns that authoring bug into a hung generation. Always bound the loop and always handle "no valid token here."
 
 ### Step 2: Outlines for JSON Schema
 

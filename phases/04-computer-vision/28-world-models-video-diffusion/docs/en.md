@@ -154,26 +154,32 @@ class VideoPatch3D(nn.Module):
 
 A 3D conv with stride equal to kernel acts as the spatio-temporal patchifier. `(T, H, W) -> (T/2, H/2, W/2)` grid of tokens.
 
-### Step 2: 3D rotary position encoding
+### Step 2: 3D position encoding
 
-Rotary Position Embeddings (RoPE) separately applied along `t`, `h`, `w` axes:
+One position encoding per axis (`t`, `h`, `w`), concatenated along the channel dimension. Real video DiTs use rotary embeddings (RoPE) here; the version below is the simpler additive sin/cos form, which carries the same positional information and is easier to read:
 
 ```python
-def rope_3d(tokens, t_dim, h_dim, w_dim, grid):
+def sincos_pos_3d(tokens, t_dim, h_dim, w_dim, grid):
     """
     tokens: (N, T*H*W, D)
     grid: (T, H, W) sizes
-    t_dim + h_dim + w_dim == D
+    t_dim + h_dim + w_dim == D, and each of the three must be even
     """
     T, H, W = grid
     n, seq, d = tokens.shape
     if t_dim + h_dim + w_dim != d:
         raise ValueError(f"t_dim+h_dim+w_dim ({t_dim}+{h_dim}+{w_dim}) must equal D={d}")
+    # Each axis contributes sin and cos over dim // 2 frequencies, i.e. 2 * (dim // 2)
+    # channels. An odd dim would silently lose a channel and the concatenation below
+    # would come out shorter than D.
+    for name, dim in [("t_dim", t_dim), ("h_dim", h_dim), ("w_dim", w_dim)]:
+        if dim % 2 != 0:
+            raise ValueError(f"{name} must be even, got {dim}")
     assert seq == T * H * W
     t_idx = torch.arange(T, device=tokens.device).repeat_interleave(H * W)
     h_idx = torch.arange(H, device=tokens.device).repeat_interleave(W).repeat(T)
     w_idx = torch.arange(W, device=tokens.device).repeat(T * H)
-    # Simplified: just scale channels by frequencies. Real RoPE rotates pairs.
+    # Additive sin/cos over a geometric frequency ladder. Real RoPE rotates channel pairs.
     freqs_t = torch.exp(-torch.log(torch.tensor(10000.0)) * torch.arange(t_dim // 2, device=tokens.device) / (t_dim // 2))
     freqs_h = torch.exp(-torch.log(torch.tensor(10000.0)) * torch.arange(h_dim // 2, device=tokens.device) / (h_dim // 2))
     freqs_w = torch.exp(-torch.log(torch.tensor(10000.0)) * torch.arange(w_dim // 2, device=tokens.device) / (w_dim // 2))
@@ -183,7 +189,7 @@ def rope_3d(tokens, t_dim, h_dim, w_dim, grid):
     return tokens + torch.cat([emb_t, emb_h, emb_w], dim=-1)
 ```
 
-Simplified additive form. Real RoPE rotates paired channels at frequencies; the positional information is the same.
+Simplified additive form — despite the "3D position encoding" heading this is *not* RoPE. Real RoPE rotates paired channels at those frequencies inside the attention op instead of adding to the token; the positional information is the same.
 
 ### Step 3: Divided attention block
 
@@ -275,7 +281,7 @@ This lesson produces:
 
 ## Exercises
 
-1. **(Easy)** Compute the token count for a 5-second 360p video at patch-t=2, patch-h=8, patch-w=8. Reason about memory for attention at this size.
+1. **(Easy)** Compute the token count for a 5-second 360p video at 30 fps (150 frames of 480x360) with patch-t=2, patch-h=8, patch-w=8. Reason about memory for attention at this size.
 2. **(Medium)** Swap the divided attention block above for a full joint attention block and measure the shape and parameter count. Explain why divided attention is necessary for real video models.
 3. **(Hard)** Build a minimal latent-action video model: take a dataset of (frame_t, action_t, frame_{t+1}) triples (any simple 2D game), train a tiny video DiT conditioned on action embeddings, and show that different actions produce different next frames.
 

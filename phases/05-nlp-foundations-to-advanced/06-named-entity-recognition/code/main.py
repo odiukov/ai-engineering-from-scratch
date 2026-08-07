@@ -34,6 +34,11 @@ def rule_based_ner(tokens):
 def spans_to_bio(tokens, spans):
     labels = ["O"] * len(tokens)
     for start, end, label in spans:
+        if any(labels[i] != "O" for i in range(start, end)):
+            raise ValueError(
+                f"span ({start}, {end}, {label}) overlaps an existing span; "
+                "BIO gives each token exactly one label and cannot nest"
+            )
         labels[start] = f"B-{label}"
         for i in range(start + 1, end):
             labels[i] = f"I-{label}"
@@ -41,6 +46,8 @@ def spans_to_bio(tokens, spans):
 
 
 def bio_to_spans(tokens, labels):
+    if len(tokens) != len(labels):
+        raise ValueError("tokens and labels must be the same length")
     spans = []
     current = None
     for i, label in enumerate(labels):

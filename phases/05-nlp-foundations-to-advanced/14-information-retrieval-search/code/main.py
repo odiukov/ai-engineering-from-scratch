@@ -16,6 +16,8 @@ class BM25:
         self.b = b
         self.n_docs = len(self.corpus)
         self.avg_dl = sum(len(d) for d in self.corpus) / self.n_docs
+        self.doc_freqs = [Counter(d) for d in self.corpus]
+        self.doc_lens = [len(d) for d in self.corpus]
         self.df = Counter()
         for doc in self.corpus:
             for term in set(doc):
@@ -25,11 +27,9 @@ class BM25:
         n = self.df.get(term, 0)
         return math.log(1 + (self.n_docs - n + 0.5) / (n + 0.5))
 
-    def score(self, query, doc_idx):
-        q_tokens = tokenize(query)
-        doc = self.corpus[doc_idx]
-        dl = len(doc)
-        freq = Counter(doc)
+    def _score_tokens(self, q_tokens, doc_idx):
+        freq = self.doc_freqs[doc_idx]
+        dl = self.doc_lens[doc_idx]
         total = 0.0
         for term in q_tokens:
             f = freq.get(term, 0)
@@ -40,9 +40,21 @@ class BM25:
             total += self.idf(term) * num / den
         return total
 
+    def score(self, query, doc_idx):
+        return self._score_tokens(tokenize(query), doc_idx)
+
     def rank(self, query, top_k=10):
-        scored = [(self.score(query, i), i) for i in range(self.n_docs)]
-        scored.sort(reverse=True)
+        # Drop documents that share no term with the query: they carry no
+        # signal, and RRF downstream would weight them like real candidates.
+        # Ties break by ascending index, so results do not depend on the
+        # order documents were loaded in.
+        q_tokens = tokenize(query)
+        scored = [
+            (s, i)
+            for s, i in ((self._score_tokens(q_tokens, i), i) for i in range(self.n_docs))
+            if s > 0.0
+        ]
+        scored.sort(key=lambda x: (-x[0], x[1]))
         return scored[:top_k]
 
 
@@ -70,7 +82,8 @@ def fake_dense_rank(query, corpus, top_k=5):
                 if qt != dt and min(len(qt), len(dt)) >= 4 and (qt in dt or dt in qt):
                     expansion += 0.15
         scored.append((jaccard + expansion, i))
-    scored.sort(reverse=True)
+    scored = [(s, i) for s, i in scored if s > 0.0]
+    scored.sort(key=lambda x: (-x[0], x[1]))
     return scored[:top_k]
 
 
@@ -108,6 +121,8 @@ def main():
         print(f"  {score:.4f}  {corpus[idx]}")
 
     print()
+    print("note: the Section 420 statute never appears — it shares no term with the query.")
+    print("that vocabulary gap is the whole reason dense retrieval exists (docs/en.md, step 2).")
     print("note: this code uses a toy 'fake-dense' ranker for teaching.")
     print("real dense retrieval needs a sentence-transformer encoder; see docs/en.md.")
 

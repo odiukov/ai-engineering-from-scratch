@@ -89,17 +89,30 @@ Sweep `depth_ratio` ∈ {0, 0.25, 0.5, 0.75, 1.0} × `total_tokens` ∈ {1k, 4k,
 ### Step 2: a multi-needle variant
 
 ```python
-def build_multi_needle(filler, needles, total_tokens):
-    depths = [0.1, 0.4, 0.7]
-    chunks = [filler[:int(total_tokens * 0.1)]]
-    for depth, needle in zip(depths, needles):
-        chunks.append(needle)
-        next_chunk = filler[int(total_tokens * depth): int(total_tokens * (depth + 0.3))]
-        chunks.append(next_chunk)
-    return " ".join(chunks)
+def build_multi_needle(filler_text, needles, total_tokens, depths=(0.1, 0.4, 0.7)):
+    filler_tokens = tokenize(filler_text)
+    if not filler_tokens:
+        raise ValueError("filler_text produced no tokens")
+
+    needle_tokens = [tokenize(n) for n in needles]
+    body_len = max(total_tokens - sum(len(n) for n in needle_tokens), 0)
+    while len(filler_tokens) < body_len:
+        filler_tokens = filler_tokens + filler_tokens
+    filler_tokens = filler_tokens[:body_len]
+
+    out, cursor = [], 0
+    for depth, needle in sorted(zip(depths, needle_tokens)):
+        pos = min(int(body_len * depth), body_len)
+        out.extend(filler_tokens[cursor:pos])
+        out.extend(needle)
+        cursor = pos
+    out.extend(filler_tokens[cursor:])
+    return " ".join(out)
 ```
 
 Questions like "What are the three magic words?" require retrieving all three. Single-needle success does not predict multi-needle success.
+
+Keep the units honest: `total_tokens` is a token count, so every slice here is a token slice. Slicing the filler *string* by `total_tokens` instead measures characters, and the haystack you actually build ends up a few times shorter than the length you are reporting on the x-axis of your heatmap. Walking a single cursor through the filler also guarantees the depth windows tile the document instead of overlapping.
 
 ### Step 3: multi-hop variable tracing (RULER-style)
 

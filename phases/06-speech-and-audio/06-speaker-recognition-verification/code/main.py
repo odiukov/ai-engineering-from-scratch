@@ -119,7 +119,9 @@ def cosine(a, b):
 
 
 def eer(same_scores, diff_scores):
-    thresholds = sorted(set(same_scores + diff_scores))
+    # set union, not `same + diff`: `+` concatenates lists but breaks on
+    # tuples-vs-lists and adds element-wise on numpy arrays.
+    thresholds = sorted(set(same_scores) | set(diff_scores))
     best_gap = float("inf")
     best_fa, best_fr, best_t = 1.0, 0.0, thresholds[0] if thresholds else 0.0
     for t in thresholds:

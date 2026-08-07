@@ -98,7 +98,7 @@ Why it helps: the model stops memorising spiky one-hot targets and learns to int
 
 ### Label smoothing
 
-A cousin of mixup. Instead of training against `[0, 0, 1, 0, 0]`, train against `[eps/C, eps/C, 1-eps, eps/C, eps/C]` for a small `eps` like 0.1. Stops the model from producing arbitrarily sharp logits and improves calibration at almost no cost. Built into `nn.CrossEntropyLoss(label_smoothing=0.1)` since PyTorch 1.10.
+A cousin of mixup. Instead of training against `[0, 0, 1, 0, 0]`, train against `(1 - eps) * onehot + eps / C` for a small `eps` like 0.1 — with `C = 5` that target is `[eps/C, eps/C, 1 - eps + eps/C, eps/C, eps/C]`, which still sums to 1. Stops the model from producing arbitrarily sharp logits and improves calibration at almost no cost. That is exactly the convention `nn.CrossEntropyLoss(label_smoothing=0.1)` implements, built in since PyTorch 1.10.
 
 ### Evaluation beyond accuracy
 
@@ -180,20 +180,20 @@ def standardize(mean, std):
     return _fn
 
 
-def random_hflip(p=0.5):
+def random_hflip(rng, p=0.5):
     def _fn(img):
-        if np.random.random() < p:
+        if rng.random() < p:
             return img[:, ::-1, :].copy()
         return img
     return _fn
 
 
-def random_crop(pad=4):
+def random_crop(rng, pad=4):
     def _fn(img):
         h, w = img.shape[:2]
         padded = np.pad(img, ((pad, pad), (pad, pad), (0, 0)), mode="reflect")
-        y = np.random.randint(0, 2 * pad)
-        x = np.random.randint(0, 2 * pad)
+        y = rng.integers(0, 2 * pad + 1)
+        x = rng.integers(0, 2 * pad + 1)
         return padded[y:y + h, x:x + w, :]
     return _fn
 
@@ -206,17 +206,17 @@ def compose(*fns):
     return _fn
 ```
 
-Reflect-pad before crop, not zero-pad, because black borders are a signal the model would learn to ignore in a non-useful way.
+Reflect-pad before crop, not zero-pad, because black borders are a signal the model would learn to ignore in a non-useful way. Both augmentations draw from an explicit `np.random.Generator` you pass in, the same style as `synthetic_cifar` in Step 1 — reach for the global `np.random` here and the run stops being reproducible no matter what seed you set.
 
 ### Step 3: Mixup
 
 Mixes two images and two labels inside the training step. Implemented as a batch transform so it lives next to the forward pass rather than inside the dataset.
 
 ```python
-def mixup_batch(x, y, num_classes, alpha=0.2):
+def mixup_batch(x, y, num_classes, rng, alpha=0.2):
     if alpha <= 0:
         return x, torch.nn.functional.one_hot(y, num_classes).float()
-    lam = float(np.random.beta(alpha, alpha))
+    lam = float(rng.beta(alpha, alpha))
     idx = torch.randperm(x.size(0), device=x.device)
     x_mixed = lam * x + (1 - lam) * x[idx]
     y_onehot = torch.nn.functional.one_hot(y, num_classes).float()
@@ -229,7 +229,7 @@ def soft_cross_entropy(logits, soft_targets):
     return -(soft_targets * log_probs).sum(dim=-1).mean()
 ```
 
-`soft_cross_entropy` is cross-entropy against a soft-label distribution. It reduces to the usual one-hot case when the target is exactly one-hot.
+`soft_cross_entropy` is cross-entropy against a soft-label distribution. It reduces to the usual one-hot case when the target is exactly one-hot. `lam` comes from the same passed-in generator as the augmentations, so mixup does not reintroduce global randomness.
 
 ### Step 4: The training loop
 
@@ -242,13 +242,13 @@ from torch.utils.data import DataLoader
 from torch.optim import SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-def train_one_epoch(model, loader, optimizer, device, num_classes, use_mixup=True):
+def train_one_epoch(model, loader, optimizer, device, num_classes, rng, use_mixup=True):
     model.train()
     total, correct, loss_sum = 0, 0, 0.0
     for x, y in loader:
         x, y = x.to(device), y.to(device)
         if use_mixup:
-            x_m, y_soft = mixup_batch(x, y, num_classes)
+            x_m, y_soft = mixup_batch(x, y, num_classes, rng)
             logits = model(x_m)
             loss = soft_cross_entropy(logits, y_soft)
         else:
@@ -315,7 +315,8 @@ X_val, Y_val = X[split:], Y[split:]
 
 mean = [0.5, 0.5, 0.5]
 std = [0.25, 0.25, 0.25]
-train_tf = compose(random_hflip(), random_crop(pad=4), standardize(mean, std))
+aug_rng = np.random.default_rng(1)
+train_tf = compose(random_hflip(aug_rng), random_crop(aug_rng, pad=4), standardize(mean, std))
 eval_tf = standardize(mean, std)
 
 train_ds = ArrayDataset(X_train, Y_train, transform=train_tf)
@@ -330,7 +331,7 @@ optimizer = SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4, nes
 scheduler = CosineAnnealingLR(optimizer, T_max=10)
 
 for epoch in range(10):
-    tr_loss, tr_acc = train_one_epoch(model, train_loader, optimizer, device, 10, use_mixup=True)
+    tr_loss, tr_acc = train_one_epoch(model, train_loader, optimizer, device, 10, aug_rng, use_mixup=True)
     va_loss, va_acc, _ = evaluate(model, val_loader, device, 10)
     scheduler.step()
     print(f"epoch {epoch:2d}  lr {scheduler.get_last_lr()[0]:.4f}  "
@@ -413,7 +414,7 @@ This lesson produces:
 | DataLoader | "The batcher" | Wraps a dataset with shuffling, batching, and (optional) multi-worker loading; gets blamed for half of training bugs |
 | Augmentation | "Random transforms" | Any pixel-level transform at training time that preserves the label; teaches invariances the CNN does not have natively |
 | Mixup / Cutmix | "Mix two images" | Blend both inputs and labels so the classifier learns smooth interpolations instead of hard boundaries |
-| Label smoothing | "Softer targets" | Replace one-hot with (1-eps, eps/(C-1), ...); improves calibration and slightly boosts accuracy |
+| Label smoothing | "Softer targets" | Replace one-hot with `(1 - eps) * onehot + eps/C`, the PyTorch convention; improves calibration and slightly boosts accuracy |
 | Top-k accuracy | "Top-5" | The correct class is in the k highest-probability predictions; used on datasets with genuinely ambiguous classes |
 | Confusion matrix | "Where errors live" | C x C table where entry (i, j) counts images of true class i predicted as j; diagonal is right, off-diagonal tells you what to fix |
 

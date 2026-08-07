@@ -54,20 +54,20 @@ def standardize(mean, std):
     return _fn
 
 
-def random_hflip(p=0.5):
+def random_hflip(rng, p=0.5):
     def _fn(img):
-        if np.random.random() < p:
+        if rng.random() < p:
             return img[:, ::-1, :].copy()
         return img
     return _fn
 
 
-def random_crop(pad=4):
+def random_crop(rng, pad=4):
     def _fn(img):
         h, w = img.shape[:2]
         padded = np.pad(img, ((pad, pad), (pad, pad), (0, 0)), mode="reflect")
-        y = np.random.randint(0, 2 * pad + 1)
-        x = np.random.randint(0, 2 * pad + 1)
+        y = rng.integers(0, 2 * pad + 1)
+        x = rng.integers(0, 2 * pad + 1)
         return padded[y:y + h, x:x + w, :]
     return _fn
 
@@ -80,10 +80,10 @@ def compose(*fns):
     return _fn
 
 
-def mixup_batch(x, y, num_classes, alpha=0.2):
+def mixup_batch(x, y, num_classes, rng, alpha=0.2):
     if alpha <= 0:
         return x, F.one_hot(y, num_classes).float()
-    lam = float(np.random.beta(alpha, alpha))
+    lam = float(rng.beta(alpha, alpha))
     idx = torch.randperm(x.size(0), device=x.device)
     x_mixed = lam * x + (1 - lam) * x[idx]
     y_onehot = F.one_hot(y, num_classes).float()
@@ -123,13 +123,13 @@ class MiniClassifier(nn.Module):
         return self.head(self.features(x))
 
 
-def train_one_epoch(model, loader, optimizer, device, num_classes, use_mixup=True):
+def train_one_epoch(model, loader, optimizer, device, num_classes, rng, use_mixup=True):
     model.train()
     total, correct, loss_sum = 0, 0, 0.0
     for x, y in loader:
         x, y = x.to(device), y.to(device)
         if use_mixup:
-            x_m, y_soft = mixup_batch(x, y, num_classes)
+            x_m, y_soft = mixup_batch(x, y, num_classes, rng)
             logits = model(x_m)
             loss = soft_cross_entropy(logits, y_soft)
         else:
@@ -184,7 +184,8 @@ def main():
 
     mean = [0.5, 0.5, 0.5]
     std = [0.25, 0.25, 0.25]
-    train_tf = compose(random_hflip(), random_crop(pad=4), standardize(mean, std))
+    aug_rng = np.random.default_rng(1)
+    train_tf = compose(random_hflip(aug_rng), random_crop(aug_rng, pad=4), standardize(mean, std))
     eval_tf = standardize(mean, std)
 
     train_ds = ArrayDataset(X_train, Y_train, transform=train_tf)
@@ -199,7 +200,7 @@ def main():
 
     for epoch in range(5):
         current_lr = scheduler.get_last_lr()[0]
-        tr_loss, tr_acc = train_one_epoch(model, train_loader, optimizer, device, 10, use_mixup=True)
+        tr_loss, tr_acc = train_one_epoch(model, train_loader, optimizer, device, 10, aug_rng, use_mixup=True)
         va_loss, va_acc, cm = evaluate(model, val_loader, device, 10)
         scheduler.step()
         print(f"epoch {epoch}  lr {current_lr:.4f}  "

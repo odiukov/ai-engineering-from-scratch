@@ -246,11 +246,14 @@ def fmt_billions(x: int) -> str:
 
 
 def fmt_bytes(b: int) -> str:
+    """Decimal SI units, so the printed number matches the docs' KV-cache
+    arithmetic (Llama 3 8B at 128k = 17,179,869,184 bytes = 17.2 GB)."""
+    value = float(b)
     for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if b < 1024:
-            return f"{b:.1f}{unit}"
-        b /= 1024
-    return f"{b:.1f}PB"
+        if value < 1000:
+            return f"{value:.1f}{unit}"
+        value /= 1000
+    return f"{value:.1f}PB"
 
 
 def print_breakdown(b: Breakdown, config: dict) -> None:

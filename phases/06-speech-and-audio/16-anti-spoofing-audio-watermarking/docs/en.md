@@ -91,13 +91,13 @@ def spectral_rolloff(spec, percentile=0.85):
             return k
     return len(spec) - 1
 
-def is_suspicious(audio):
+def is_suspicious(audio, percentile=0.95, max_rolloff_ratio=0.92):
     spec = magnitude_spectrum(audio)
-    rolloff = spectral_rolloff(spec)
-    return rolloff / len(spec) > 0.92
+    rolloff = spectral_rolloff(spec, percentile)
+    return rolloff / len(spec) > max_rolloff_ratio
 ```
 
-Synthetic speech often has unusually flat high-frequency energy. Production detectors use AASIST, not this. But the intuition holds.
+Natural speech dumps most of its energy low in the band, so its rolloff bin sits well below the top. Synthetic speech often carries flat energy all the way up, which pushes the rolloff bin toward the last bin. Watch the two knobs together: on a perfectly flat spectrum `rolloff / len(spec)` converges to `percentile` itself, so a threshold above the percentile can never fire — the pairing `percentile=0.85, max_rolloff_ratio=0.92` looks strict but is simply dead code. Production detectors use AASIST, not this. But the intuition holds.
 
 ### Step 2: AudioSeal embed + detect
 
@@ -122,15 +122,19 @@ result, decoded_payload = detector.detect_watermark(watermarked, sample_rate=160
 
 ```python
 def eer(real_scores, fake_scores):
-    thresholds = sorted(set(real_scores + fake_scores))
-    best = (1.0, 0.0)
+    real_scores, fake_scores = list(real_scores), list(fake_scores)
+    thresholds = sorted(set(real_scores) | set(fake_scores))
+    best_gap, best_eer = None, 1.0
     for t in thresholds:
         far = sum(1 for s in fake_scores if s >= t) / len(fake_scores)
         frr = sum(1 for s in real_scores if s < t) / len(real_scores)
-        if abs(far - frr) < best[0]:
-            best = (abs(far - frr), (far + frr) / 2)
-    return best[1]
+        gap = abs(far - frr)
+        if best_gap is None or gap < best_gap:
+            best_gap, best_eer = gap, (far + frr) / 2
+    return best_eer
 ```
+
+Two things worth copying: build the threshold set with `set(...) | set(...)` after materializing both inputs as lists — `real_scores + fake_scores` only concatenates for lists, and silently does something else (element-wise addition) for numpy arrays. And seed the search with `best_gap = None` rather than a magic `1.0`; a `|FAR − FRR|` of exactly 1.0 at every threshold would otherwise leave the sentinel untouched and return 0.0, which reads as a perfect detector when it actually means "nothing was evaluated."
 
 ### Step 4: the production integration
 

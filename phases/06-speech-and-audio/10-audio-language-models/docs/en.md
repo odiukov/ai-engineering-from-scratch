@@ -4,7 +4,7 @@
 
 **Type:** Learn
 **Languages:** Python
-**Prerequisites:** Phase 6 · 04 (ASR), Phase 12 · 03 (Vision-Language Models), Phase 7 · 10 (Audio Transformers)
+**Prerequisites:** Phase 6 · 04 (ASR), Phase 7 · 10 (Audio Transformers — Whisper), Phase 12 · 03 (BLIP-2 Q-Former Bridge)
 **Time:** ~45 minutes
 
 ## The Problem
@@ -115,31 +115,39 @@ import torch.nn as nn
 class AudioProjector(nn.Module):
     def __init__(self, audio_dim=1280, llm_dim=4096):
         super().__init__()
-        self.down = nn.Linear(audio_dim, llm_dim)
+        self.fc1 = nn.Linear(audio_dim, llm_dim)   # 1280 -> 4096
         self.act = nn.GELU()
-        self.up = nn.Linear(llm_dim, llm_dim)
+        self.fc2 = nn.Linear(llm_dim, llm_dim)     # 4096 -> 4096
 
     def forward(self, audio_features):
-        return self.up(self.act(self.down(audio_features)))
+        return self.fc2(self.act(self.fc1(audio_features)))
 ```
 
 That's it. The projector is usually 1-3 linear layers. Training it on ASR pairs (audio → transcript) is the Stage-1 pretext task.
 
+Note the direction: the audio encoder's hidden size (1280 for Whisper-large) is *smaller* than the LLM's (4096 for a 7B), so both layers project up or sideways — there is no bottleneck in this block, and naming the first layer `down` would be exactly backwards. The width you cannot change is `llm_dim`: whatever comes out has to sit in the same space as the LLM's token embeddings.
+
 ### Step 3: benchmarking MMAU / LongAudioBench
 
 ```python
+from collections import Counter
 from datasets import load_dataset
+
 mmau = load_dataset("MMAU/MMAU-Pro")
 
-correct = 0
+seen, hits = Counter(), Counter()
 for item in mmau["test"]:
     answer = call_model(item["audio"], item["question"], item["choices"])
-    if answer == item["correct_choice"]:
-        correct += 1
-print(f"Accuracy: {correct / len(mmau['test']):.3f}")
+    category = item["category"]      # speech / sound / music / multi-audio
+    seen[category] += 1
+    hits[category] += int(answer == item["correct_choice"])
+
+for category in sorted(seen):
+    print(f"{category:12s} {hits[category] / seen[category]:.3f}  (n={seen[category]})")
+print(f"{'overall':12s} {sum(hits.values()) / sum(seen.values()):.3f}")
 ```
 
-Report per-category (speech / sound / music / multi-audio) separately. Aggregate numbers hide where the model fails.
+Keep the per-category counters, not just the running total. Aggregate numbers hide where the model fails — a model that is strong on speech and at chance on multi-audio can report the same overall accuracy as one that is uniformly mediocre, and only the split tells you whether a "which clip has X" feature is viable.
 
 ## Use It
 

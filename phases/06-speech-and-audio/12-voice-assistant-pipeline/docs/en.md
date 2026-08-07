@@ -28,7 +28,7 @@ Latency target: first TTS audio byte within 800 ms of the user finishing their u
 ### The seven components
 
 1. **Audio capture.** Mic → 16 kHz mono → 20 ms chunks. Usually `sounddevice` in Python or native AudioUnit/ALSA/WASAPI in production.
-2. **VAD (Lesson 11).** Silero VAD @ threshold 0.5, min speech 250 ms, silence hang-over 500 ms. Signals "start" and "end."
+2. **VAD (Lesson 11).** Silero VAD @ start threshold 0.3 (Silero's own default is 0.5; 0.3 buys you the first word at the cost of a few false starts — see failure mode 1), min speech 250 ms, silence hang-over 500 ms. Signals "start" and "end."
 3. **Streaming STT (Lesson 4-5).** Whisper-streaming, Parakeet-TDT, or Deepgram Nova-3 (API). Partial + final transcripts.
 4. **LLM with tool calling.** GPT-4o / Claude 3.5 / Gemini 2.5 Flash. JSON schema for tools. Stream tokens.
 5. **Streaming TTS (Lesson 7).** Kokoro-82M (fastest open) or Cartesia Sonic (commercial). Start TTS after 20 LLM tokens.
@@ -74,29 +74,34 @@ def mic_stream(chunk_ms=20, sr=16000):
 ### Step 2: VAD-gated turn capture
 
 ```python
-def capture_turn(stream, vad, pre_roll_ms=300, silence_ms=500):
-    buf, pre, triggered = [], collections.deque(maxlen=pre_roll_ms // 20), False
-    silent = 0
+def capture_turn(stream, vad, chunk_ms=20, pre_roll_ms=300, silence_ms=500):
+    pre = collections.deque(maxlen=max(1, pre_roll_ms // chunk_ms))
+    buf, triggered, silent = [], False, 0
     for chunk in stream:
-        pre.append(chunk)
         if vad(chunk):
             if not triggered:
-                buf = list(pre)
+                buf = list(pre)      # pre-roll only — `chunk` is appended below
                 triggered = True
             buf.append(chunk)
             silent = 0
         elif triggered:
-            silent += 20
             buf.append(chunk)
+            silent += chunk_ms
             if silent >= silence_ms:
-                return b"".join(buf)
+                return np.concatenate(buf)
+        else:
+            pre.append(chunk)        # rolling pre-roll while nobody is talking
+    # stream ended before the hangover elapsed — return what we have, not None
+    return np.concatenate(buf) if triggered else None
 ```
+
+Three details that bite in practice: the pre-roll deque must be sized from the *same* `chunk_ms` the mic uses (otherwise a 10 ms mic silently halves your pre-roll), the triggering frame must not be counted twice (it is in `buf` via `pre` or via `append`, never both), and `mic_stream` yields float arrays — concatenate them, do not `b"".join` them.
 
 ### Step 3: streaming STT → LLM → TTS
 
 ```python
-async def turn(audio_bytes):
-    transcript = await stt.transcribe(audio_bytes)
+async def turn(audio):
+    transcript = await stt.transcribe(audio)
     async for token in llm.stream(transcript):
         async for audio in tts.stream(token):
             await speaker.play(audio)

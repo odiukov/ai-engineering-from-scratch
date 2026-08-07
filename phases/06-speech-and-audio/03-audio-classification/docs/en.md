@@ -66,6 +66,8 @@ def featurize_mfcc(signal, sr, n_mfcc=13, n_mels=40, frame_len=400, hop=160):
     return [dct_ii(frame, n_mfcc) for frame in log]
 ```
 
+Every helper here — `stft_magnitude`, `mel_filterbank`, `apply_filterbank`, `log_transform`, `dct_ii` — is the one you built in lesson 02.
+
 ### Step 2: fixed-length summary
 
 ```python
@@ -83,6 +85,9 @@ Simple but strong: mean + variance across time gives a 26-dim fixed embedding fo
 ### Step 3: k-NN
 
 ```python
+import math
+from collections import Counter
+
 def cosine(a, b):
     dot = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a)) or 1e-12

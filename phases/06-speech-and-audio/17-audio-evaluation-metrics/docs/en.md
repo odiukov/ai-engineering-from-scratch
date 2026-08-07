@@ -129,7 +129,7 @@ score = wer(
     truth_transform=transform,
     hypothesis_transform=transform,
 )
-# ~0.17
+# 0.2 — reference normalizes to 5 words, one substitution (lights → light): 1/5
 ```
 
 ### Step 2: TTS round-trip WER
@@ -167,15 +167,19 @@ score = fad.get_fad_score("generated_folder/", "reference_folder/")
 
 ```python
 def eer(same_scores, diff_scores):
-    thresholds = sorted(set(same_scores + diff_scores))
-    best = (1.0, 0.0)
+    same_scores, diff_scores = list(same_scores), list(diff_scores)
+    thresholds = sorted(set(same_scores) | set(diff_scores))
+    best_gap, best_eer = None, 1.0
     for t in thresholds:
         far = sum(1 for s in diff_scores if s >= t) / len(diff_scores)
         frr = sum(1 for s in same_scores if s < t) / len(same_scores)
-        if abs(far - frr) < best[0]:
-            best = (abs(far - frr), (far + frr) / 2)
-    return best[1]
+        gap = abs(far - frr)
+        if best_gap is None or gap < best_gap:
+            best_gap, best_eer = gap, (far + frr) / 2
+    return best_eer
 ```
+
+`same_scores + diff_scores` concatenates only for lists — hand it two numpy arrays and you get element-wise addition (or a shape error), and the thresholds are quietly wrong. Materialize as lists and union the sets. Likewise, `best_gap = None` beats seeding the search with a magic `1.0`: if `|FAR − FRR|` never drops below the sentinel, the old code returned 0.0 — an EER of zero, i.e. a flawless detector — when it should say "unmeasurable."
 
 ## Use It
 

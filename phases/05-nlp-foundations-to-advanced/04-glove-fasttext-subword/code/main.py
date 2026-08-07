@@ -24,7 +24,10 @@ def learn_bpe(corpus, k_merges):
                 pair_freq[(a, b)] += freq
         if not pair_freq:
             break
-        best = pair_freq.most_common(1)[0][0]
+        # Most frequent pair, ties broken lexicographically. `most_common(1)`
+        # would break ties by insertion order, so the same corpus in a
+        # different order would learn a different vocabulary.
+        best = min(pair_freq.items(), key=lambda kv: (-kv[1], kv[0]))[0]
         merges.append(best)
 
         new_vocab = {}

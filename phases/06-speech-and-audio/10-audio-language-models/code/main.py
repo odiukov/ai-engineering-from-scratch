@@ -19,10 +19,11 @@ def fake_audio_encoder(audio_seconds=3.0, dim=1280):
 
 def projector(features, audio_dim=1280, llm_dim=4096):
     random.seed(1)
-    W_down = [[random.gauss(0, 0.02) for _ in range(audio_dim)] for _ in range(llm_dim)]
+    # audio_dim (1280) -> llm_dim (4096): this projects *up*, no bottleneck here.
+    W = [[random.gauss(0, 0.02) for _ in range(audio_dim)] for _ in range(llm_dim)]
     out = []
     for f in features:
-        hidden = [sum(W_down[i][j] * f[j] for j in range(audio_dim)) for i in range(llm_dim)]
+        hidden = [sum(W[i][j] * f[j] for j in range(audio_dim)) for i in range(llm_dim)]
         hidden = [max(0.0, h) for h in hidden]
         out.append(hidden)
     return out

@@ -76,21 +76,22 @@ def main():
     silent_ms = 0
     turn_start = time.time()
     for chunk, truth in mic_generator():
-        pre_roll.append(chunk)
-        if len(pre_roll) > 15:
-            pre_roll.pop(0)
         if vad(chunk):
             if not triggered:
-                for c in pre_roll:
+                for c in pre_roll:      # pre-roll only; `chunk` is added below
                     buffered.extend(c)
                 triggered = True
             buffered.extend(chunk)
             silent_ms = 0
         elif triggered:
-            silent_ms += 20
             buffered.extend(chunk)
+            silent_ms += 20
             if silent_ms >= 400:
                 break
+        else:
+            pre_roll.append(chunk)      # rolling 300 ms pre-roll while idle
+            if len(pre_roll) > 15:
+                pre_roll.pop(0)
     t_capture = (time.time() - turn_start) * 1000
     print(f"  captured {len(buffered)} samples ({len(buffered)/16000:.3f} s) in {t_capture:.0f} ms wall time")
 

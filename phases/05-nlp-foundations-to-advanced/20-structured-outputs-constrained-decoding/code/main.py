@@ -56,12 +56,14 @@ def fake_llm_logits(alphabet, rng):
     return [rng.gauss(0.0, 1.5) for _ in alphabet]
 
 
-def generate_constrained(alphabet, fsm, seed):
+def generate_constrained(alphabet, fsm, seed, max_steps=256):
     rng = random.Random(seed)
     alphabet_idx = {ch: i for i, ch in enumerate(alphabet)}
     state = 0
     out = ""
-    while not fsm.is_accept(state):
+    for _ in range(max_steps):
+        if fsm.is_accept(state):
+            break
         logits = fake_llm_logits(alphabet, rng)
         valid_chars = fsm.valid_next(state)
         if not valid_chars:

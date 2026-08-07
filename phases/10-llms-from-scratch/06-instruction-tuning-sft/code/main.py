@@ -1,14 +1,38 @@
-import numpy as np
-import sys
+import importlib.util
 import os
+import sys
 
-sys.path.insert(
-    0,
-    os.path.join(
-        os.path.dirname(__file__), "..", "..", "04-pre-training-mini-gpt", "code"
-    ),
+import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+LESSON_04_MAIN = os.path.join(
+    HERE, "..", "..", "04-pre-training-mini-gpt", "code", "main.py"
 )
-from main import MiniGPT, LayerNorm, FeedForward, MultiHeadAttention, TransformerBlock, Embedding
+
+
+def _load_module(name, file_path):
+    spec = importlib.util.spec_from_file_location(name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {name} from {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+# Lesson 04's file is also called main.py, so it has to be loaded under a
+# distinct module name. A bare `from main import ...` resolves to *this* file
+# as soon as this file is itself imported as a module named `main`.
+_mini_gpt = _load_module("_lesson04_mini_gpt", LESSON_04_MAIN)
+
+MiniGPT = _mini_gpt.MiniGPT
+LayerNorm = _mini_gpt.LayerNorm
+FeedForward = _mini_gpt.FeedForward
+MultiHeadAttention = _mini_gpt.MultiHeadAttention
+TransformerBlock = _mini_gpt.TransformerBlock
+Embedding = _mini_gpt.Embedding
+layernorm_backward = _mini_gpt.layernorm_backward
+ffn_backward = _mini_gpt.ffn_backward
 
 
 INSTRUCTION_DATA = [
@@ -107,6 +131,74 @@ def masked_cross_entropy_loss(logits, targets, loss_mask):
     return loss
 
 
+def masked_cross_entropy_backward(logits, targets, loss_mask):
+    batch, seq_len, vocab_size = logits.shape
+
+    probs = np.exp(logits - logits.max(axis=-1, keepdims=True))
+    probs = probs / probs.sum(axis=-1, keepdims=True)
+
+    dlogits = probs.copy()
+    dlogits[np.arange(batch)[:, None], np.arange(seq_len), targets] -= 1.0
+
+    num_response_tokens = loss_mask.sum()
+    if num_response_tokens == 0:
+        return np.zeros_like(logits)
+
+    return dlogits * loss_mask[:, :, np.newaxis] / num_response_tokens
+
+
+def sft_step(model, input_ids, target_ids, loss_mask, lr):
+    seq_len = input_ids.shape[-1]
+    mask = np.triu(np.full((seq_len, seq_len), -1e9), k=1)
+
+    x = model.embedding.forward(input_ids)
+    block_inputs = [x]
+    for block in model.blocks:
+        x = block.forward(x, mask)
+        block_inputs.append(x)
+    x_pre_ln = x
+    x_normed = model.ln_f.forward(x_pre_ln)
+    logits = x_normed @ model.embedding.token_embed.T
+
+    loss = masked_cross_entropy_loss(logits, target_ids, loss_mask)
+    dlogits = masked_cross_entropy_backward(logits, target_ids, loss_mask)
+
+    grad_token_embed = np.zeros_like(model.embedding.token_embed)
+    for b in range(logits.shape[0]):
+        grad_token_embed += dlogits[b].T @ x_normed[b]
+
+    dx_normed = dlogits @ model.embedding.token_embed
+    dx, grad_ln_gamma, grad_ln_beta = layernorm_backward(
+        dx_normed, x_pre_ln, model.ln_f
+    )
+
+    for i in range(len(model.blocks) - 1, -1, -1):
+        block = model.blocks[i]
+        block_in = block_inputs[i]
+
+        ln2_in = block_in + block.attn.forward(block.ln1.forward(block_in), mask)
+        ln2_out = block.ln2.forward(ln2_in)
+
+        dffn, gW1, gb1, gW2, gb2 = ffn_backward(dx, ln2_out, block.ffn)
+        dln2_in, g_ln2_gamma, g_ln2_beta = layernorm_backward(
+            dffn, ln2_in, block.ln2
+        )
+        dx = dx + dln2_in
+
+        block.ffn.W1 -= lr * gW1
+        block.ffn.b1 -= lr * gb1
+        block.ffn.W2 -= lr * gW2
+        block.ffn.b2 -= lr * gb2
+        block.ln2.gamma -= lr * g_ln2_gamma
+        block.ln2.beta -= lr * g_ln2_beta
+
+    model.ln_f.gamma -= lr * grad_ln_gamma
+    model.ln_f.beta -= lr * grad_ln_beta
+    model.embedding.token_embed -= lr * grad_token_embed
+
+    return loss
+
+
 def sft_train(model, dataset, num_epochs=2, lr=2e-5, seq_len=64):
     formatted_data = []
     for example in dataset:
@@ -139,25 +231,7 @@ def sft_train(model, dataset, num_epochs=2, lr=2e-5, seq_len=64):
             target_ids = np.array(tokens[1:]).reshape(1, -1)
             loss_mask = np.array(mask[1:]).reshape(1, -1)
 
-            logits = model.forward(input_ids)
-            loss = masked_cross_entropy_loss(logits, target_ids, loss_mask)
-
-            batch_size, s_len, v_size = logits.shape
-            probs = np.exp(logits - logits.max(axis=-1, keepdims=True))
-            probs = probs / probs.sum(axis=-1, keepdims=True)
-            dlogits = probs.copy()
-            dlogits[np.arange(batch_size)[:, None], np.arange(s_len), target_ids] -= 1.0
-
-            mask_expanded = loss_mask[:, :, np.newaxis]
-            num_resp = loss_mask.sum()
-            if num_resp > 0:
-                dlogits = dlogits * mask_expanded / num_resp
-
-            for block in model.blocks:
-                block.ffn.W1 -= lr * np.random.randn(*block.ffn.W1.shape) * 0.01
-                block.ffn.W2 -= lr * np.random.randn(*block.ffn.W2.shape) * 0.01
-                block.ffn.b1 -= lr * np.random.randn(*block.ffn.b1.shape) * 0.01
-                block.ffn.b2 -= lr * np.random.randn(*block.ffn.b2.shape) * 0.01
+            loss = sft_step(model, input_ids, target_ids, loss_mask, lr)
 
             epoch_loss += loss
             num_batches += 1

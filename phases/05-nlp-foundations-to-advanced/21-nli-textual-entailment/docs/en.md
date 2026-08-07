@@ -92,13 +92,21 @@ The template is "This example is about {label}." by default. Customize with `hyp
 ### Step 3: faithfulness check for RAG
 
 ```python
-def is_faithful(answer, context, threshold=0.5):
-    result = nli({"text": context, "text_pair": answer})[0]
+def is_supported(claim, context, threshold=0.5):
+    result = nli({"text": context, "text_pair": claim})[0]
     entail = next(s for s in result if s["label"] == "entailment")
     return entail["score"] > threshold
+
+
+def faithfulness(answer, context, split_claims, threshold=0.5):
+    claims = [c for c in split_claims(answer) if c.strip()]
+    if not claims:
+        return 0.0
+    supported = sum(is_supported(c, context, threshold) for c in claims)
+    return supported / len(claims)
 ```
 
-This is the core of RAGAS faithfulness. Split the generated answer into atomic claims. Check each claim against the retrieved context. Report the fraction that entail.
+This is the core of RAGAS faithfulness. Split the generated answer into atomic claims, check each claim against the retrieved context, report the fraction that entail. `split_claims` is the decomposition step: a sentence splitter is the cheap version, an LLM call the accurate one. Do not run NLI over the whole answer in one call — a four-sentence answer with one hallucinated sentence still reads as mostly-entailed, and the single score hides it.
 
 ### Step 4: hand-rolled NLI classifier (conceptual)
 

@@ -60,6 +60,10 @@ class TurnDetector:
                     self.speech_ms = 0
                     self.silence_ms = 0
                     return "END"
+            else:
+                # while idle, speech must be *consecutive* to count — otherwise
+                # scattered coughs add up to min_speech_ms and fake a START
+                self.speech_ms = 0
         return None
 
 

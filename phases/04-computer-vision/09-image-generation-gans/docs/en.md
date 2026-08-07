@@ -176,7 +176,7 @@ import torch.nn.functional as F
 
 def train_step(G, D, real, z, opt_g, opt_d, device):
     real = real.to(device)
-    bs = real.size(0)
+    z = z.to(device)
 
     # D step
     opt_d.zero_grad()
@@ -244,15 +244,16 @@ def sample(G, n=16, z_dim=64, device="cpu"):
     G.eval()
     z = torch.randn(n, z_dim, device=device)
     imgs = G(z)
+    G.train()
     imgs = (imgs + 1) / 2
     return imgs.clamp(0, 1)
 ```
 
-Always switch to eval mode before sampling. For DCGAN this matters because batch norm running stats are used instead of the batch's stats.
+Always switch to eval mode before sampling. For DCGAN this matters because batch norm running stats are used instead of the batch's stats. Switch back to `train()` before returning — if you call `sample()` at the end of every epoch and forget this, the next epoch trains with frozen batch-norm statistics.
 
 ### Step 6: Spectral normalisation
 
-A drop-in replacement for BN in the discriminator that guarantees the network is 1-Lipschitz. Fixes most "D wins too hard" failures.
+A drop-in replacement for BN in the discriminator that bounds each layer's Lipschitz constant at 1, which keeps the whole network's Lipschitz constant under control. Fixes most "D wins too hard" failures.
 
 ```python
 from torch.nn.utils import spectral_norm

@@ -155,35 +155,40 @@ class SimpleTracker:
         self.max_age = max_age
 
     def step(self, detections, frame):
+        # Normalise to an array once, so every Track holds the same bbox type
+        # whether it was born here or updated below.
+        det_boxes = (np.array(detections, dtype=np.float32) if len(detections)
+                     else np.empty((0, 4), dtype=np.float32))
+
         if not self.tracks:
-            for d in detections:
+            for d in det_boxes:
                 self.tracks.append(Track(self.next_id, d, frame))
                 self.next_id += 1
-            return [(t.id, t.bbox) for t in self.tracks]
+            return [(t.id, t.bbox.tolist()) for t in self.tracks]
 
         track_boxes = np.array([t.bbox for t in self.tracks])
-        det_boxes = np.array(detections) if len(detections) else np.empty((0, 4))
 
         iou = bbox_iou(track_boxes, det_boxes) if len(det_boxes) else np.zeros((len(track_boxes), 0))
         cost = 1 - iou
         cost[iou < self.iou_threshold] = 1e6
 
-        matched_track = set()
         matched_det = set()
         if cost.size > 0:
             row, col = linear_sum_assignment(cost)
             for r, c in zip(row, col):
                 if cost[r, c] < 1.0:
                     self.tracks[r].update(det_boxes[c], frame)
-                    matched_track.add(r); matched_det.add(c)
+                    matched_det.add(c)
 
         for i, d in enumerate(det_boxes):
             if i not in matched_det:
                 self.tracks.append(Track(self.next_id, d, frame))
                 self.next_id += 1
 
+        # Unmatched tracks are not touched: their last_frame stays behind, so the
+        # max_age filter below is what eventually retires them.
         self.tracks = [t for t in self.tracks if frame - t.last_frame <= self.max_age]
-        return [(t.id, t.bbox) for t in self.tracks]
+        return [(t.id, t.bbox.tolist()) for t in self.tracks]
 ```
 
 60 lines. Takes per-frame detections, returns per-frame track IDs. Real systems add the Kalman predict, ByteTrack's second-stage re-match, and appearance features.

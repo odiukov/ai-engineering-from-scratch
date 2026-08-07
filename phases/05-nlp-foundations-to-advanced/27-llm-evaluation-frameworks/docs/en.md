@@ -75,7 +75,9 @@ def atomic_claims(answer: str, llm: LLM) -> list[str]:
     prompt = f"""Break this answer into simple factual claims (one per line):
 {answer}
 """
-    return llm(prompt).splitlines()
+    # Filter blanks: they cannot be entailed, so every one of them lands in the
+    # denominator of `faithfulness` and silently drags the metric down.
+    return [line.strip() for line in llm(prompt).splitlines() if line.strip()]
 
 
 def faithfulness(answer: str, context: str, llm: LLM) -> float:
@@ -142,6 +144,33 @@ print(metric.score, metric.reason)
 ```
 
 The evaluation steps are the rubric. Explicit steps are more stable than implicit "score 0-1" prompts.
+
+### Step 3b: gate the judge's JSON
+
+Every judge that returns JSON eventually returns something that is not JSON. Parse defensively and count the failures instead of letting them vanish:
+
+```python
+import json
+import math
+
+
+def judge_score(prompt: str, llm: LLM) -> float | None:
+    """Return None — never NaN — when the judge does not produce parseable JSON."""
+    raw = llm(prompt)
+    try:
+        score = float(json.loads(raw)["score"])
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
+    return score if math.isfinite(score) else None
+
+
+def aggregate(scores: list[float | None]) -> tuple[float, int]:
+    ok = [s for s in scores if s is not None]
+    mean = sum(ok) / len(ok) if ok else 0.0
+    return mean, len(scores) - len(ok)
+```
+
+Report the unparsed count next to the mean, always. A NaN dropped into `sum() / len()` silently poisons the aggregate; a NaN dropped by `numpy.nanmean` silently shrinks the sample. "0.85 over 1000 cases" and "0.85 over the 700 that parsed" are different claims, and only one of them is a regression signal.
 
 ### Step 4: CI gate
 

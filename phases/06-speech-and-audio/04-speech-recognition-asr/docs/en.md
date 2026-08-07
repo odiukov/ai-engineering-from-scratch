@@ -89,7 +89,7 @@ def ctc_beam(frame_logits, beam=8, blank=0):
     return beams[0][0]
 ```
 
-Production uses prefix tree beam search with LM fusion; this is the conceptual skeleton.
+Production uses prefix tree beam search with LM fusion; this is the conceptual skeleton, and it is simplified in exactly the place CTC's blank matters. It merges any repeated token unconditionally, so a real double letter — the two `l`s in "hello", which CTC emits as `l blank l` — is unreachable here. A correct prefix beam tracks two probabilities per prefix (ends-in-blank vs ends-in-non-blank) and only merges repeats when no blank came between them. It also sums the probabilities of candidates that collapse to the same string instead of keeping them as separate beams.
 
 ### Step 3: WER
 

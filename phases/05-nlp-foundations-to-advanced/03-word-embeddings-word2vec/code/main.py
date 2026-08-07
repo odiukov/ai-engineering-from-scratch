@@ -55,6 +55,16 @@ def train_pair(W, W_prime, c_idx, ctx_idx, neg_indices, lr):
     W[c_idx] -= lr * grad_center
 
 
+def sample_negatives(rng, vocab_size, k_neg, forbidden):
+    if vocab_size <= len(forbidden):
+        return []
+    negs = []
+    while len(negs) < k_neg:
+        draw = rng.integers(0, vocab_size, size=k_neg)
+        negs.extend(int(n) for n in draw if n not in forbidden)
+    return negs[:k_neg]
+
+
 def train(docs, dim=16, window=2, k_neg=5, epochs=200, lr=0.05, seed=0):
     vocab = build_vocab(docs)
     vocab_size = len(vocab)
@@ -67,8 +77,7 @@ def train(docs, dim=16, window=2, k_neg=5, epochs=200, lr=0.05, seed=0):
         for center, context in pairs:
             c_idx = vocab[center]
             ctx_idx = vocab[context]
-            neg_candidates = rng.integers(0, vocab_size, size=k_neg * 2)
-            negs = [int(n) for n in neg_candidates if n != ctx_idx and n != c_idx][:k_neg]
+            negs = sample_negatives(rng, vocab_size, k_neg, {c_idx, ctx_idx})
             train_pair(W, W_prime, c_idx, ctx_idx, negs, lr)
     return vocab, W
 

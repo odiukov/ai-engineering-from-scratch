@@ -60,7 +60,7 @@ Why heatmaps work better than direct regression: the network's spatial structure
 
 ### Sub-pixel localisation
 
-Argmax gives integer coordinates. For sub-pixel precision, refine by fitting a parabola to the argmax and its neighbours, or use the well-known offset `(dx, dy) = 0.25 * (heatmap[y, x+1] - heatmap[y, x-1], ...)` direction.
+Argmax gives integer coordinates. For sub-pixel precision, refine by fitting a parabola to the argmax and its neighbours, or use the well-known quarter-pixel shift `(dx, dy) = 0.25 * sign(heatmap[y, x+1] - heatmap[y, x-1], ...)` — a fixed quarter-pixel step toward the larger neighbour. Take the **sign** of the difference, not the raw difference: the raw values scale the shift by heatmap magnitude and throw the estimate far off the peak on confident predictions.
 
 ### Part Affinity Fields (PAFs)
 
@@ -162,9 +162,11 @@ One line at inference. For sub-pixel refinement, interpolate around the argmax.
 Simple: draw four points on a white canvas and learn to predict them.
 
 ```python
-def make_synthetic_sample(size=64):
+def make_synthetic_sample(size=64, rng=None):
+    # Take the generator as an argument so the caller controls the seed;
+    # a fresh default_rng() inside the function makes the dataset irreproducible.
+    rng = rng if rng is not None else np.random.default_rng()
     img = np.ones((3, size, size), dtype=np.float32)
-    rng = np.random.default_rng()
     kps = rng.integers(8, size - 8, size=(4, 2))
     for cx, cy in kps:
         img[:, cy - 2:cy + 2, cx - 2:cx + 2] = 0.0
@@ -177,15 +179,20 @@ Easy enough for a tiny model to learn in a minute.
 ### Step 5: Training
 
 ```python
+torch.manual_seed(0)
+rng = np.random.default_rng(0)
+
 model = TinyKeypointNet(num_keypoints=4)
 opt = torch.optim.Adam(model.parameters(), lr=3e-3)
 
 for step in range(200):
-    batch = [make_synthetic_sample() for _ in range(16)]
+    batch = [make_synthetic_sample(rng=rng) for _ in range(16)]
     imgs = torch.from_numpy(np.stack([b[0] for b in batch]))
     hms = torch.from_numpy(np.stack([b[1] for b in batch]))
     pred = model(imgs)
-    # Upsample pred to full resolution
+    # Safety net, not an upsample: two stride-2 convs followed by two 2x transposed
+    # convs already return full resolution, so this is a no-op whenever H and W are
+    # multiples of 4. It only does real work for input sizes that are not.
     pred = F.interpolate(pred, size=hms.shape[-2:], mode="bilinear", align_corners=False)
     loss = F.mse_loss(pred, hms)
     opt.zero_grad(); loss.backward(); opt.step()

@@ -13,8 +13,11 @@ PATTERNS = [
     RulePattern(r"i (need|want) (.+)", "Why do you {0} {1}?"),
     RulePattern(r"i feel (.+)", "Why do you feel {0}?"),
     RulePattern(r"(hi|hello|hey)\b.*", "Hello. How can I help?"),
-    RulePattern(r".*", "Tell me more about that."),
 ]
+
+# The catch-all is not a pattern. As a trailing r".*" rule it would match every
+# input, including "", and make any code after the loop unreachable.
+FALLBACK = "Tell me more about that."
 
 
 def rule_based_respond(user_input):
@@ -22,7 +25,7 @@ def rule_based_respond(user_input):
         m = p.regex.match(user_input.strip())
         if m:
             return p.template.format(*m.groups())
-    return "I don't understand."
+    return FALLBACK
 
 
 FAQ = [
@@ -64,7 +67,7 @@ def hybrid_respond(user_input):
         return "Destructive action detected. Routing to structured confirmation flow.", "rule"
 
     answer, score = faq_respond(user_input)
-    if answer:
+    if answer is not None:
         return f"{answer}  (faq match={score:.2f})", "faq"
 
     return f"(would call LLM agent for: {user_input!r})", "agent"

@@ -47,7 +47,9 @@ def train_bpe(text, num_merges):
         pairs = pair_counts(vocab)
         if not pairs:
             break
-        best = pairs.most_common(1)[0][0]
+        # Explicit tie-break. Counter.most_common is stable, so equal-count
+        # pairs would be ranked by insertion order, i.e. by corpus order.
+        best = min(pairs.items(), key=lambda kv: (-kv[1], kv[0]))[0]
         merges.append(best)
         vocab = merge_pair(vocab, best)
     final_tokens = set()
