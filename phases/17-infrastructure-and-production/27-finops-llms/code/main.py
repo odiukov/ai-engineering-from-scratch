@@ -19,6 +19,15 @@ class TenantPolicy:
     rate_limit_per_min: int
     spend_cap_multiplier: float = 2.0
     kill_z_score: float = 4.0
+    # A z-score alone says nothing about whether the money matters: a tenant
+    # whose baseline is cents reaches z > 4 on a rounding error, and a tenant
+    # still inside its contract does not deserve a pause however unusual the
+    # day looks. The kill switch fires only on a spike that is ALSO overspend.
+    kill_min_usd: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.kill_min_usd == 0.0:
+            self.kill_min_usd = self.contracted_daily_usd
 
 
 @dataclass
@@ -32,7 +41,7 @@ class TenantState:
 TENANTS = {
     "tenant_A_normal":  (TenantPolicy(100.0, rate_limit_per_min=120), TenantState(), 1.0),
     "tenant_B_growing": (TenantPolicy(50.0,  rate_limit_per_min=60),  TenantState(), 2.5),
-    "tenant_C_abusive": (TenantPolicy(20.0,  rate_limit_per_min=40),  TenantState(), 25.0),
+    "tenant_C_abusive": (TenantPolicy(20.0,  rate_limit_per_min=40),  TenantState(), 1.0),
 }
 
 
@@ -40,7 +49,18 @@ def simulate_day(day: int, verbose: bool) -> None:
     for name, (policy, state, traffic_mult) in TENANTS.items():
         if state.paused:
             continue
-        requests = int(100 * traffic_mult * random.uniform(0.8, 1.3))
+        # Daily volume has to be of the same order as the contract, otherwise
+        # nobody ever reaches the cap and the middle rung of the ladder below
+        # is dead code. At this base a normal tenant sits near 60% of contract.
+        #
+        # tenant_C's abuse STARTS on day 6 — a leaked key, a retry loop, a
+        # runaway agent. That matters: a z-score detects change, not level, so
+        # a tenant that was abusive from day one would build its own high
+        # baseline and never look anomalous. The cap catches that case; the
+        # kill switch catches this one.
+        if name == "tenant_C_abusive" and day >= 6:
+            traffic_mult *= 30.0
+        requests = int(10_000 * traffic_mult * random.uniform(0.8, 1.3))
         tokens_per_req = int(random.gauss(600, 150))
         cost_per_req = (tokens_per_req / 1e6) * 10.0
         total_spend = requests * cost_per_req
@@ -54,7 +74,7 @@ def simulate_day(day: int, verbose: bool) -> None:
             mean = statistics.mean(state.daily_history)
             sd = statistics.stdev(state.daily_history) or 1
             z = (state.spend_today_usd - mean) / sd
-            if z > policy.kill_z_score:
+            if z > policy.kill_z_score and state.spend_today_usd >= policy.kill_min_usd:
                 state.paused = True
                 if verbose:
                     print(f"  [KILL SWITCH] {name}: z={z:.2f} on spend ${state.spend_today_usd:.2f} (baseline ${mean:.2f} ± ${sd:.2f}) → auto-pause + page on-call")
@@ -72,8 +92,10 @@ def main() -> None:
         for name, (policy, state, _) in TENANTS.items():
             status = "PAUSED" if state.paused else "active"
             print(f"  {name}: spend=${state.spend_today_usd:7.2f}, contract=${policy.contracted_daily_usd:.2f}  [{status}]")
-            state.daily_history.append(state.spend_today_usd)
+            # A paused tenant spends nothing, so appending its frozen total
+            # every day would poison the baseline it is measured against.
             if not state.paused:
+                state.daily_history.append(state.spend_today_usd)
                 state.spend_today_usd = 0.0
     print("\nRead: rate limits throttle; caps trigger alerts; kill switch catches blow-ups.")
 

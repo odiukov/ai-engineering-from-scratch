@@ -16,7 +16,10 @@ import re
 
 SSN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 EMAIL = re.compile(r"\b[\w.+-]+@[\w.-]+\.\w+\b")
-PHONE = re.compile(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b")
+# The leading guard cannot be \b: a match may start at "(" or "+", and there is
+# no word boundary before a non-word character. With \b the engine skipped to the
+# first digit, leaving "(" or "+" behind in the "redacted" text.
+PHONE = re.compile(r"(?<![\w+(])(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b")
 
 
 @dataclass

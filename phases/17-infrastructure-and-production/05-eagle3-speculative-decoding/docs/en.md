@@ -32,7 +32,7 @@ Without spec decode, per-token cost is one target forward. With spec decode at d
 
 ### Why alpha is the only metric that matters
 
-Rejected tokens do not disappear — they force a second target forward for the first rejected token. On a workload where alpha drops to 0.4, you pay draft overhead plus verification plus re-roll. At high concurrency (say 256 concurrent), the decode batch is already large enough that the memory-bandwidth gap between "target alone" and "target with verify" shrinks. Below alpha 0.55 on most 2026 hardware, spec decode is net negative.
+Rejected tokens do not disappear, but they do not cost a second target forward either: the replacement token is resampled from the residual `(p - q)+` using the target logits the verification pass already returned. That is why the accounting above is one target forward per step regardless of how much was rejected — if a rejection cost a second forward, expected tokens per forward could not be `1 + K * alpha`. What rejection actually costs is the wasted draft work for the tokens after the rejection point. On a workload where alpha drops to 0.4, you pay draft overhead plus verification plus re-roll. At high concurrency (say 256 concurrent), the decode batch is already large enough that the memory-bandwidth gap between "target alone" and "target with verify" shrinks. Below alpha 0.55 on most 2026 hardware, spec decode is net negative.
 
 Alpha varies by workload. On ShareGPT-style general chat, EAGLE-3 trained on ShareGPT hits 0.6-0.8. On domain-specific traffic (code, medical, legal) the draft head trained on general data drops to 0.4-0.6. Training a domain-specific draft head recovers alpha — it is a light, quick training job compared to target finetuning.
 
@@ -102,7 +102,7 @@ This lesson produces `outputs/skill-eagle3-rollout.md`. Given a target model, tr
 | `speculative_config` | "vLLM spec config" | The explicit opt-in in vLLM V1; no default means no acceleration |
 | N-gram spec decode | "N-gram draft" | GPU-side draft using N-gram lookups in the prompt; chunked-prefill-compatible |
 | Break-even alpha | "no-op alpha" | Alpha at which spec decode gives zero speedup; watch this at production concurrency |
-| Rejected-draft two-pass | "reroll cost" | Two target forwards when drafts reject; drives P99 tail |
+| Reroll cost | "wasted draft" | A rejection discards the drafted tokens after the rejection point and resamples from the residual using logits the verify pass already produced — one target forward, wasted draft work; drives P99 tail |
 
 ## Further Reading
 

@@ -32,14 +32,16 @@ A radix tree (compact trie) stores token sequences. Each node owns a token range
 
 ```
 root
- |- "You are a helpful assistant..."  (2,000 tokens, 124 KV blocks)
-      |- "Context: <doc A>..."        (500 tokens, 31 blocks)
+ |- "You are a helpful assistant..."  (2,000 tokens, 125 KV blocks)
+      |- "Context: <doc A>..."        (500 tokens, 32 blocks)
            |- "Question: Alice..."    (80 tokens, 5 blocks)
            |- "Question: Bob..."      (95 tokens, 6 blocks)
       |- "Context: <doc B>..."        (520 tokens, 33 blocks)
 ```
 
-A new request comes in with system prompt + "Context: <doc A>" + "Question: Carol". The scheduler walks: system prefix matches (124 blocks reused), doc-A branch matches (31 blocks reused), then allocates fresh blocks only for "Question: Carol" (4 blocks). Prefill cost: 4 blocks of new tokens. Without the tree: 160 blocks. ~40x savings on prefill.
+A new request comes in with system prompt + "Context: <doc A>" + "Question: Carol". The scheduler walks: system prefix matches (125 blocks reused), doc-A branch matches (32 blocks reused), then allocates fresh blocks only for "Question: Carol" (4 blocks). Prefill cost: 4 blocks of new tokens. Without the tree: 125 + 32 + 4 = 161 blocks. ~40x savings on prefill.
+
+(Block counts here are `ceil(tokens / 16)` throughout, matching the vLLM default block size from the prerequisite lesson.)
 
 ### Cache-aware scheduling
 

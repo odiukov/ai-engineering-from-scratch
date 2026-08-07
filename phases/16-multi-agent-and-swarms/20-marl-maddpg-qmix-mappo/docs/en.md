@@ -105,7 +105,7 @@ sw-ctde
 
 `code/main.py` implements three pattern demonstrations, all on a tiny 2-agent cooperative grid-world:
 
-- Environment: 2 agents on a 4x4 grid, one reward pellet. Reward = 1 if any agent reaches pellet; task finishes.
+- Environment: 2 agents on a 4x4 grid, two reward pellets — one per agent. The task finishes when both are collected, which is what makes the division of labour worth learning.
 - `IndependentAgents` — each agent treats others as environment. Baseline.
 - `MADDPGStyle` — centralized critic computes a joint value; actor policies update from it. Scripted policy improvement.
 - `QMIXStyle` — value decomposition with a monotone mixer.

@@ -39,7 +39,10 @@ def rtt(a: str, b: str) -> int:
 class Replica:
     region: str
     idx: int
-    prefix_cache: set = field(default_factory=set)
+    # dict, not set: eviction below must pick the OLDEST entry. set.pop()
+    # removes an arbitrary element whose identity follows the string hash
+    # seed, which made this simulation vary run to run despite the rng seed.
+    prefix_cache: dict = field(default_factory=dict)
     queue_depth: int = 0
 
 
@@ -106,9 +109,9 @@ def simulate(strategy: str, reqs: list[Request]) -> dict:
             r.ttft_ms = CACHE_HIT_MS + rtt(r.origin_region, chosen.region)
         else:
             r.ttft_ms = CACHE_MISS_MS + rtt(r.origin_region, chosen.region)
-            chosen.prefix_cache.add(r.prefix_hash)
+            chosen.prefix_cache[r.prefix_hash] = None
             if len(chosen.prefix_cache) > 12:
-                chosen.prefix_cache.pop()
+                del chosen.prefix_cache[next(iter(chosen.prefix_cache))]
         chosen.queue_depth = max(0, chosen.queue_depth + (1 if rng.random() < 0.4 else 0) - 1)
         r.served_by = chosen
         r.crossregion = cross

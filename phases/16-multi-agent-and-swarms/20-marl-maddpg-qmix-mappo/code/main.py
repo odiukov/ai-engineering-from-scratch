@@ -1,6 +1,6 @@
 """MARL patterns — CTDE, value decomposition, centralized value — on a tiny grid.
 
-Two agents, 4x4 grid, one pellet. All four styles share the same environment
+Two agents, 4x4 grid, two pellets. All four styles share the same environment
 and reward. Scripted policies demonstrate how CTDE variants converge faster
 than the independent baseline even without gradient updates.
 """

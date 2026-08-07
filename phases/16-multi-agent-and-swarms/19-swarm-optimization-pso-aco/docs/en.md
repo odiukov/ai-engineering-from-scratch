@@ -100,7 +100,7 @@ swarm-stigmergy
 `code/main.py` implements:
 
 - `LMPSO` — PSO over numeric prompt parameters (temperature, top_k weights). Each particle's "LLM generation" is simulated as a scripted fitness function. Runs the algorithm for 30 iterations and shows g_best convergence.
-- `AMRO_S` — ACO-style routing. 3 agents, 4 task types, pheromone matrix, 100 routed tasks. Prints (task_type → agent choices) distribution over time to show trail formation.
+- `AMRO_S` — ACO-style routing. 3 agents, 4 task types, pheromone matrix, 200 routed tasks. Prints (task_type → agent choices) distribution over time to show trail formation.
 - Comparison: random routing vs ACO routing on the same task stream. Measures quality and latency.
 
 Run:
