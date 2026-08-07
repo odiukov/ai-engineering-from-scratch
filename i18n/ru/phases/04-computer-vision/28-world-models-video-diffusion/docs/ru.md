@@ -175,26 +175,32 @@ class VideoPatch3D(nn.Module):
 
 > 🎒 **На пальцах.** Тот же приём, что в ViT, только кубиками вместо квадратов. Свёртка с ядром 2x2x2 и шагом 2x2x2 не перекрывается сама с собой, поэтому каждый кубик из 8 вокселей превращается ровно в один токен. Вход (1, 4, 8, 16, 16) даёт сетку (4, 8, 8) — сжатие в 8 раз по числу позиций.
 
-### Step 2: 3D rotary position encoding
+### Step 2: 3D position encoding
 
-Rotary Position Embeddings (RoPE) применяются отдельно по осям `t`, `h`, `w`:
+По одному позиционному кодированию на каждую ось (`t`, `h`, `w`), склеенные по размерности каналов. Настоящие видео-DiT используют здесь rotary embeddings (RoPE); версия ниже — более простая аддитивная sin/cos форма, которая несёт ту же позиционную информацию и читается легче:
 
 ```python
-def rope_3d(tokens, t_dim, h_dim, w_dim, grid):
+def sincos_pos_3d(tokens, t_dim, h_dim, w_dim, grid):
     """
     tokens: (N, T*H*W, D)
     grid: (T, H, W) sizes
-    t_dim + h_dim + w_dim == D
+    t_dim + h_dim + w_dim == D, and each of the three must be even
     """
     T, H, W = grid
     n, seq, d = tokens.shape
     if t_dim + h_dim + w_dim != d:
         raise ValueError(f"t_dim+h_dim+w_dim ({t_dim}+{h_dim}+{w_dim}) must equal D={d}")
+    # Each axis contributes sin and cos over dim // 2 frequencies, i.e. 2 * (dim // 2)
+    # channels. An odd dim would silently lose a channel and the concatenation below
+    # would come out shorter than D.
+    for name, dim in [("t_dim", t_dim), ("h_dim", h_dim), ("w_dim", w_dim)]:
+        if dim % 2 != 0:
+            raise ValueError(f"{name} must be even, got {dim}")
     assert seq == T * H * W
     t_idx = torch.arange(T, device=tokens.device).repeat_interleave(H * W)
     h_idx = torch.arange(H, device=tokens.device).repeat_interleave(W).repeat(T)
     w_idx = torch.arange(W, device=tokens.device).repeat(T * H)
-    # Simplified: just scale channels by frequencies. Real RoPE rotates pairs.
+    # Additive sin/cos over a geometric frequency ladder. Real RoPE rotates channel pairs.
     freqs_t = torch.exp(-torch.log(torch.tensor(10000.0)) * torch.arange(t_dim // 2, device=tokens.device) / (t_dim // 2))
     freqs_h = torch.exp(-torch.log(torch.tensor(10000.0)) * torch.arange(h_dim // 2, device=tokens.device) / (h_dim // 2))
     freqs_w = torch.exp(-torch.log(torch.tensor(10000.0)) * torch.arange(w_dim // 2, device=tokens.device) / (w_dim // 2))
@@ -204,9 +210,11 @@ def rope_3d(tokens, t_dim, h_dim, w_dim, grid):
     return tokens + torch.cat([emb_t, emb_h, emb_w], dim=-1)
 ```
 
-Упрощённая аддитивная форма. Настоящий RoPE вращает пары каналов с разными частотами; позиционная информация та же самая.
+Упрощённая аддитивная форма — и, несмотря на заголовок «3D position encoding», это *не* RoPE. Настоящий RoPE вращает пары каналов на тех же частотах внутри самой операции внимания, а не прибавляется к токену; позиционная информация при этом та же самая.
 
 > 🎒 **На пальцах.** Без позиций внимание видит мешок токенов и не знает, какой кадр был раньше. Здесь размерность D просто делится на три части: `t_dim` отвечает за «когда», `h_dim` и `w_dim` — за «где». Проверка `t_dim + h_dim + w_dim != d` падает с ошибкой именно потому, что три куска обязаны в сумме дать всю ширину токена.
+
+> 🎒 **На пальцах.** Вторая проверка — про чётность — из той же серии, но ловушка тоньше. Каждая ось берёт `dim // 2` частот и на каждую выдаёт синус и косинус, то есть занимает `2 * (dim // 2)` каналов. Для чётного `dim` это ровно `dim`, а для нечётного — на один меньше: при `t_dim = 21` получится `2 * 10 = 20`. Ошибки не будет, просто склейка трёх кусков выйдет короче D, и `tokens + ...` упадёт где-то дальше с невнятным сообщением про формы. Поэтому лучше сказать «`t_dim` must be even, got 21» сразу.
 
 ### Step 3: Divided attention block
 
@@ -306,11 +314,11 @@ print(f"output {tuple(out.shape)}")
 
 ## Exercises
 
-1. **(Easy)** Посчитайте число токенов для 5-секундного видео 360p при patch-t=2, patch-h=8, patch-w=8. Прикиньте, сколько памяти займёт внимание на таком размере.
+1. **(Easy)** Посчитайте число токенов для 5-секундного видео 360p при 30 fps (150 кадров 480x360) с patch-t=2, patch-h=8, patch-w=8. Прикиньте, сколько памяти займёт внимание на таком размере.
 2. **(Medium)** Замените блок divided attention выше на блок полного совместного внимания и измерьте формы и число параметров. Объясните, почему divided attention необходим для настоящих видеомоделей.
 3. **(Hard)** Постройте минимальную видеомодель с latent-действиями: возьмите датасет троек (frame_t, action_t, frame_{t+1}) из любой простой 2D-игры, обучите крошечный video DiT с обусловливанием на embedding действия и покажите, что разные действия дают разные следующие кадры.
 
-> 🎒 **На пальцах.** Подсказка к первому заданию: 360p — это 640x360, при 24 fps пять секунд дают 120 кадров. Токенов получается (120/2) × (360/8) × (640/8) = 60 × 45 × 80 = 216000. Матрица полного внимания — это 216000², то есть 4,7 × 10^10 чисел: даже в fp16 это около 93 ТБ. Отсюда и весь смысл divided attention.
+> 🎒 **На пальцах.** Подсказка к первому заданию: все числа уже даны в условии — 150 кадров размером 480x360. Токенов получается (150/2) × (360/8) × (480/8) = 75 × 45 × 60 = 202500. Матрица полного внимания — это 202500², то есть примерно 4,1 × 10^10 чисел: даже в fp16 по 2 байта это около 82 ГБ на одну голову одного слоя. В H100 влезает 80 ГБ. Отсюда и весь смысл divided attention.
 
 ## Key Terms
 

@@ -111,9 +111,9 @@ Cutmix:
 
 ### Label smoothing
 
-Родственник mixup. Вместо обучения против `[0, 0, 1, 0, 0]` учим против `[eps/C, eps/C, 1-eps, eps/C, eps/C]` для маленького `eps` вроде 0.1. Не даёт модели выдавать сколь угодно острые логиты и улучшает калибровку почти бесплатно. Встроено в `nn.CrossEntropyLoss(label_smoothing=0.1)` начиная с PyTorch 1.10.
+Родственник mixup. Вместо обучения против `[0, 0, 1, 0, 0]` учим против `(1 - eps) * onehot + eps / C` для маленького `eps` вроде 0.1 — при `C = 5` такая цель равна `[eps/C, eps/C, 1 - eps + eps/C, eps/C, eps/C]` и по-прежнему суммируется в 1. Не даёт модели выдавать сколь угодно острые логиты и улучшает калибровку почти бесплатно. Это ровно та конвенция, которую реализует `nn.CrossEntropyLoss(label_smoothing=0.1)`, встроенный начиная с PyTorch 1.10.
 
-> 🎒 **На пальцах.** При 5 классах и eps = 0.1 цель становится [0.02, 0.02, 0.9, 0.02, 0.02]: правильному классу дают 0.9, а оставшиеся 0.1 делят между четырьмя остальными. Одна строка в конструкторе — и модель перестаёт быть уверенной на 99.99% там, где она ошибается.
+> 🎒 **На пальцах.** При 5 классах и eps = 0.1 формула раздаёт каждому классу поровну по eps/C = 0.1/5 = 0.02, а правильному классу добавляет сверху 1 − eps = 0.9. Цель получается [0.02, 0.02, 0.92, 0.02, 0.02], сумма ровно 1. Одна строка в конструкторе — и модель перестаёт быть уверенной на 99.99% там, где она ошибается.
 
 ### Evaluation beyond accuracy
 
@@ -199,20 +199,20 @@ def standardize(mean, std):
     return _fn
 
 
-def random_hflip(p=0.5):
+def random_hflip(rng, p=0.5):
     def _fn(img):
-        if np.random.random() < p:
+        if rng.random() < p:
             return img[:, ::-1, :].copy()
         return img
     return _fn
 
 
-def random_crop(pad=4):
+def random_crop(rng, pad=4):
     def _fn(img):
         h, w = img.shape[:2]
         padded = np.pad(img, ((pad, pad), (pad, pad), (0, 0)), mode="reflect")
-        y = np.random.randint(0, 2 * pad)
-        x = np.random.randint(0, 2 * pad)
+        y = rng.integers(0, 2 * pad + 1)
+        x = rng.integers(0, 2 * pad + 1)
         return padded[y:y + h, x:x + w, :]
     return _fn
 
@@ -225,19 +225,19 @@ def compose(*fns):
     return _fn
 ```
 
-Reflect-pad перед обрезкой, а не zero-pad, потому что чёрные рамки — это сигнал, который модель научится игнорировать бесполезным способом.
+Reflect-pad перед обрезкой, а не zero-pad, потому что чёрные рамки — это сигнал, который модель научится игнорировать бесполезным способом. Обе augmentation берут случайность из явного `np.random.Generator`, который вы передаёте снаружи, — в том же стиле, что и `synthetic_cifar` из Step 1. Потянетесь тут за глобальным `np.random` — и запуск перестанет быть воспроизводимым, какой бы seed вы ни выставили.
 
-> 🎒 **На пальцах.** `random_crop(pad=4)` дополняет картинку 32×32 до 40×40 и вырезает случайный кусок 32×32. Вариантов сдвига 8 × 8 = 64, то есть из каждой картинки получается 64 разных. Вместе с `random_hflip` — уже 128. Датасет вырос в сто с лишним раз, а на диске не прибавилось ни байта.
+> 🎒 **На пальцах.** `random_crop(rng, pad=4)` дополняет картинку 32×32 до 40×40 и вырезает случайный кусок 32×32. Смещение по каждой оси берётся из `rng.integers(0, 2 * pad + 1)`, то есть 0, 1, ... 8 — девять вариантов; всего 9 × 9 = 81 разная обрезка из одной картинки. Вместе с `random_hflip` — уже 162. Датасет вырос более чем в полторы сотни раз, а на диске не прибавилось ни байта.
 
 ### Step 3: Mixup
 
 Смешивает две картинки и две метки прямо внутри шага обучения. Реализовано как преобразование батча, чтобы жить рядом с прямым проходом, а не внутри датасета.
 
 ```python
-def mixup_batch(x, y, num_classes, alpha=0.2):
+def mixup_batch(x, y, num_classes, rng, alpha=0.2):
     if alpha <= 0:
         return x, torch.nn.functional.one_hot(y, num_classes).float()
-    lam = float(np.random.beta(alpha, alpha))
+    lam = float(rng.beta(alpha, alpha))
     idx = torch.randperm(x.size(0), device=x.device)
     x_mixed = lam * x + (1 - lam) * x[idx]
     y_onehot = torch.nn.functional.one_hot(y, num_classes).float()
@@ -250,7 +250,7 @@ def soft_cross_entropy(logits, soft_targets):
     return -(soft_targets * log_probs).sum(dim=-1).mean()
 ```
 
-`soft_cross_entropy` — это cross-entropy против распределения мягких меток. Она сводится к обычному one-hot случаю, когда цель ровно one-hot.
+`soft_cross_entropy` — это cross-entropy против распределения мягких меток. Она сводится к обычному one-hot случаю, когда цель ровно one-hot. `lam` берётся из того же переданного снаружи генератора, что и augmentation, поэтому mixup не тащит глобальную случайность обратно.
 
 > 🎒 **На пальцах.** `torch.randperm` просто перемешивает батч и складывает его сам с собой в другом порядке: картинка 1 смешивается со случайной картинкой 7, картинка 2 — с картинкой 40. Никаких лишних загрузок с диска, стоимость операции — одно сложение тензоров.
 
@@ -265,13 +265,13 @@ from torch.utils.data import DataLoader
 from torch.optim import SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-def train_one_epoch(model, loader, optimizer, device, num_classes, use_mixup=True):
+def train_one_epoch(model, loader, optimizer, device, num_classes, rng, use_mixup=True):
     model.train()
     total, correct, loss_sum = 0, 0, 0.0
     for x, y in loader:
         x, y = x.to(device), y.to(device)
         if use_mixup:
-            x_m, y_soft = mixup_batch(x, y, num_classes)
+            x_m, y_soft = mixup_batch(x, y, num_classes, rng)
             logits = model(x_m)
             loss = soft_cross_entropy(logits, y_soft)
         else:
@@ -340,7 +340,8 @@ X_val, Y_val = X[split:], Y[split:]
 
 mean = [0.5, 0.5, 0.5]
 std = [0.25, 0.25, 0.25]
-train_tf = compose(random_hflip(), random_crop(pad=4), standardize(mean, std))
+aug_rng = np.random.default_rng(1)
+train_tf = compose(random_hflip(aug_rng), random_crop(aug_rng, pad=4), standardize(mean, std))
 eval_tf = standardize(mean, std)
 
 train_ds = ArrayDataset(X_train, Y_train, transform=train_tf)
@@ -355,7 +356,7 @@ optimizer = SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4, nes
 scheduler = CosineAnnealingLR(optimizer, T_max=10)
 
 for epoch in range(10):
-    tr_loss, tr_acc = train_one_epoch(model, train_loader, optimizer, device, 10, use_mixup=True)
+    tr_loss, tr_acc = train_one_epoch(model, train_loader, optimizer, device, 10, aug_rng, use_mixup=True)
     va_loss, va_acc, _ = evaluate(model, val_loader, device, 10)
     scheduler.step()
     print(f"epoch {epoch:2d}  lr {scheduler.get_last_lr()[0]:.4f}  "
@@ -446,7 +447,7 @@ val_ds   = CIFAR10(root="./data", train=False, download=True, transform=eval_tf)
 | DataLoader | «Тот, кто делает батчи» | Оборачивает датасет перемешиванием, батчами и (необязательно) многопроцессной загрузкой; на него списывают половину багов обучения |
 | Augmentation | «Случайные преобразования» | Любое преобразование пикселей во время обучения, сохраняющее метку; учит инвариантностям, которых у CNN нет от рождения |
 | Mixup / Cutmix | «Смешать две картинки» | Смешивание и входов, и меток, чтобы классификатор учил плавные переходы вместо жёстких границ |
-| Label smoothing | «Мягкие цели» | Замена one-hot на (1-eps, eps/(C-1), ...); улучшает калибровку и слегка поднимает точность |
+| Label smoothing | «Мягкие цели» | Замена one-hot на `(1 - eps) * onehot + eps/C` — конвенция PyTorch; улучшает калибровку и слегка поднимает точность |
 | Top-k accuracy | «Top-5» | Правильный класс попал в k предсказаний с наибольшей вероятностью; используется на датасетах с действительно неоднозначными классами |
 | Confusion matrix | «Где живут ошибки» | Таблица C x C, где ячейка (i, j) считает картинки истинного класса i, предсказанные как j; диагональ — верные ответы, остальное подсказывает, что чинить |
 

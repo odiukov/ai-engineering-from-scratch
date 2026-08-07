@@ -220,8 +220,13 @@ def encode(box_xyxy, cell_x, cell_y, stride, anchor_wh):
     cy = 0.5 * (y1 + y2)
     w = x2 - x1
     h = y2 - y1
-    tx = cx / stride - cell_x
-    ty = cy / stride - cell_y
+    # decode() applies a sigmoid to tx/ty, so encode has to apply its inverse:
+    # the logit. Clamp away from 0 and 1 first, or a box centred exactly on a
+    # cell edge sends log(off / (1 - off)) to +-inf.
+    off_x = np.clip(cx / stride - cell_x, 1e-6, 1 - 1e-6)
+    off_y = np.clip(cy / stride - cell_y, 1e-6, 1 - 1e-6)
+    tx = float(np.log(off_x / (1 - off_x)))
+    ty = float(np.log(off_y / (1 - off_y)))
     tw = np.log(w / anchor_wh[0] + 1e-8)
     th = np.log(h / anchor_wh[1] + 1e-8)
     return np.array([tx, ty, tw, th])
@@ -240,9 +245,9 @@ def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 ```
 
-Проверка: закодируйте рамку и раскодируйте обратно — вы должны получить что-то очень близкое к исходному (с точностью до того, что обратная функция к sigmoid не идеально обратима, когда `tx` вне диапазона после sigmoid).
+Проверка: закодируйте рамку и раскодируйте обратно — вы получите исходную рамку с точностью до плавающей запятой, потому что `encode` и `decode` — точные взаимно обратные функции: логит против sigmoid, логарифм против exp. Единственный шаг с потерей — это clip, и он срабатывает лишь для центра, сидящего ровно на границе клетки, где сдвигает результат заметно меньше чем на пиксель. Если выбросить логит и хранить сырое смещение внутри клетки, `decode` пропустит его через sigmoid второй раз, и все рамки вернутся неправильными.
 
-> 🎒 **На пальцах.** Почему логарифм в `encode` и exp в `decode`: если рамка вдвое шире anchor box, tw = log(2) ≈ 0.69; если вдвое уже, tw = log(0.5) ≈ −0.69. Симметрично относительно нуля. Без логарифма «вдвое шире» было бы +1, а «вдвое уже» −0.5, и сеть штрафовала бы одну ошибку сильнее другой.
+> 🎒 **На пальцах.** В `encode` два разных «обратных хода», не путайте их. Для размеров: рамка вдвое шире anchor box даёт tw = log(2) ≈ 0.69, вдвое уже — log(0.5) ≈ −0.69, симметрично относительно нуля, и `decode` возвращает это через exp. Для центра обратной к sigmoid служит логит: центр ровно посередине клетки — смещение 0.5, логит log(0.5/0.5) = 0, и sigmoid(0) = 0.5, всё сошлось. Смещение 0.9 даёт логит log(0.9/0.1) ≈ 2.2, а sigmoid(2.2) ≈ 0.9 — снова сошлось. Если бы вы записали в цель просто 0.9, `decode` выдал бы sigmoid(0.9) ≈ 0.71, то есть рамку, съехавшую почти на пятую часть клетки.
 
 ### Step 4: A minimal YOLO head
 
@@ -284,7 +289,11 @@ def assign_targets(boxes_xyxy, classes, anchors, stride, grid_size, num_classes)
     for box, cls in zip(boxes_xyxy, classes):
         x1, y1, x2, y2 = box
         cx, cy = 0.5 * (x1 + x2), 0.5 * (y1 + y2)
-        gx, gy = int(cx / stride), int(cy / stride)
+        gx_raw, gy_raw = int(cx / stride), int(cy / stride)
+        if not (0 <= gx_raw < grid_size and 0 <= gy_raw < grid_size):
+            continue
+        gx = min(gx_raw, grid_size - 1)
+        gy = min(gy_raw, grid_size - 1)
         bw, bh = x2 - x1, y2 - y1
 
         ious = np.array([
@@ -294,8 +303,12 @@ def assign_targets(boxes_xyxy, classes, anchors, stride, grid_size, num_classes)
         best = int(np.argmax(ious))
         aw, ah = anchors[best]
 
-        target[gy, gx, best, 0] = cx / stride - gx
-        target[gy, gx, best, 1] = cy / stride - gy
+        # Same logit trick as encode(): the network's raw tx/ty go through a
+        # sigmoid at decode time, so the target lives in logit space too.
+        off_x = np.clip(cx / stride - gx, 1e-6, 1 - 1e-6)
+        off_y = np.clip(cy / stride - gy, 1e-6, 1 - 1e-6)
+        target[gy, gx, best, 0] = np.log(off_x / (1 - off_x))
+        target[gy, gx, best, 1] = np.log(off_y / (1 - off_y))
         target[gy, gx, best, 2] = np.log(bw / aw + 1e-8)
         target[gy, gx, best, 3] = np.log(bh / ah + 1e-8)
         target[gy, gx, best, 4] = 1.0
@@ -304,9 +317,9 @@ def assign_targets(boxes_xyxy, classes, anchors, stride, grid_size, num_classes)
     return target, has_obj
 ```
 
-Выбор anchor box идёт по принципу «лучший IoU формы с эталоном» — дешёвый заменитель, совпадающий с назначением в YOLOv2/v3. В v5 и позже используют более изощрённые стратегии (task-aligned matching, dynamic k), которые уточняют ту же идею.
+Индекс клетки не принимается на веру, а проверяется: у рамки с центром ровно на правом или нижнем краю картинки `int(cx / stride) == grid_size`, и такой индекс уехал бы за конец массива `target`. Всё, что действительно вне картинки, отбрасывается; всё, что на границе, притягивается назад в последнюю клетку. Выбор anchor box идёт по принципу «лучший IoU формы с эталоном» — дешёвый заменитель, совпадающий с назначением в YOLOv2/v3. В v5 и позже используют более изощрённые стратегии (task-aligned matching, dynamic k), которые уточняют ту же идею.
 
-> 🎒 **На пальцах.** Строка `gx, gy = int(cx / stride), int(cy / stride)` — это и есть «кто отвечает». Центр в пикселе 147 при stride 32 даёт int(4.59) = 4, значит объект приписан клетке 4. Соседняя клетка 5 обязана предсказать objectness = 0, даже если объект наполовину заходит на её территорию.
+> 🎒 **На пальцах.** Строка `gx_raw, gy_raw = int(cx / stride), int(cy / stride)` — это и есть «кто отвечает». Центр в пикселе 147 при stride 32 даёт int(4.59) = 4, значит объект приписан клетке 4. Соседняя клетка 5 обязана предсказать objectness = 0, даже если объект наполовину заходит на её территорию. А теперь крайний случай: картинка 416×416, stride 32, значит `grid_size = 13` и клетки нумеруются от 0 до 12. Центр ровно в пикселе 416 даёт int(13.0) = 13 — такой индекс на единицу больше последней клетки, и `target[gy, 13]` уронил бы вас с IndexError. `min(gx_raw, grid_size - 1)` возвращает 12, а `continue` выкидывает рамки, чей центр вообще оказался за пределами картинки.
 
 ### Step 6: The three losses
 

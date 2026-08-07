@@ -141,18 +141,29 @@ def split_concepts(sentence):
     Heuristic splitter for multi-concept prompts.
     Returns list of short noun phrases.
     """
-    for sep in [",", ";", "and", "or", "&"]:
-        if sep in sentence:
-            parts = [p.strip() for p in sentence.replace("and ", ",").split(",")]
-            return [p for p in parts if p]
+    # Сначала приводим все разделители к запятой, потом режем один раз.
+    # Обратите внимание на пробелы вокруг "and" / "or": голое "and" попало бы
+    # и внутрь слов "band", "brand", "headband", "thousand".
+    normalised = sentence
+    for sep in [" and ", " or ", "&", ";"]:
+        normalised = normalised.replace(sep, ",")
+    if "," in normalised:
+        parts = [p.strip() for p in normalised.split(",")]
+        return [p for p in parts if p]
     return [sentence.strip()]
 
-print(split_concepts("cats, dogs and balloons"))
+print(split_concepts("cats, dogs and balloons"))   # ['cats', 'dogs', 'balloons']
+print(split_concepts("mug; spoon & plate"))        # ['mug', 'spoon', 'plate']
+print(split_concepts("a red band and a hat"))      # ['a red band', 'a hat']
 ```
 
 SAM 3 принимает один концепт за прямой проход; для запросов с несколькими концептами делайте цикл или батч.
 
-> 🎒 **На пальцах.** Прогоните пример в голове. Строка `"cats, dogs and balloons"` сначала превращается в `"cats, dogs ,balloons"` (замена `"and "` на запятую), потом режется по запятым и обрезается по краям — получается три концепта. А значит и три прямых прохода модели, а не один. Эвристика грубая: фраза «bread and butter» развалится на два концепта, хотя человек имел в виду один.
+> 🎒 **На пальцах.** Прогоните первый пример в голове. Строка `"cats, dogs and balloons"` сначала превращается в `"cats, dogs,balloons"` (замена `" and "` на запятую), потом режется по запятым и обрезается по краям — получается три концепта. А значит и три прямых прохода модели, а не один.
+>
+> Теперь про пробелы вокруг `" and "` — это не косметика, а единственное, что спасает третий пример. Если искать голое `"and"`, то `"a red band and a hat"` порежется ещё и внутри слова `band`, и вы получите обрывок `"a red b"`. Тот же капкан ждёт слова `brand`, `headband`, `thousand`. С пробелами по краям `band` остаётся целым, а разделителем работает только отдельно стоящее слово.
+>
+> Эвристика всё равно грубая: фраза «bread and butter» развалится на два концепта, хотя человек имел в виду один. Никакая расстановка пробелов от этого не защитит — тут нужен уже разбор смысла, а не строк.
 
 ### Step 2: Post-processing helpers
 
@@ -173,21 +184,26 @@ class ConceptDetection:
 
 def rle_encode(binary_mask):
     flat = binary_mask.flatten().astype("uint8")
+    if flat.size == 0:            # empty mask: flat[0] below would raise IndexError
+        return ""
     runs = []
-    prev, count = flat[0], 0
+    prev, count = int(flat[0]), 0
     for v in flat:
-        if v == prev:
+        iv = int(v)
+        if iv == prev:
             count += 1
         else:
-            runs.append((int(prev), count))
-            prev, count = v, 1
-    runs.append((int(prev), count))
+            runs.append((prev, count))
+            prev, count = iv, 1
+    runs.append((prev, count))
     return ";".join(f"{v}x{c}" for v, c in runs)
 ```
 
 RLE держит размер ответа небольшим даже при множестве mask высокого разрешения. Тот же формат работает и в SAM 2, и в SAM 3, и в Grounded SAM 2.
 
 > 🎒 **На пальцах.** RLE — это «сжатие сериями»: вместо тысячи нулей подряд пишется «0 повторить тысячу раз». Разберите строку `"0x100;1x50;0x200"`: сто нулей, пятьдесят единиц, двести нулей. Всего 350 пикселей, из них внутри объекта 50, то есть около 14%. В виде списка это 350 чисел, в виде RLE — три пары. Экономия тем больше, чем крупнее и однороднее mask.
+
+> 🎒 **На пальцах.** Первая же строка после `flatten` — про пустой массив. Модель вполне может вернуть mask нулевого размера (ничего не найдено, пустой crop), и тогда `flat[0]` упадёт с `IndexError` ещё до начала цикла. Проверка `flat.size == 0` возвращает пустую строку — честное «серий нет». Такие защиты в продакшене стоят одну строку, а без них пайплайн валится на самом скучном входе.
 
 ### Step 3: A unified open-vocab segmentation interface
 

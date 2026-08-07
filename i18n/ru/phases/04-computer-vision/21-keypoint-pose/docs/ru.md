@@ -69,7 +69,7 @@ target[k, y, x] = exp(-((x - cx_k)^2 + (y - cy_k)^2) / (2 sigma^2))
 
 ### Sub-pixel localisation
 
-Argmax даёт целые координаты. Для субпиксельной точности уточняют, подгоняя параболу по argmax и его соседям, или используют известное смещение в направлении `(dx, dy) = 0.25 * (heatmap[y, x+1] - heatmap[y, x-1], ...)`.
+Argmax даёт целые координаты. Для субпиксельной точности уточняют, подгоняя параболу по argmax и его соседям, или используют известный сдвиг на четверть пикселя `(dx, dy) = 0.25 * sign(heatmap[y, x+1] - heatmap[y, x-1], ...)` — фиксированный шаг в четверть пикселя в сторону более яркого соседа. Берут именно **знак** разности, а не саму разность: сырые значения масштабируют сдвиг на амплитуду heatmap и на уверенных предсказаниях уносят оценку далеко от пика.
 
 > 🎒 **На пальцах.** Считайте, что это цена округления. На heatmap 64×64 один пиксель — это 1/64 ≈ 1.6% ширины кадра. Для человека ростом 1.8 м в полный рост ошибка округления запястья — около 3 см. Для фитнес-приложения, считающего угол в локте, эти 3 см — уже пара градусов.
 
@@ -185,9 +185,11 @@ print(f"coords: {coords.shape}")  # (2, 4, 2)
 Просто: нарисовать четыре точки на белом холсте и научиться их предсказывать.
 
 ```python
-def make_synthetic_sample(size=64):
+def make_synthetic_sample(size=64, rng=None):
+    # Генератор принимаем аргументом, чтобы seed контролировал вызывающий код;
+    # свежий default_rng() внутри функции делает датасет невоспроизводимым.
+    rng = rng if rng is not None else np.random.default_rng()
     img = np.ones((3, size, size), dtype=np.float32)
-    rng = np.random.default_rng()
     kps = rng.integers(8, size - 8, size=(4, 2))
     for cx, cy in kps:
         img[:, cy - 2:cy + 2, cx - 2:cx + 2] = 0.0
@@ -202,15 +204,21 @@ def make_synthetic_sample(size=64):
 ### Step 5: Training
 
 ```python
+torch.manual_seed(0)
+rng = np.random.default_rng(0)
+
 model = TinyKeypointNet(num_keypoints=4)
 opt = torch.optim.Adam(model.parameters(), lr=3e-3)
 
 for step in range(200):
-    batch = [make_synthetic_sample() for _ in range(16)]
+    batch = [make_synthetic_sample(rng=rng) for _ in range(16)]
     imgs = torch.from_numpy(np.stack([b[0] for b in batch]))
     hms = torch.from_numpy(np.stack([b[1] for b in batch]))
     pred = model(imgs)
-    # Upsample pred to full resolution
+    # Страховка, а не upsample: две свёртки со stride 2 и две транспонированные
+    # свёртки с коэффициентом 2 уже возвращают полное разрешение, так что при H и W,
+    # кратных 4, эта строка ничего не делает. Работа находится только для входов
+    # с некратными размерами.
     pred = F.interpolate(pred, size=hms.shape[-2:], mode="bilinear", align_corners=False)
     loss = F.mse_loss(pred, hms)
     opt.zero_grad(); loss.backward(); opt.step()

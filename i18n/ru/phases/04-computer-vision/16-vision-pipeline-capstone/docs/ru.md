@@ -12,7 +12,7 @@
 
 - Спроектировать продакшн-пайплайн зрения, который находит объекты, классифицирует их и отдаёт структурированный JSON — с обработкой каждого пути отказа
 - Соединить детектор (Mask R-CNN или YOLO), классификатор (ConvNeXt-Tiny) и контракт данных (Pydantic) в один сервис
-- Замерить пайплайн целиком и найти первое узкое место (обычно это препроцессинг, потом детектор)
+- Замерить пайплайн целиком и найти первое узкое место (на CPU это детектор; препроцессинг — когда модели переезжают на GPU)
 - Выкатить минимальный FastAPI-сервис, который принимает картинку, прогоняет пайплайн и возвращает детекции с классами
 
 > 🎒 **На пальцах.** Раньше вы учили отдельные модели. Сейчас — конвейер: картинка на входе, JSON на выходе, семь этапов между ними. Из этих семи только два — модели. Остальные пять — обычный код, и именно в нём живут баги.
@@ -61,7 +61,7 @@ Detection(
     box: tuple[float, float, float, float],   # (x1, y1, x2, y2), absolute pixels
     score: float,                              # [0, 1]
     class_id: int,                             # from detector's label map
-    mask: Optional[list[list[int]]],           # RLE-encoded if present
+    mask_rle: Optional[str],                   # RLE-encoded mask, if present
 )
 
 PipelineResult(
@@ -80,7 +80,7 @@ PipelineResult(
 
 Три истины верны почти для любого пайплайна зрения:
 
-1. **Preprocessing is often the biggest single block.** Декодирование JPEG, перевод цветовых пространств, изменение размера — всё это упирается в CPU и легко забывается.
+1. **Preprocessing is easy to underestimate.** Декодирование JPEG, перевод цветовых пространств, изменение размера — всё это упирается в CPU и легко забывается. На машине без GPU детектор всё равно перевешивает препроцессинг с большим отрывом (числа — в шаге 5); но как только модели переезжают на GPU, препроцессинг часто становится самым большим куском реального времени.
 2. **The detector dominates GPU time.** 70-90% времени GPU уходит на прямой проход детектора.
 3. **Postprocessing (NMS, RLE encode/decode) is cheap on GPU, expensive on CPU.** Всегда профилируйте на настоящем целевом железе.
 
@@ -192,10 +192,13 @@ class VisionPipeline:
         crops = []
         detections = []
         valid_indices = []
+        H, W = tensor.shape[-2], tensor.shape[-1]
         for i, (box, score, cls) in enumerate(zip(det["boxes"], det["scores"], det["labels"])):
-            x1, y1, x2, y2 = [max(0, int(b)) for b in box.tolist()]
-            x2 = min(x2, tensor.shape[-1])
-            y2 = min(y2, tensor.shape[-2])
+            x1, y1, x2, y2 = [int(b) for b in box.tolist()]
+            # зажимаем с обеих сторон, чтобы коробка, целиком вылезшая за кадр,
+            # выродилась в нулевую площадь, а не в перевёрнутую (x1 > x2)
+            x1, y1 = min(max(x1, 0), W), min(max(y1, 0), H)
+            x2, y2 = min(max(x2, x1), W), min(max(y2, y1), H)
             detections.append(Detection(
                 box=(x1, y1, x2, y2),
                 score=float(score),
@@ -234,7 +237,7 @@ class VisionPipeline:
 
 Каждый стык типизирован. У каждого пути отказа есть конкретное решение.
 
-> 🎒 **На пальцах.** Смотрите на две строки защиты: `max(0, int(b))` не даёт координате уйти в минус, а `min(x2, tensor.shape[-1])` не даёт вылезти за правый край. Если картинка шириной 600, а детектор предложил x2 = 640, останется 600. Без этих двух строк вырезание фрагмента вернёт пустой тензор, и классификатор упадёт где-то далеко от места настоящей ошибки.
+> 🎒 **На пальцах.** Разберём две строки защиты. Каждая координата зажимается с двух сторон: `max(..., 0)` не даёт уйти в минус, `min(..., W)` — вылезти за правый край. Картинка шириной 600, детектор предложил x2 = 640 — останется 600. Теперь злой случай: детектор предложил коробку целиком справа от кадра, x1 = 700, x2 = 760. Оба конца прижимаются к 600, ширина становится 0, и проверка `min_crop` спокойно её выбрасывает. Если бы x1 зажимали только снизу (а x2 только сверху), вышло бы x1 = 700, x2 = 600, то есть перевёрнутая коробка: срез `tensor[:, y1:y2, 700:600]` в Python молча даёт пустой тензор, и падение случится далеко от места настоящей ошибки. Отдельно посмотрите на `min(max(x2, x1), W)`: правая граница никогда не оказывается левее левой, поэтому «нулевая площадь» — худшее, что может выйти.
 
 ### Step 3: Wire a detector and a classifier
 
@@ -260,18 +263,22 @@ print(result.model_dump_json(indent=2)[:500])
 ### Step 4: FastAPI service
 
 ```python
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, HTTPException
 from io import BytesIO
 
-app = FastAPI()
 pipe = None  # initialised on startup
 
-@app.on_event("startup")
-def load():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     global pipe
     detector = maskrcnn_resnet50_fpn_v2(weights="DEFAULT").eval()
     classifier = convnext_tiny(weights="DEFAULT").eval()
     pipe = VisionPipeline(detector, classifier, class_names=[f"c{i}" for i in range(1000)])
+    yield
+    # работа на остановке (закрыть пулы, сбросить метрики) идёт после yield
+
+app = FastAPI(lifespan=lifespan)
 
 @app.post("/detect")
 async def detect_endpoint(file: UploadFile):
@@ -288,7 +295,7 @@ async def detect_endpoint(file: UploadFile):
 
 Запускается командой `uvicorn main:app --host 0.0.0.0 --port 8000`. Проверяется командой `curl -F 'file=@dog.jpg' http://localhost:8000/detect`.
 
-> 🎒 **На пальцах.** Обратите внимание на порядок проверок: сначала тип файла, потом попытка декодирования, и только потом модель. Три разных причины отказа — три разных ответа 400 с разным текстом. Модели загружаются один раз на старте, а не на каждый запрос: иначе первый пользователь ждал бы 30 секунд.
+> 🎒 **На пальцах.** Обратите внимание на порядок проверок: сначала тип файла, потом попытка декодирования, и только потом модель. Три разных причины отказа — три разных ответа 400 с разным текстом. Модели загружаются один раз на старте, а не на каждый запрос: иначе первый пользователь ждал бы 30 секунд. Механизм — `lifespan`: всё до `yield` выполняется один раз при подъёме сервиса, всё после `yield` — один раз при остановке. Старый `@app.on_event("startup")` делал то же самое, но в FastAPI он объявлен устаревшим, и у него нет симметричного места под закрытие ресурсов.
 
 ### Step 5: Benchmark the pipeline
 
@@ -307,10 +314,11 @@ def benchmark(pipe, num_runs=20, image_size=(400, 600)):
         det = pipe.detect(tensor)
         t2 = time.perf_counter()
         crops = []
+        H, W = tensor.shape[-2], tensor.shape[-1]
         for box in det["boxes"]:
-            x1, y1, x2, y2 = [max(0, int(b)) for b in box.tolist()]
-            x2 = min(x2, tensor.shape[-1])
-            y2 = min(y2, tensor.shape[-2])
+            x1, y1, x2, y2 = [int(b) for b in box.tolist()]
+            x1, y1 = min(max(x1, 0), W), min(max(y1, 0), H)
+            x2, y2 = min(max(x2, x1), W), min(max(y2, y1), H)
             if (x2 - x1) >= pipe.min_crop and (y2 - y1) >= pipe.min_crop:
                 crop = tensor[:, y1:y2, x1:x2]
                 crop = torch.nn.functional.interpolate(

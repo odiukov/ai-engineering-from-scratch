@@ -176,40 +176,49 @@ class SimpleTracker:
         self.max_age = max_age
 
     def step(self, detections, frame):
+        # Приводим к массиву один раз, чтобы у каждого Track был bbox одного типа —
+        # и у только что созданного здесь, и у обновлённого ниже.
+        det_boxes = (np.array(detections, dtype=np.float32) if len(detections)
+                     else np.empty((0, 4), dtype=np.float32))
+
         if not self.tracks:
-            for d in detections:
+            for d in det_boxes:
                 self.tracks.append(Track(self.next_id, d, frame))
                 self.next_id += 1
-            return [(t.id, t.bbox) for t in self.tracks]
+            return [(t.id, t.bbox.tolist()) for t in self.tracks]
 
         track_boxes = np.array([t.bbox for t in self.tracks])
-        det_boxes = np.array(detections) if len(detections) else np.empty((0, 4))
 
         iou = bbox_iou(track_boxes, det_boxes) if len(det_boxes) else np.zeros((len(track_boxes), 0))
         cost = 1 - iou
         cost[iou < self.iou_threshold] = 1e6
 
-        matched_track = set()
         matched_det = set()
         if cost.size > 0:
             row, col = linear_sum_assignment(cost)
             for r, c in zip(row, col):
                 if cost[r, c] < 1.0:
                     self.tracks[r].update(det_boxes[c], frame)
-                    matched_track.add(r); matched_det.add(c)
+                    matched_det.add(c)
 
         for i, d in enumerate(det_boxes):
             if i not in matched_det:
                 self.tracks.append(Track(self.next_id, d, frame))
                 self.next_id += 1
 
+        # Несовпавшие треки не трогаем: их last_frame остаётся в прошлом, так что
+        # отправляет их на пенсию именно фильтр по max_age строкой ниже.
         self.tracks = [t for t in self.tracks if frame - t.last_frame <= self.max_age]
-        return [(t.id, t.bbox) for t in self.tracks]
+        return [(t.id, t.bbox.tolist()) for t in self.tracks]
 ```
 
 60 строк. На вход — покадровые детекции, на выход — покадровые ID треков. Реальные системы добавляют предсказание Kalman, второй проход ByteTrack и признаки внешнего вида.
 
 > 🎒 **На пальцах.** Разберите три числа в коде. `iou_threshold=0.3`: пара с перекрытием меньше 30% получает стоимость 1e6, то есть «никогда не соединяй». `cost = 1 - iou`: IoU 0.6 превращается в стоимость 0.4, и Hungarian algorithm минимизирует сумму таких стоимостей. `max_age=5`: трек, к которому 5 кадров подряд ничего не привязалось, удаляется — на 30 fps это примерно 0.17 секунды терпения.
+
+> 🎒 **На пальцах.** Заметьте, чего в коде нет: множества совпавших треков. Оно и не нужно — трек, которому в этом кадре ничего не досталось, просто остаётся с прежним `last_frame`, и разница `frame - t.last_frame` растёт сама. Через `max_age` кадров он вылетает по фильтру. Так что «забыть про несовпавшие треки» здесь — не недосмотр, а ровно то поведение SORT: объект, пропавший на 2-3 кадра (кто-то прошёл перед ним), возвращается с тем же ID, а исчезнувший навсегда тихо удаляется.
+
+> 🎒 **На пальцах.** Ещё одна деталь про типы. `det_boxes` строится один раз в начале `step`, поэтому `bbox` внутри любого `Track` — всегда массив numpy, а не список: и у трека, рождённого на первом кадре, и у трека, обновлённого на сотом. Наружу же оба возвращаются через `.tolist()`, то есть вызывающий код всегда получает обычные списки Python. Такие мелочи экономят часы отладки: смешивать список и массив в одном поле — верный способ получить `TypeError` через месяц в самом неожиданном месте.
 
 ### Step 3: Synthetic trajectory test
 
