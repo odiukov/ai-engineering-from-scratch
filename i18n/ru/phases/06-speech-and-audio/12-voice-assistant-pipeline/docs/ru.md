@@ -31,7 +31,7 @@
 ### The seven components
 
 1. **Audio capture.** Микрофон → 16 кГц моно → чанки по 20 мс. Обычно `sounddevice` в Python или нативные AudioUnit/ALSA/WASAPI в продакшене.
-2. **VAD (Lesson 11).** Silero VAD с порогом 0.5, минимальная речь 250 мс, hangover тишины 500 мс. Даёт сигналы «начало» и «конец».
+2. **VAD (Lesson 11).** Silero VAD с порогом старта 0.3 (собственный дефолт Silero — 0.5; порог 0.3 покупает вам первое слово ценой нескольких ложных стартов — см. failure mode 1), минимальная речь 250 мс, hangover тишины 500 мс. Даёт сигналы «начало» и «конец».
 3. **Streaming STT (Lesson 4-5).** Whisper-streaming, Parakeet-TDT или Deepgram Nova-3 (API). Частичные и финальные транскрипты.
 4. **LLM with tool calling.** GPT-4o / Claude 3.5 / Gemini 2.5 Flash. JSON-схема для инструментов. Токены стримом.
 5. **Streaming TTS (Lesson 7).** Kokoro-82M (самая быстрая открытая) или Cartesia Sonic (коммерческая). Запускать TTS после первых 20 токенов от LLM.
@@ -85,31 +85,36 @@ def mic_stream(chunk_ms=20, sr=16000):
 ### Step 2: VAD-gated turn capture
 
 ```python
-def capture_turn(stream, vad, pre_roll_ms=300, silence_ms=500):
-    buf, pre, triggered = [], collections.deque(maxlen=pre_roll_ms // 20), False
-    silent = 0
+def capture_turn(stream, vad, chunk_ms=20, pre_roll_ms=300, silence_ms=500):
+    pre = collections.deque(maxlen=max(1, pre_roll_ms // chunk_ms))
+    buf, triggered, silent = [], False, 0
     for chunk in stream:
-        pre.append(chunk)
         if vad(chunk):
             if not triggered:
-                buf = list(pre)
+                buf = list(pre)      # pre-roll only — `chunk` is appended below
                 triggered = True
             buf.append(chunk)
             silent = 0
         elif triggered:
-            silent += 20
             buf.append(chunk)
+            silent += chunk_ms
             if silent >= silence_ms:
-                return b"".join(buf)
+                return np.concatenate(buf)
+        else:
+            pre.append(chunk)        # rolling pre-roll while nobody is talking
+    # stream ended before the hangover elapsed — return what we have, not None
+    return np.concatenate(buf) if triggered else None
 ```
 
-> 🎒 **На пальцах.** `pre` — это кольцевой буфер на `300 // 20 = 15` чанков, то есть 300 мс звука «из прошлого». Когда VAD наконец говорит «речь», мы берём не текущий чанк, а весь буфер целиком — так спасается обрезанное первое слово. Счётчик `silent` растёт на 20 мс за чанк и на 25-м чанке подряд достигает 500 мс: turn закончен.
+Три детали, которые кусаются на практике: длину pre-roll-очереди надо считать от *того же* `chunk_ms`, с которым работает микрофон (иначе микрофон на 10 мс молча урежет ваш pre-roll вдвое), триггерный кадр нельзя учитывать дважды (он попадает в `buf` либо через `pre`, либо через `append`, но никогда через оба), и `mic_stream` отдаёт float-массивы — их надо склеивать через `np.concatenate`, а не через `b"".join`.
+
+> 🎒 **На пальцах.** `pre` — это кольцевой буфер на `300 // 20 = 15` чанков, то есть 300 мс звука «из прошлого». Когда VAD наконец говорит «речь», мы берём весь этот буфер целиком — так спасается обрезанное первое слово. Заметьте, что `pre.append(chunk)` живёт в ветке `else`, то есть буфер набивается только пока никто не говорит: если бы он обновлялся на каждом кадре, триггерный кадр попал бы в `buf` дважды — один раз внутри `list(pre)` и второй раз через `buf.append(chunk)`, и в записи появился бы продублированный 20-мс фрагмент. Счётчик `silent` растёт на `chunk_ms` за кадр и на 25-м тихом кадре подряд достигает 500 мс: turn закончен. А последняя строка нужна для случая, когда поток кончился раньше hangover'а — без неё функция вернула бы `None`, и уже записанная реплика молча потерялась бы.
 
 ### Step 3: streaming STT → LLM → TTS
 
 ```python
-async def turn(audio_bytes):
-    transcript = await stt.transcribe(audio_bytes)
+async def turn(audio):
+    transcript = await stt.transcribe(audio)
     async for token in llm.stream(transcript):
         async for audio in tts.stream(token):
             await speaker.play(audio)
@@ -160,7 +165,7 @@ while True:
 - `kokoro` или `cartesia`
 - `sounddevice` для ввода-вывода
 
-> 🎒 **На пальцах.** Заглушки нужны не для лени, а чтобы отладить стыки. Все семь компонентов общаются через простые типы — байты аудио, строки, токены, — поэтому заменять их можно по одному. Сначала поставьте настоящий VAD, убедитесь, что тайминги сходятся, и только потом трогайте STT.
+> 🎒 **На пальцах.** Заглушки нужны не для лени, а чтобы отладить стыки. Все семь компонентов общаются через простые типы — массивы аудио, строки, токены, — поэтому заменять их можно по одному. Сначала поставьте настоящий VAD, убедитесь, что тайминги сходятся, и только потом трогайте STT.
 
 ## Pitfalls
 

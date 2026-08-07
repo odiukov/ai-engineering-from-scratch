@@ -5,7 +5,7 @@
 
 **Type:** Learn
 **Languages:** Python
-**Prerequisites:** Phase 6 · 04 (ASR), Phase 12 · 03 (Vision-Language Models), Phase 7 · 10 (Audio Transformers)
+**Prerequisites:** Phase 6 · 04 (ASR), Phase 7 · 10 (Audio Transformers — Whisper), Phase 12 · 03 (BLIP-2 Q-Former Bridge)
 **Time:** ~45 minutes
 
 ## The Problem
@@ -136,35 +136,43 @@ import torch.nn as nn
 class AudioProjector(nn.Module):
     def __init__(self, audio_dim=1280, llm_dim=4096):
         super().__init__()
-        self.down = nn.Linear(audio_dim, llm_dim)
+        self.fc1 = nn.Linear(audio_dim, llm_dim)   # 1280 -> 4096
         self.act = nn.GELU()
-        self.up = nn.Linear(llm_dim, llm_dim)
+        self.fc2 = nn.Linear(llm_dim, llm_dim)     # 4096 -> 4096
 
     def forward(self, audio_features):
-        return self.up(self.act(self.down(audio_features)))
+        return self.fc2(self.act(self.fc1(audio_features)))
 ```
 
 Вот и всё. Projector — обычно 1-3 линейных слоя. Обучение на парах ASR (аудио → транскрипт) и есть предобучающая задача Stage 1.
+
+Обратите внимание на направление: скрытая размерность аудио-энкодера (1280 у Whisper-large) *меньше*, чем у LLM (4096 у семимиллиардной модели), так что оба слоя проецируют вверх или в ту же ширину — никакого bottleneck'а в этом блоке нет, и назвать первый слой `down` было бы ровно наоборот. Единственная ширина, которую вы не можете менять, — это `llm_dim`: то, что выходит из projector'а, обязано лежать в том же пространстве, что и токенные эмбеддинги LLM.
 
 > 🎒 **На пальцах.** Посчитаем размер этого «моста»: первый слой 1280 × 4096 ≈ 5.2 млн весов, второй 4096 × 4096 ≈ 16.8 млн. Всего около 22 млн параметров против 7 млрд у LLM — это треть процента модели. Вся магия «модель научилась слышать» помещается в эти 22 миллиона чисел.
 
 ### Step 3: benchmarking MMAU / LongAudioBench
 
 ```python
+from collections import Counter
 from datasets import load_dataset
+
 mmau = load_dataset("MMAU/MMAU-Pro")
 
-correct = 0
+seen, hits = Counter(), Counter()
 for item in mmau["test"]:
     answer = call_model(item["audio"], item["question"], item["choices"])
-    if answer == item["correct_choice"]:
-        correct += 1
-print(f"Accuracy: {correct / len(mmau['test']):.3f}")
+    category = item["category"]      # speech / sound / music / multi-audio
+    seen[category] += 1
+    hits[category] += int(answer == item["correct_choice"])
+
+for category in sorted(seen):
+    print(f"{category:12s} {hits[category] / seen[category]:.3f}  (n={seen[category]})")
+print(f"{'overall':12s} {sum(hits.values()) / sum(seen.values()):.3f}")
 ```
 
-Отчитывайтесь по категориям (речь / звуки / музыка / несколько аудио) раздельно. Общая цифра прячет то место, где модель ломается.
+Держите счётчики по категориям, а не один общий итог. Общая цифра прячет то место, где модель ломается: модель, сильная на речи и угадывающая наугад на multi-audio, покажет ту же общую точность, что и ровно посредственная везде, — и только разбивка скажет вам, жизнеспособна ли фича «в каком фрагменте есть X».
 
-> 🎒 **На пальцах.** Именно этот цикл и рождает разницу между «52.2%» и правдой. Если в 1800 вопросах 900 про речь и 200 про несколько аудио, то провал с 20% на multi-audio утонет в общем среднем и почти не сдвинет итог. Считайте `correct` отдельным счётчиком на каждую категорию — это две лишние строки кода и совсем другой вывод.
+> 🎒 **На пальцах.** Именно поэтому здесь два `Counter`'а, а не одна переменная `correct`. Если в 1800 вопросах 900 про речь и 200 про несколько аудио, то провал с 20% на multi-audio утонет в общем среднем и почти не сдвинет итог. `seen` считает, сколько вопросов было в категории, `hits` — сколько из них угадано; деление одного на другое и даёт те самые столбцы Speech / Sound / Music / Multi-audio из таблицы выше. Строка `overall` печатается последней специально: сначала смотрите разбивку, потом итог, а не наоборот.
 
 ## Use It
 

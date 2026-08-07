@@ -83,6 +83,8 @@ def featurize_mfcc(signal, sr, n_mfcc=13, n_mels=40, frame_len=400, hop=160):
     return [dct_ii(frame, n_mfcc) for frame in log]
 ```
 
+Каждый хелпер здесь — `stft_magnitude`, `mel_filterbank`, `apply_filterbank`, `log_transform`, `dct_ii` — тот самый, что вы написали в уроке 02.
+
 > 🎒 **На пальцах.** Это ровно конвейер из урока 02, свёрнутый в одну функцию: спектрограмма → mel-фильтры → логарифм → DCT. На выходе список кадров, в каждом по 13 чисел. Для клипа на 10 секунд при `hop=160` это примерно 998 × 13 значений. Заметьте `n_mels=40`, а не 80 — для MFCC берут меньше mel-бинов, потому что DCT всё равно сожмёт их до 13.
 
 ### Step 2: fixed-length summary
@@ -104,6 +106,9 @@ def summarize(mfcc_frames):
 ### Step 3: k-NN
 
 ```python
+import math
+from collections import Counter
+
 def cosine(a, b):
     dot = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a)) or 1e-12

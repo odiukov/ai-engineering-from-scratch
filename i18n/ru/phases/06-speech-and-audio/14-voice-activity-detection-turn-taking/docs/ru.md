@@ -120,15 +120,23 @@ class TurnDetector:
                 self.state = "speaking"
                 return "START"
         else:
-            self.silence_ms += chunk_ms
-            if self.state == "speaking" and self.silence_ms >= self.silence_hangover_ms:
-                self.state = "idle"
+            if self.state == "speaking":
+                self.silence_ms += chunk_ms
+                if self.silence_ms >= self.silence_hangover_ms:
+                    self.state = "idle"
+                    self.speech_ms = 0
+                    self.silence_ms = 0
+                    return "END"
+            else:
+                # while idle, speech must be *consecutive* to count — otherwise
+                # scattered coughs add up to min_speech_ms and fake a START
                 self.speech_ms = 0
-                return "END"
         return None
 ```
 
-> 🎒 **На пальцах.** Это автомат с двумя состояниями: `idle` и `speaking`. При chunk_ms=20 переход в `speaking` требует накопить 250 мс речи, то есть 13 чанков подряд; возврат в `idle` — 500 мс тишины, то есть 25 чанков. Заметьте: `self.silence_ms = 0` обнуляется на каждом речевом чанке, поэтому короткие вдохи посреди фразы не завершают turn.
+Обратите внимание на `self.speech_ms = 0` при тишине в состоянии `idle`. Без этой строки счётчик накапливается за всю сессию, и тринадцать никак не связанных друг с другом 20-мс покашливаний, разбросанных по минуте, в сумме дают 260 мс и перебивают `min_speech_ms`. Считать тишину в состоянии `idle` так же бессмысленно — конец реплики решает только hangover внутри `speaking`.
+
+> 🎒 **На пальцах.** Это автомат с двумя состояниями: `idle` и `speaking`. При chunk_ms=20 переход в `speaking` требует накопить 250 мс речи, то есть 13 чанков **подряд**; возврат в `idle` — 500 мс тишины, то есть 25 чанков. Слово «подряд» держится ровно на ветке `else` внизу: любой тихий чанк в состоянии `idle` сбрасывает `speech_ms` в ноль, иначе кашель, скрип стула и хлопок двери за минуту сложились бы в фальшивый `START`. И наоборот, `self.silence_ms = 0` обнуляется на каждом речевом чанке, поэтому короткие вдохи посреди фразы не завершают turn.
 
 ### Step 4: the flush trick skeleton
 

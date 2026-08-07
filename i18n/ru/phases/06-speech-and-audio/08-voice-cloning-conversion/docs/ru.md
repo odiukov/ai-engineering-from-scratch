@@ -139,15 +139,24 @@ detected = sc.detect(watermarked, sr=24000)   # returns payload bytes
 ### Step 5: consent gate
 
 ```python
+class ConsentError(RuntimeError):
+    """Refusal, not a bug — surface it to the caller."""
+
+
 def cloned_inference(text, ref_audio, consent_record):
-    assert verify_signature(consent_record), "Signed consent required"
-    assert consent_record["speaker_id"] == hash_speaker(ref_audio)
+    # consent_record = {"consent_id": ..., "speaker_id": ..., "signature": ...}
+    if not verify_signature(consent_record):
+        raise ConsentError("signed consent required")
+    if consent_record["speaker_id"] != hash_speaker(ref_audio):
+        raise ConsentError("consent does not cover this voice")
     wav = tts.infer(ref_file=ref_audio, gen_text=text)
-    wav = watermark(wav, payload=consent_record["id"])
+    wav = watermark(wav, payload=consent_record["consent_id"])
     return wav
 ```
 
-> 🎒 **На пальцах.** Обратите внимание на порядок: сначала два `assert`, и только потом синтез. Это не стилистика, а суть — гейт должен стоять до генерации, иначе клон уже создан, и запретить его постфактум нельзя. Второй `assert` сверяет хеш голоса из образца с тем, на кого подписано согласие: без него можно было бы приложить бумагу от одного человека, а клонировать другого.
+Никогда не пишите этот гейт через `assert`. Python вырезает все assertion'ы под `-O` (и под `PYTHONOPTIMIZE`), так что единственная проверка, которую вы обязаны выполнять по закону, — это же и та единственная проверка, которая молча исчезнет в тот день, когда кто-нибудь добавит флаг оптимизации в продакшен-энтрипоинт. Assertion'ы нужны для инвариантов, которые, по вашему мнению, не могут нарушиться; согласие же — это входные данные, которые иногда вполне ожидаемо оказываются неправильными. В payload вотермарка уходит именно `consent_id` — тот самый формат `consent_id:...` из Step 4, который привязывает каждую выданную волну к строке в журнале согласий.
+
+> 🎒 **На пальцах.** Обратите внимание на порядок: сначала две проверки с `raise`, и только потом синтез. Это не стилистика, а суть — гейт должен стоять до генерации, иначе клон уже создан, и запретить его постфактум нельзя. Вторая проверка сверяет хеш голоса из образца с тем, на кого подписано согласие: без неё можно было бы приложить бумагу от одного человека, а клонировать другого. И обратите внимание, что отказ — это своё исключение `ConsentError`, а не `AssertionError`: вызывающий код должен видеть «я отказался это делать», а не «у меня баг». И ещё: `assert` тут был бы просто опасен — под `python -O` обе строки исчезли бы, и функция начала бы клонировать голос вообще без проверки согласия.
 
 ## Use It
 
