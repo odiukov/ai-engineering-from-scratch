@@ -1,0 +1,197 @@
+"""
+Экономики агентов: Шепли, аукционы, репутация — эталон.
+
+Открывай ПОСЛЕ своих зелёных тестов.
+"""
+
+import itertools
+import math
+
+# Порог сравнения полезностей. Ставки — числа с плавающей точкой, и
+# «одинаковая полезность» приходится определять через допуск, иначе
+# доминирующая стратегия перестаёт находиться из-за 1e-17.
+EPS = 1e-12
+
+
+def marginal_contributions(value_fn, order):
+    """Предельные вклады агентов при данном порядке присоединения к коалиции.
+
+    value_fn принимает frozenset агентов и возвращает ценность коалиции.
+
+    v = lambda s: 1.0 if {"coder", "reviewer"} <= s else 0.0
+    marginal_contributions(v, ["coder", "reviewer"])  ->  {"coder": 0.0, "reviewer": 1.0}
+    marginal_contributions(v, ["reviewer", "coder"])  ->  {"reviewer": 0.0, "coder": 1.0}
+
+    Один и тот же агент в разном порядке получает разный вклад — поэтому
+    Шепли и усредняет по всем порядкам, а не берёт один «естественный».
+
+    Ловушка: отсчёт начинается от v(пустое множество), а не от нуля. Для
+    систем с фиксированной стоимостью запуска это разные числа.
+    """
+    contributions = {}
+    prefix = []
+    previous = value_fn(frozenset())
+    for agent in order:
+        prefix.append(agent)
+        current = value_fn(frozenset(prefix))
+        contributions[agent] = current - previous
+        previous = current
+    return contributions
+
+
+def shapley(value_fn, agents):
+    """Точные значения Шепли перебором всех перестановок. Вернуть {агент: доля}.
+
+    v = lambda s: 1.0 if {"coder", "reviewer"} <= s else 0.0
+    shapley(v, ["coder", "reviewer"])  ->  {"coder": 0.5, "reviewer": 0.5}
+
+    v = lambda s: float(len(s))
+    shapley(v, ["a", "b", "c"])  ->  {"a": 1.0, "b": 1.0, "c": 1.0}
+
+    Единственное распределение, удовлетворяющее четырём аксиомам:
+    эффективность (сумма равна ценности всей коалиции), симметрия,
+    линейность, нулевой игрок.
+
+    Стоимость N! — при N=10 это 3.6 млн перестановок. Дальше только
+    сэмплирование, см. shapley_sampled.
+    """
+    orders = list(itertools.permutations(agents))
+    totals = {a: 0.0 for a in agents}
+    for order in orders:
+        for agent, contribution in marginal_contributions(value_fn, order).items():
+            totals[agent] += contribution
+    return {a: t / len(orders) for a, t in totals.items()}
+
+
+def shapley_sampled(value_fn, agents, samples, rng):
+    """Оценка Шепли по случайным порядкам (Monte Carlo). Вернуть {агент: доля}.
+
+    shapley_sampled(v, ["a", "b", "c"], 500, random.Random(0))
+        ->  примерно то же, что shapley(v, ["a", "b", "c"])
+
+    rng приходит снаружи: без него оценка невоспроизводима, и отличить
+    «шум сэмплирования» от «ошибка в формуле» невозможно.
+
+    Ловушка: перемешивать надо КОПИЮ списка агентов. rng.shuffle правит
+    список на месте, и вызывающий код неожиданно получит переставленный
+    agents обратно.
+    """
+    order = list(agents)
+    totals = {a: 0.0 for a in agents}
+    for _ in range(samples):
+        rng.shuffle(order)
+        for agent, contribution in marginal_contributions(value_fn, order).items():
+            totals[agent] += contribution
+    return {a: t / samples for a, t in totals.items()}
+
+
+def second_price_auction(bids):
+    """Аукцион второй цены (Викри). Вернуть (индекс победителя, цена).
+
+    second_price_auction([0.82, 0.60, 0.95, 0.45, 0.77])  ->  (2, 0.82)
+    second_price_auction([0.5])                           ->  (0, 0.0)
+    second_price_auction([0.5, 0.5])                      ->  (0, 0.5)
+
+    Побеждает наибольшая ставка, платит вторую по величине. Единственный
+    участник платит 0 — конкурентов нет. При равенстве побеждает меньший
+    индекс, и цена равна его же ставке: выигрыш нулевой.
+
+    Реальный аналог: token auctions из «Mechanism design for large language
+    models» (Google Research) — N агентов предлагают продолжение, берётся
+    лучшее, платится вторая цена.
+    """
+    if not bids:
+        raise ValueError("аукцион без участников")
+    winner = 0
+    for i, b in enumerate(bids):
+        if b > bids[winner]:        # строгое >: при равенстве остаётся меньший индекс
+            winner = i
+    rest = [b for i, b in enumerate(bids) if i != winner]
+    return winner, (max(rest) if rest else 0.0)
+
+
+def bidder_utility(true_value, bids, index):
+    """Полезность участника index: сколько он заработал на этом аукционе.
+
+    bidder_utility(0.9, [0.9, 0.5], 0)  ->  0.4   (выиграл, платит 0.5)
+    bidder_utility(0.4, [0.9, 0.5], 0)  ->  -0.1  (переставил и выиграл в убыток)
+    bidder_utility(0.9, [0.3, 0.5], 0)  ->  0.0   (недоставил и проиграл)
+
+    Проигравший не платит ничего, поэтому у него ровно ноль, а не минус
+    ставка. Отрицательная полезность бывает только у победителя, который
+    поставил выше своей истинной ценности.
+    """
+    winner, price = second_price_auction(bids)
+    return (true_value - price) if winner == index else 0.0
+
+
+def best_bids(true_value, others, candidates):
+    """Все ставки из candidates, максимизирующие полезность против others.
+
+    best_bids(0.7, [0.5, 0.3], [0.3, 0.7, 0.9])  ->  [0.7, 0.9]
+    best_bids(0.2, [0.5, 0.3], [0.2, 0.6])       ->  [0.2]
+
+    Участник ставит первым в списке (индекс 0), остальные ставки — others.
+    Возвращается СПИСОК, потому что оптимум обычно не единственный:
+    любая ставка выше конкурентов даёт тот же исход и ту же цену.
+
+    Смысл функции — перебором доказать, что честная ставка входит в оптимум
+    при любых чужих ставках. Это и есть доминирующая стратегия.
+    """
+    best_utility, winners = -math.inf, []
+    for bid in candidates:
+        utility = bidder_utility(true_value, [bid] + list(others), 0)
+        if utility > best_utility + EPS:
+            best_utility, winners = utility, [bid]
+        elif utility >= best_utility - EPS:
+            winners.append(bid)
+    return winners
+
+
+def update_reputation(rep, quality, alpha=0.9, verified=True, penalty=0.3):
+    """Обновление репутационного капитала за один подтверждённый вклад.
+
+    Подтверждён:     rep' = alpha*rep + (1 - alpha)*quality
+    Не подтверждён:  rep' = max(0, rep - penalty)   — это slashing
+
+    update_reputation(0.5, 1.0, 0.9)                  ->  0.55
+    update_reputation(0.5, 0.0, 0.9)                  ->  0.45
+    update_reputation(0.5, 1.0, 0.9, verified=False)  ->  0.2
+    update_reputation(0.1, 1.0, 0.9, verified=False)  ->  0.0
+
+    alpha близко к 1 — репутация инертна, старые заслуги держатся долго.
+    Ловушка: без max(0, ...) репутация уходит в минус, и дальше
+    rep-взвешенная маршрутизация начинает делить на отрицательные веса.
+
+    Верификация обязана быть внешней. Самоотчёт о качестве превращает
+    репутацию в бесплатный ресурс, и сибил-атака становится выгодной.
+    """
+    if not verified:
+        return max(0.0, rep - penalty)
+    return alpha * rep + (1.0 - alpha) * quality
+
+
+def reputation_weighted_pick(reps, rng):
+    """Выбрать агента с вероятностью, пропорциональной его репутации.
+
+    reputation_weighted_pick([0.0, 1.0, 0.0], random.Random(0))  ->  1
+    reputation_weighted_pick([1.0, 1.0], random.Random(0))        ->  0 или 1
+
+    Рулетка с одним вызовом rng.random(). Отрицательные веса — ValueError,
+    нулевая сумма — тоже: если вся репутация нулевая, выбирать не из чего.
+
+    Ловушка холодного старта: новый агент с rep=0 не получит ни одной
+    задачи и никогда не наберёт репутацию. В проде агентам дают стартовый
+    рейтинг больше нуля именно поэтому.
+    """
+    if any(r < 0 for r in reps):
+        raise ValueError("отрицательная репутация")
+    total = sum(reps)
+    if total <= 0.0:
+        raise ValueError("суммарная репутация нулевая: некого выбирать")
+    roll, acc = rng.random() * total, 0.0
+    for i, r in enumerate(reps):
+        acc += r
+        if roll < acc:
+            return i
+    return len(reps) - 1            # хвост от накопленной ошибки float
