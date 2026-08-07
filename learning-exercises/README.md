@@ -6,8 +6,9 @@
 ## Быстрый путь: одна команда в чате
 
 ```
-/check-code              # последний урок
-/check-code lesson-01    # конкретный
+/check-code                                   # текущий урок из LEARNING.md
+/check-code p01-l01-linear-algebra-intuition  # конкретный
+/check-code p01-l01                           # хватит и префикса
 ```
 
 Гоняет тесты. Красные — объясняю что сломано и подсказываю направление,
@@ -19,25 +20,28 @@
 ## Запуск
 
 ```bash
-./learning-exercises/watch.sh            # последний урок, автоперезапуск
-./learning-exercises/watch.sh lesson-01  # конкретный урок
+./learning-exercises/watch.sh                                   # последний урок
+./learning-exercises/watch.sh p01-l01-linear-algebra-intuition  # конкретный
 ```
 
-Открой рядом `learning-exercises/lesson-01/exercise.py`. Сохранил файл —
-тесты перезапустились сами. Выход: `Ctrl-C`.
+Открой рядом `learning-exercises/p01-l01-linear-algebra-intuition/exercise.py`.
+Сохранил файл — тесты перезапустились сами. Выход: `Ctrl-C`.
 
 Разовый прогон без слежения:
 
 ```bash
-cd learning-exercises/lesson-01 && python3 -m pytest
+cd learning-exercises/p01-l01-linear-algebra-intuition && python3 -m pytest
 ```
 
 ## Что где
 
+Директория урока называется `p<фаза>-l<урок>-<slug>`: `p01-l01-...` — первый
+урок первой фазы, ровно тот же номер, что в `phases/`.
+
 ```
 learning-exercises/
   watch.sh              запускалка
-  lesson-01/
+  p01-l01-linear-algebra-intuition/
     exercise.py         ← пишешь сюда, заглушки бросают NotImplementedError
     test_exercise.py    ← мои тесты, не трогай
     solution.py         ← эталон, открывать после своих зелёных
@@ -70,7 +74,7 @@ E   assert 0 == 32 ± 1.0e-09
 ## Сравнение с эталоном
 
 ```bash
-python3 learning-exercises/compare.py lesson-01
+python3 learning-exercises/compare.py p01-l01-linear-algebra-intuition
 ```
 
 Показывает по каждой функции: строк, циклов, вложенность и **реальное время
