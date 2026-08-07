@@ -12,9 +12,11 @@ tags: [practice, testing, review, ai-engineering]
 
 # Check Code
 
-The learner is working through exercises in `learning-exercises/lesson-NN/`.
-They write `exercise.py`; the tests and the reference are already there. This
-skill is the one command that tells them where they stand.
+The learner is working through exercises in
+`learning-exercises/p<NN>-l<NN>-<slug>/` — `p01-l01-linear-algebra-intuition`
+is Phase 1, Lesson 1. They write `exercise.py`; the tests and the reference
+are already there. This skill is the one command that tells them where they
+stand.
 
 Teach and report in the language from `LEARNING.md`'s `Language:` field
 (`ru` unless it says otherwise). Keep code, identifiers, test names, and
@@ -22,9 +24,17 @@ error strings verbatim.
 
 ## Step 0 — Pick the lesson
 
-Argument wins: `/check-code lesson-02` targets that directory. With no
-argument, use the highest-numbered `learning-exercises/lesson-*` directory
-that exists.
+Argument wins: `/check-code p01-l02-vectors-matrices-operations` targets that
+directory; a partial argument (`p01-l02`, `vectors-matrices`) resolves by
+prefix or substring match against `learning-exercises/p*-l*`, and an
+ambiguous one asks rather than guesses.
+
+With no argument, take the lesson from the last Progress log row in
+`LEARNING.md` and map it to its exercise directory —
+`01-math-foundations/01-linear-algebra-intuition` →
+`p01-l01-linear-algebra-intuition`. Only if `LEARNING.md` is missing, fall
+back to the most recently modified `learning-exercises/p*-l*/exercise.py`.
+Never pick by sort order: `p20-*` sorts last but is nobody's current lesson.
 
 `exercise.py` is deliberately not in git — each learner has their own. If it
 is missing, create it by copying `exercise.template.py` and say so, then
@@ -33,7 +43,7 @@ continue. If neither exists, stop — there is nothing to check.
 ## Step 1 — Run the tests
 
 ```bash
-cd learning-exercises/<lesson> && python3 -m pytest -q --no-header --tb=short
+cd learning-exercises/<exercise-dir> && python3 -m pytest -q --no-header --tb=short
 ```
 
 Report the count as `N/M`. Then branch on the result.
@@ -67,7 +77,7 @@ Say so plainly, then continue to Step 2.
 ## Step 2 — Metric comparison
 
 ```bash
-python3 learning-exercises/compare.py <lesson>
+python3 learning-exercises/compare.py <exercise-dir>
 ```
 
 Show the table as-is. Then read it for them, because the numbers alone do
