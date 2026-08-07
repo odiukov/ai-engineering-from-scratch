@@ -1,0 +1,308 @@
+"""
+Тематическое моделирование: LDA и BERTopic — эталон.
+
+Открывай ПОСЛЕ своих зелёных тестов.
+"""
+
+import math
+import re
+from collections import Counter
+
+
+def build_corpus(documents, stopwords=(), min_df=1, max_df=1.0):
+    """Словарь корпуса и документы, переписанные в id слов.
+
+    Токен — цепочка латинских букв в нижнем регистре. Слово попадает в
+    словарь, если встретилось не меньше чем в min_df документах и не больше
+    чем в max_df * len(documents). Словарь отсортирован по алфавиту, id —
+    позиция в этом списке. Слова вне словаря из документов выбрасываются.
+
+    build_corpus(["Cat dog", "cat sky"])
+        ->  (["cat", "dog", "sky"], [[0, 1], [0, 2]])
+    build_corpus(["cat dog", "cat sky"], min_df=2)
+        ->  (["cat"], [[0], [0]])
+    build_corpus(["cat dog", "cat sky"], stopwords=["cat"])
+        ->  (["dog", "sky"], [[0], [1]])
+
+    Это ручной CountVectorizer(stop_words=..., min_df=..., max_df=...) из
+    sklearn: тот же фильтр редких и вездесущих слов. Разница в том, что мы
+    возвращаем не матрицу счётчиков, а последовательность id — сэмплеру
+    Гиббса нужен каждый токен отдельно, а не его частота.
+
+    Ловушка: min_df считает ДОКУМЕНТЫ, а не вхождения. Слово, повторённое
+    десять раз в одном документе, имеет document frequency 1.
+    """
+    stop = set(stopwords)
+    tokenized = [re.findall(r"[a-z]+", doc.lower()) for doc in documents]
+    n_docs = len(tokenized)
+
+    # document frequency: set() на документ, иначе повтор внутри документа
+    # накрутит счётчик и min_df перестанет означать «в скольких документах»
+    df = Counter()
+    for tokens in tokenized:
+        df.update(set(tokens) - stop)
+
+    max_count = max_df * n_docs
+    vocab = sorted(w for w, c in df.items() if min_df <= c <= max_count)
+    index = {w: i for i, w in enumerate(vocab)}
+    doc_ids = [[index[t] for t in tokens if t in index] for tokens in tokenized]
+    return vocab, doc_ids
+
+
+def count_tables(doc_ids, assignments, n_topics, n_words):
+    """Две таблицы счётчиков, на которых стоит весь сэмплер Гиббса.
+
+    assignments[d][i] — номер темы, приписанный i-му токену документа d.
+    Возвращает (doc_topic, topic_word):
+      doc_topic[d][k] — сколько токенов документа d сейчас отданы теме k;
+      topic_word[k][w] — сколько раз слово w сейчас отдано теме k.
+
+    count_tables([[0, 1]], [[0, 0]], 2, 2)  ->  ([[2, 0]], [[1, 1], [0, 0]])
+    count_tables([[0], [0]], [[0], [1]], 2, 1)  ->  ([[1, 0], [0, 1]], [[1], [1]])
+
+    Суммы обеих таблиц равны общему числу токенов корпуса — полезная
+    проверка на месте, если что-то поехало.
+    """
+    doc_topic = [[0] * n_topics for _ in doc_ids]
+    topic_word = [[0] * n_words for _ in range(n_topics)]
+    for d, doc in enumerate(doc_ids):
+        for i, w in enumerate(doc):
+            k = assignments[d][i]
+            doc_topic[d][k] += 1
+            topic_word[k][w] += 1
+    return doc_topic, topic_word
+
+
+def topic_conditional(doc_counts, word_counts, topic_totals, alpha, beta, n_words):
+    """Распределение по темам для одного токена — сердце collapsed Gibbs.
+
+    doc_counts[k]   — токенов темы k в этом документе (без текущего токена);
+    word_counts[k]  — сколько раз это слово отдано теме k (без текущего);
+    topic_totals[k] — всего токенов у темы k (без текущего).
+
+    p(k) пропорционально
+        (doc_counts[k] + alpha) * (word_counts[k] + beta)
+        / (topic_totals[k] + n_words * beta)
+    и результат нормирован: сумма ровно 1.
+
+    topic_conditional([0, 0], [0, 0], [0, 0], 1.0, 1.0, 2)  ->  [0.5, 0.5]
+    topic_conditional([9, 0], [0, 0], [9, 0], 1.0, 1.0, 2)  ->  [~0.645, ~0.355]
+
+    Левый множитель — «эта тема уже популярна в документе», правый — «эта
+    тема уже любит это слово». Их произведение и есть весь LDA: смесь тем в
+    документе и распределение слов в теме тянут токен каждый в свою сторону.
+
+    Ловушка: alpha и beta не косметика. При alpha=0 тема, из которой ушёл
+    последний токен документа, получит вероятность 0 и не вернётся уже
+    никогда — сэмплер схлопнется.
+    """
+    weights = [
+        (d + alpha) * (w + beta) / (t + n_words * beta)
+        for d, w, t in zip(doc_counts, word_counts, topic_totals)
+    ]
+    total = sum(weights)
+    return [w / total for w in weights]
+
+
+def fit_lda(doc_ids, n_topics, n_words, rng, n_iter=100, alpha=0.1, beta=0.01):
+    """LDA методом collapsed Gibbs sampling. Возвращает (doc_topic, topic_word).
+
+    Обе матрицы вероятностные и сглажены теми же alpha и beta:
+      doc_topic[d][k]  — доля темы k в документе d, каждая строка в сумме 1;
+      topic_word[k][w] — вероятность слова w в теме k, строка в сумме 1.
+
+    Схема одного прохода: для каждого токена вынуть его из счётчиков,
+    посчитать topic_conditional, вытянуть новую тему по этому распределению,
+    вернуть счётчики на место.
+
+    rng — экземпляр random.Random. Никакого глобального random: два запуска
+    с одинаковым seed обязаны дать побитово одинаковый ответ.
+
+    fit_lda([[0, 0], [1, 1]], 2, 2, random.Random(0), n_iter=50)
+        ->  темы разъезжаются: одна забирает слово 0, другая слово 1
+
+    Это ручной sklearn.decomposition.LatentDirichletAllocation: doc_topic —
+    то, что возвращает fit_transform, topic_word — нормированный components_.
+    Sklearn считает вариационным Байесом, мы — сэмплированием; ответ тот же
+    с точностью до перестановки номеров тем.
+
+    Ловушка: номера тем ничего не значат. Один seed даст «тема 0 про
+    животных», другой — «тема 1 про животных». Сравнивать модели по номеру
+    темы нельзя, только по её топ-словам.
+    """
+    assignments = [[rng.randrange(n_topics) for _ in doc] for doc in doc_ids]
+    doc_topic, topic_word = count_tables(doc_ids, assignments, n_topics, n_words)
+    topic_totals = [sum(row) for row in topic_word]
+
+    for _ in range(n_iter):
+        for d, doc in enumerate(doc_ids):
+            row = doc_topic[d]
+            for i, w in enumerate(doc):
+                k = assignments[d][i]
+                # вынимаем текущий токен: условное распределение в collapsed
+                # Gibbs берётся при всех ОСТАЛЬНЫХ назначениях
+                row[k] -= 1
+                topic_word[k][w] -= 1
+                topic_totals[k] -= 1
+
+                word_counts = [topic_word[t][w] for t in range(n_topics)]
+                probs = topic_conditional(
+                    row, word_counts, topic_totals, alpha, beta, n_words
+                )
+
+                # обратное преобразование: катим накопленную сумму до u
+                u = rng.random()
+                acc = 0.0
+                k = n_topics - 1
+                for t, p in enumerate(probs):
+                    acc += p
+                    if u < acc:
+                        k = t
+                        break
+
+                assignments[d][i] = k
+                row[k] += 1
+                topic_word[k][w] += 1
+                topic_totals[k] += 1
+
+    doc_topic_p = [
+        [(c + alpha) / (sum(row) + n_topics * alpha) for c in row] for row in doc_topic
+    ]
+    topic_word_p = [
+        [(c + beta) / (tot + n_words * beta) for c in row]
+        for row, tot in zip(topic_word, topic_totals)
+    ]
+    return doc_topic_p, topic_word_p
+
+
+def top_words(topic_word, vocab, n_top=10):
+    """Топ-n слов каждой темы — то, чем тему показывают человеку.
+
+    Слова сортируются по убыванию веса; при равных весах побеждает то, что
+    раньше в vocab (иначе результат зависел бы от порядка перебора).
+
+    top_words([[0.7, 0.2, 0.1]], ["cat", "dog", "sky"], 2)  ->  [["cat", "dog"]]
+    top_words([[0.5, 0.5]], ["cat", "dog"], 1)              ->  [["cat"]]
+
+    Это np.argsort(-topic)[:n_top] из урока, только без numpy. Работает и на
+    матрице c-TF-IDF из BERTopic — там веса не вероятности, но порядок тот же.
+    """
+    result = []
+    for row in topic_word:
+        # ключ (-вес, индекс): второй элемент делает сортировку однозначной
+        order = sorted(range(len(row)), key=lambda i: (-row[i], i))
+        result.append([vocab[i] for i in order[:n_top]])
+    return result
+
+
+def topic_diversity(topics):
+    """Доля уникальных слов среди всех топ-слов всех тем. От 0 до 1.
+
+    topic_diversity([["cat", "dog"], ["stock", "bond"]])  ->  1.0
+    topic_diversity([["cat", "dog"], ["cat", "dog"]])     ->  0.5
+    topic_diversity([["the", "cat"], ["the", "stock"]])   ->  0.75
+
+    Метрика из раздела про оценку: чем ближе к 1, тем меньше темы налезают
+    друг на друга. Низкая diversity — обычно признак того, что стоп-слова не
+    вычищены и все темы возглавляет одно и то же «the, is, of».
+    """
+    flat = [w for topic in topics for w in topic]
+    if not flat:
+        return 0.0
+    return len(set(flat)) / len(flat)
+
+
+def topic_coherence_npmi(topics, doc_tokens):
+    """Когерентность тем через NPMI пар топ-слов. Ядро метрики c_v.
+
+    Для пары слов a, b по документам считаются p(a), p(b), p(a, b) —
+    доля документов, где слово встретилось. Дальше
+        NPMI = log(p(a, b) / (p(a) * p(b))) / (-log p(a, b)).
+    Когерентность темы — среднее по всем парам её слов, ответ — среднее по
+    темам. Диапазон от -1 до 1, больше — лучше.
+
+    Вырожденные случаи заданы по соглашению:
+      слово не встречается ни в одном документе  ->  пара даёт 0.0;
+      слова ни разу не встретились вместе        ->  пара даёт -1.0;
+      пара есть во ВСЕХ документах               ->  пара даёт 1.0.
+
+    docs = [["cat", "dog"], ["cat", "dog"], ["stock"], ["bond"]]
+    topic_coherence_npmi([["cat", "dog"]], docs)    ->  1.0
+    topic_coherence_npmi([["cat", "stock"]], docs)  ->  -1.0
+
+    doc_tokens — список документов, каждый список токенов; повторы внутри
+    документа не важны, NPMI смотрит только на факт присутствия.
+
+    Ловушка: -log p(a, b) обращается в ноль, когда пара покрывает весь
+    корпус. Делить в этот момент нельзя, отсюда и явное соглашение выше.
+    """
+    doc_sets = [set(doc) for doc in doc_tokens]
+    n_docs = len(doc_sets)
+    if n_docs == 0:
+        return 0.0
+
+    scores = []
+    for topic in topics:
+        pairs = []
+        for i in range(len(topic)):
+            for j in range(i + 1, len(topic)):
+                a, b = topic[i], topic[j]
+                p_a = sum(1 for s in doc_sets if a in s) / n_docs
+                p_b = sum(1 for s in doc_sets if b in s) / n_docs
+                p_ab = sum(1 for s in doc_sets if a in s and b in s) / n_docs
+                if p_a == 0.0 or p_b == 0.0:
+                    pairs.append(0.0)
+                elif p_ab == 0.0:
+                    pairs.append(-1.0)
+                elif p_ab == 1.0:
+                    pairs.append(1.0)
+                else:
+                    pairs.append(math.log(p_ab / (p_a * p_b)) / -math.log(p_ab))
+        scores.append(sum(pairs) / len(pairs) if pairs else 0.0)
+    return sum(scores) / len(scores) if scores else 0.0
+
+
+def class_based_tfidf(clusters, n_words):
+    """c-TF-IDF: как BERTopic достаёт слова кластера. Матрица (кластеры, слова).
+
+    Кластер — плоский список id слов всех его документов (склеенных в один
+    «мега-документ», это и есть суть class-based варианта).
+        tf(w, c)  = count(w, c) / всего токенов в c
+        idf(w)    = log(1 + A / f(w)),  A — средний размер кластера,
+                    f(w) — частота слова во всём корпусе
+        score     = tf * idf
+
+    class_based_tfidf([[0, 0, 1], [1, 2, 2]], 3)
+        ->  слово 0 живёт только в кластере 0 и получает там высокий вес,
+            слово 1 есть в обоих и потому придавлено малым idf
+
+    class_based_tfidf([[], [0]], 1)  ->  [[0.0], [...]]  (пустой кластер — нули)
+
+    Обычный TF-IDF отвечает «чем этот документ отличается от других
+    документов», c-TF-IDF — «чем этот кластер отличается от других
+    кластеров». Из-за +1 внутри логарифма веса никогда не отрицательны.
+    """
+    if not clusters:
+        return []
+
+    counts = []
+    freq = [0] * n_words
+    for cluster in clusters:
+        cnt = [0] * n_words
+        for w in cluster:
+            cnt[w] += 1
+            freq[w] += 1
+        counts.append(cnt)
+
+    avg_size = sum(len(c) for c in clusters) / len(clusters)
+    matrix = []
+    for cnt, cluster in zip(counts, clusters):
+        total = len(cluster)
+        row = []
+        for w in range(n_words):
+            # пустой кластер: делить не на что, и слова у него всё равно нет
+            tf = cnt[w] / total if total else 0.0
+            idf = math.log(1 + avg_size / freq[w]) if freq[w] else 0.0
+            row.append(tf * idf)
+        matrix.append(row)
+    return matrix

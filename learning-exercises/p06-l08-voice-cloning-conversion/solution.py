@@ -1,0 +1,234 @@
+"""
+Клонирование и конверсия голоса — эталон.
+
+Открывай ПОСЛЕ своих зелёных тестов.
+"""
+
+import math
+
+
+def speaker_embedding(frames):
+    """Speaker encoder в миниатюре: кадры → один вектор длины 1.
+
+    speaker_embedding([[3.0, 0.0], [3.0, 0.0]])  ->  [1.0, 0.0]
+    speaker_embedding([[1.0, 0.0], [0.0, 1.0]])  ->  [0.7071..., 0.7071...]
+
+    Два шага: усреднить кадры покомпонентно, потом поделить на длину
+    вектора (L2-нормировка). Пустой список кадров — ValueError, нулевой
+    средний вектор нормировать нечем — тоже ValueError.
+
+    Почему усреднение выбрасывает контент: слова меняются от кадра к кадру
+    и в среднем гасят друг друга, а тембр диктора одинаков во всех кадрах и
+    выживает. Из-за этого эмбеддинг не зависит от ПОРЯДКА кадров — то есть
+    от того, что именно человек сказал.
+    """
+    if not frames:
+        raise ValueError("frames must not be empty")
+    dim = len(frames[0])
+    mean = [0.0] * dim
+    for frame in frames:
+        if len(frame) != dim:
+            raise ValueError("all frames must have the same dimension")
+        for i, x in enumerate(frame):
+            mean[i] += x
+    mean = [x / len(frames) for x in mean]
+    norm = math.sqrt(sum(x * x for x in mean))
+    if norm == 0.0:
+        raise ValueError("mean frame is zero, embedding is undefined")
+    return [x / norm for x in mean]
+
+
+def secs(a, b):
+    """SECS: косинус между двумя speaker-эмбеддингами.
+
+    secs([1.0, 0.0], [1.0, 0.0])   ->  1.0
+    secs([1.0, 0.0], [0.0, 1.0])   ->  0.0
+    secs([1.0, 0.0], [-1.0, 0.0])  ->  -1.0
+
+    Косинус = скалярное произведение / (длина a * длина b). Он НЕ зависит
+    от масштаба: secs(a, b) == secs(a, [2*x for x in b]).
+
+    Нулевой вектор — ValueError: угла с ним не существует.
+    Разная размерность — тоже ValueError.
+
+    Порог из урока: SECS > 0.70 — для большинства слушателей клон
+    неотличим от оригинала.
+    """
+    if len(a) != len(b):
+        raise ValueError("vectors must have the same dimension")
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
+    if na == 0.0 or nb == 0.0:
+        raise ValueError("cosine of a zero vector is undefined")
+    return sum(x * y for x, y in zip(a, b)) / (na * nb)
+
+
+def knn_convert(source_frames, target_pool, k=1):
+    """KNN-VC: заменить каждый кадр источника средним k ближайших из пула.
+
+    knn_convert([[0.0]], [[5.0], [0.1]])        ->  [[0.1]]
+    knn_convert([[0.0]], [[1.0], [3.0]], k=2)   ->  [[2.0]]
+
+    Близость — евклидово расстояние. При равных расстояниях берём кадр с
+    меньшим индексом в пуле. Длина результата всегда равна длине
+    source_frames — конверсия голоса не меняет то, ЧТО сказано.
+
+    Пустой пул или k больше размера пула — ValueError.
+
+    Это непараметрический метод: модели нет вообще, есть минута речи
+    целевого диктора. Контент берётся из источника (через выбор соседей),
+    тембр — из пула.
+    """
+    if not target_pool:
+        raise ValueError("target_pool must not be empty")
+    if k < 1 or k > len(target_pool):
+        raise ValueError("k must be between 1 and len(target_pool)")
+    dim = len(target_pool[0])
+    out = []
+    for frame in source_frames:
+        if len(frame) != dim:
+            raise ValueError("source and pool frames must have the same dimension")
+        # квадрат расстояния: корень монотонен, на порядок соседей не влияет,
+        # а sqrt на каждый кадр пула — лишняя работа
+        ranked = sorted(
+            range(len(target_pool)),
+            key=lambda j: (
+                sum((frame[d] - target_pool[j][d]) ** 2 for d in range(dim)),
+                j,  # индекс в ключе — детерминированный разрыв ничьих
+            ),
+        )
+        nearest = [target_pool[j] for j in ranked[:k]]
+        out.append([sum(n[d] for n in nearest) / k for d in range(dim)])
+    return out
+
+
+def swap_speaker(frames, source_emb, target_emb):
+    """Аддитивная факторизация: вычесть диктора-источник, прибавить целевого.
+
+    swap_speaker([[1.0, 0.0]], [1.0, 0.0], [0.0, 1.0])  ->  [[0.0, 1.0]]
+
+    Модель урока: кадр = контент + вектор диктора. Тогда смена диктора —
+    это frame - source_emb + target_emb покомпонентно.
+
+    Ключевое свойство: РАЗНОСТИ между кадрами не меняются. Из каждого кадра
+    вычли и к каждому прибавили одно и то же, значит контент (то, чем кадры
+    отличаются друг от друга) остался нетронутым — поменялся только тембр.
+
+    Размерности не совпали — ValueError.
+    """
+    if len(source_emb) != len(target_emb):
+        raise ValueError("speaker embeddings must have the same dimension")
+    shift = [t - s for s, t in zip(source_emb, target_emb)]
+    out = []
+    for frame in frames:
+        if len(frame) != len(shift):
+            raise ValueError("frame dimension must match embedding dimension")
+        out.append([x + d for x, d in zip(frame, shift)])
+    return out
+
+
+def embed_watermark(samples, bits, delta=0.02):
+    """Водяной знак методом QIM: подвинуть сэмплы на решётку, зависящую от бита.
+
+    detect_watermark(embed_watermark(wav, [1, 0, 1]), 3)  ->  [1, 0, 1]
+
+    Для бита b смещение d = +delta/4 при b == 1 и -delta/4 при b == 0,
+    новый сэмпл = round((x - d) / delta) * delta + d.
+
+    Биты пишутся ЦИКЛИЧЕСКИ: bits[0] в сэмплы 0, len(bits), 2*len(bits)...,
+    bits[1] — в 1, len(bits)+1 и так далее. Повторы и дают устойчивость к
+    перекодированию: детектор решает голосованием.
+
+    Правка каждого сэмпла не больше delta/2 — потому знак и неслышим.
+    Пустой bits или delta <= 0 — ValueError. Бит не 0 и не 1 — ValueError.
+    """
+    if not bits:
+        raise ValueError("bits must not be empty")
+    if delta <= 0:
+        raise ValueError("delta must be positive")
+    if any(b not in (0, 1) for b in bits):
+        raise ValueError("bits must be 0 or 1")
+    out = []
+    for i, x in enumerate(samples):
+        d = delta / 4 if bits[i % len(bits)] == 1 else -delta / 4
+        out.append(round((x - d) / delta) * delta + d)
+    return out
+
+
+def detect_watermark(samples, n_bits, delta=0.02):
+    """Прочитать водяной знак: для каждого сэмпла ближайшая решётка, потом голосование.
+
+    detect_watermark([0.005, -0.005], 2, delta=0.02)  ->  [1, 0]
+
+    Для сэмпла x считаем два кандидата — ближайшую точку решётки бита 0 и
+    ближайшую точку решётки бита 1 — и голосуем за ту, что ближе. Голоса
+    всех повторов одного бита складываются, побеждает большинство. Ничья
+    (поровну голосов) читается как 0.
+
+    Детектор слепой: оригинал ему не нужен, только delta.
+
+    n_bits больше числа сэмплов — ValueError: на какой-то бит не пришлось
+    ни одного носителя, и прочитать его нечем.
+    """
+    if n_bits < 1:
+        raise ValueError("n_bits must be positive")
+    if delta <= 0:
+        raise ValueError("delta must be positive")
+    if n_bits > len(samples):
+        raise ValueError("not enough samples to carry n_bits")
+    votes_one = [0] * n_bits
+    votes_zero = [0] * n_bits
+    for i, x in enumerate(samples):
+        q1 = round((x - delta / 4) / delta) * delta + delta / 4
+        q0 = round((x + delta / 4) / delta) * delta - delta / 4
+        if abs(x - q1) < abs(x - q0):
+            votes_one[i % n_bits] += 1
+        else:
+            votes_zero[i % n_bits] += 1
+    return [1 if votes_one[i] > votes_zero[i] else 0 for i in range(n_bits)]
+
+
+def bit_accuracy(sent, received):
+    """Доля совпавших бит — метрика выживаемости водяного знака.
+
+    bit_accuracy([1, 0, 1], [1, 0, 1])  ->  1.0
+    bit_accuracy([1, 0, 1], [1, 1, 1])  ->  примерно 0.667
+
+    Разная длина — ValueError: сравнивать нечего. Пустые списки — тоже
+    ValueError, делить на ноль нельзя.
+
+    Ориентир: случайное угадывание даёт 0.5. Знак считается прочитанным,
+    если после MP3-перекодирования accuracy держится около 1.0.
+    """
+    if len(sent) != len(received):
+        raise ValueError("bit strings must have the same length")
+    if not sent:
+        raise ValueError("bit strings must not be empty")
+    return sum(1 for a, b in zip(sent, received) if a == b) / len(sent)
+
+
+def consent_gate(record, speaker_id, now_ts, sign):
+    """Согласие на клонирование: проверить подпись, диктора и срок.
+
+    Возвращает True либо бросает ValueError с внятной причиной.
+
+    Порядок проверок фиксирован, и он важен:
+      1. sign(record) != record["signature"]  ->  "invalid signature"
+      2. record["speaker_id"] != speaker_id   ->  "speaker mismatch"
+      3. now_ts > record["expires_ts"]        ->  "consent expired"
+
+    Сначала подпись: у неподписанной записи остальные поля читать бессмысленно,
+    их мог написать кто угодно. Момент ровно в expires_ts ещё действителен.
+    Нет обязательного поля — KeyError, и это правильно: молча пропускать
+    запись без срока действия нельзя.
+
+    sign — заглушка вместо настоящей криптоподписи, её передают параметром.
+    В EU AI Act с августа 2026 такой журнал согласий обязателен.
+    """
+    if sign(record) != record["signature"]:
+        raise ValueError("invalid signature")
+    if record["speaker_id"] != speaker_id:
+        raise ValueError("speaker mismatch")
+    if now_ts > record["expires_ts"]:
+        raise ValueError("consent expired")
+    return True

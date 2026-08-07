@@ -1,0 +1,203 @@
+"""
+Классификация изображений — эталон.
+
+Открывай ПОСЛЕ своих зелёных тестов.
+"""
+
+import math
+
+
+def softmax(logits):
+    """Логиты -> распределение вероятностей. Аналог torch.softmax(z, dim=-1).
+
+    softmax([0.0, 0.0])  ->  [0.5, 0.5]
+    softmax([1.0, 0.0])  ->  примерно [0.731, 0.269]
+
+    Ловушка — переполнение. Наивный exp(z_i) на логитах порядка 1000 даёт
+    OverflowError, хотя ответ прекрасно определён. Лечится вычитанием
+    максимума: exp(z_i - m) / sum_j exp(z_j - m) — то же самое число,
+    потому что общий множитель exp(-m) сокращается.
+    """
+    m = max(logits)
+    # сдвиг на максимум: старший экспонент становится ровно exp(0) = 1,
+    # остальные меньше — переполниться нечему
+    exps = [math.exp(z - m) for z in logits]
+    total = sum(exps)
+    return [e / total for e in exps]
+
+
+def cross_entropy(logits, target):
+    """Кросс-энтропия одного примера: -log(вероятность верного класса).
+
+    cross_entropy([0.0, 0.0, 0.0], 1)  ->  примерно 1.0986  (это log 3)
+    cross_entropy([10.0, 0.0], 0)      ->  примерно 4.54e-05
+
+    target — ИНДЕКС класса, не one-hot вектор.
+
+    Аналог torch.nn.functional.cross_entropy: он принимает сырые логиты и
+    сам делает softmax внутри. Если подать ему уже softmax-нутые числа,
+    получится log(softmax(softmax(z))) — бессмыслица, которая не падает и
+    даже вроде бы учится, просто в разы хуже. Это ошибка номер один в
+    учебных пайплайнах.
+
+    Считай по устойчивой форме CE = -z_y + log(sum_j exp(z_j)), а не через
+    log(softmax(...)): при уверенном предсказании вероятность обнуляется в
+    машинном нуле и log даёт -inf на пустом месте.
+    """
+    m = max(logits)
+    log_sum_exp = m + math.log(sum(math.exp(z - m) for z in logits))
+    return log_sum_exp - logits[target]
+
+
+def one_hot(target, num_classes, smoothing=0.0):
+    """Индекс класса -> целевое распределение, при желании со сглаживанием.
+
+    one_hot(1, 4)                  ->  [0.0, 1.0, 0.0, 0.0]
+    one_hot(1, 4, smoothing=0.2)   ->  [0.05, 0.85, 0.05, 0.05]
+
+    Конвенция та же, что у torch.nn.CrossEntropyLoss(label_smoothing=eps):
+    берём (1 - eps) * one_hot + eps / C равномерного шума. Сумма ровно 1
+    при любом eps — это стоит проверить, потому что распределение, которое
+    не суммируется в единицу, тихо перекашивает loss.
+
+    Зачем: жёсткая единица требует от модели бесконечно большого логита,
+    и сеть учится быть переуверенной. Сглаживание ставит потолок и заодно
+    чинит калибровку почти бесплатно.
+    """
+    base = smoothing / num_classes
+    dist = [base] * num_classes
+    dist[target] += 1.0 - smoothing
+    return dist
+
+
+def soft_cross_entropy(logits, target_dist):
+    """Кросс-энтропия против мягкой цели: -sum_i p_i * log(softmax(z)_i).
+
+    soft_cross_entropy([0.0, 0.0], [0.5, 0.5])  ->  примерно 0.6931  (log 2)
+    soft_cross_entropy([0.0, 0.0], [1.0, 0.0])  ->  примерно 0.6931
+
+    Обобщение cross_entropy: на жёстком one-hot обязано дать ровно её же
+    число. Именно эта функция нужна для mixup и label smoothing, потому что
+    там цель — распределение, а не индекс.
+
+    log_softmax считай как z_i - log(sum_j exp(z_j)), а не как log(softmax).
+    Второе теряет точность на маленьких вероятностях и падает в -inf там,
+    где первое спокойно возвращает -700.
+    """
+    m = max(logits)
+    log_sum_exp = m + math.log(sum(math.exp(z - m) for z in logits))
+    # log_softmax_i = z_i - logsumexp: одно вычитание вместо exp -> log
+    return -sum(p * (z - log_sum_exp) for p, z in zip(target_dist, logits))
+
+
+def mixup_batch(images, labels, num_classes, lam, rng):
+    """Mixup: перемешать батч сам с собой и смешать картинки И метки.
+
+    Возвращает пару (смешанные картинки, смешанные распределения меток).
+    images — список картинок, каждая плоский список чисел.
+    lam — вес первого слагаемого, обычно из Beta(a, a); здесь передаётся явно.
+    rng — источник случайности (random.Random), чтобы прогон повторялся.
+
+    mixup_batch([[0.0], [1.0]], [0, 1], 2, 1.0, rng)
+        ->  картинки не изменились, метки — обычные one-hot
+
+    Аналог связки torch.randperm + линейной комбинации из статьи Zhang 2017.
+
+    Ключевое отличие от прочих аугментаций: остальные меняют пиксели и НЕ
+    трогают метку, а mixup обязан смешать обе стороны одним и тем же lam.
+    Смешать картинки и оставить метку исходной — распространённая ошибка,
+    после которой модель учится на прямо неверной разметке.
+    """
+    n = len(images)
+    idx = list(range(n))
+    rng.shuffle(idx)  # партнёр для каждого элемента батча
+    mixed_x = [
+        [lam * a + (1.0 - lam) * b for a, b in zip(images[i], images[idx[i]])]
+        for i in range(n)
+    ]
+    mixed_y = [
+        [
+            lam * a + (1.0 - lam) * b
+            for a, b in zip(
+                one_hot(labels[i], num_classes), one_hot(labels[idx[i]], num_classes)
+            )
+        ]
+        for i in range(n)
+    ]
+    return mixed_x, mixed_y
+
+
+def confusion_matrix(true_labels, pred_labels, num_classes):
+    """Матрица ошибок: cm[i][j] — сколько объектов класса i названы классом j.
+
+    confusion_matrix([0, 1, 1], [0, 1, 0], 2)  ->  [[1, 0], [1, 1]]
+
+    Строки — истина, столбцы — предсказание. Порядок не декоративный:
+    транспонирование меняет местами precision и recall, и отчёт начинает
+    врать, не выдавая ни одной ошибки.
+
+    Диагональ — верные ответы, всё остальное показывает, какие пары классов
+    модель путает. Одна общая accuracy этого не покажет никогда.
+    """
+    cm = [[0] * num_classes for _ in range(num_classes)]
+    for t, p in zip(true_labels, pred_labels):
+        cm[t][p] += 1
+    return cm
+
+
+def class_report(cm):
+    """По матрице ошибок — precision, recall и f1 для каждого класса.
+
+    Возвращает список словарей вида
+    {"precision": ..., "recall": ..., "f1": ...}, по одному на класс.
+
+    class_report([[1, 0], [1, 1]])[0]
+        ->  {"precision": 0.5, "recall": 1.0, "f1": примерно 0.6667}
+
+    tp = cm[i][i]; fp = сумма СТОЛБЦА i минус tp; fn = сумма СТРОКИ i минус tp.
+    Перепутать строку со столбцом — значит поменять местами precision и
+    recall, и на симметричной матрице это даже не заметно.
+
+    Где знаменатель ноль (класс ни разу не предсказан или отсутствует в
+    выборке), возвращай 0.0, а не деление на ноль.
+    """
+    n = len(cm)
+    report = []
+    for i in range(n):
+        tp = cm[i][i]
+        fp = sum(cm[r][i] for r in range(n)) - tp
+        fn = sum(cm[i]) - tp
+        precision = tp / (tp + fp) if tp + fp else 0.0
+        recall = tp / (tp + fn) if tp + fn else 0.0
+        f1 = (
+            2 * precision * recall / (precision + recall)
+            if precision + recall
+            else 0.0
+        )
+        report.append({"precision": precision, "recall": recall, "f1": f1})
+    return report
+
+
+def top_k_accuracy(batch_logits, targets, k=1):
+    """Доля примеров, где верный класс попал в k самых вероятных.
+
+    top_k_accuracy([[0.1, 0.9], [0.8, 0.2]], [1, 1])         ->  0.5
+    top_k_accuracy([[0.1, 0.9], [0.8, 0.2]], [1, 1], k=2)    ->  1.0
+
+    Аналог torchmetrics.functional.accuracy(..., top_k=k).
+
+    Сортировать можно прямо по логитам: softmax монотонен, порядок он не
+    меняет, и лишний проход не нужен. При k = числу классов ответ всегда 1.0
+    — если получилось иначе, где-то потерян класс.
+
+    Зачем top-5: на ImageNet есть классы, которые не различает и человек
+    ("norwich terrier" против "norfolk terrier"), и top-1 штрафует модель
+    за честную неуверенность.
+    """
+    hits = 0
+    for logits, target in zip(batch_logits, targets):
+        # сортируем индексы по убыванию логита; при равенстве — меньший индекс
+        order = sorted(range(len(logits)), key=lambda i: (-logits[i], i))
+        if target in order[:k]:
+            hits += 1
+    return hits / len(targets)

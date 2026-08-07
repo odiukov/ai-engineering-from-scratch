@@ -1,0 +1,264 @@
+"""
+Subword-токенизация: BPE своими руками — эталон.
+
+Открывай ПОСЛЕ своих зелёных тестов.
+"""
+
+from collections import Counter
+
+
+def pre_tokenize(text):
+    """Разрезать текст на куски «пробелы + слово», пробел остаётся ВНУТРИ куска.
+
+    pre_tokenize("the cat")   ->  ['the', ' cat']
+    pre_tokenize(" hello")    ->  [' hello']
+    pre_tokenize("hello")     ->  ['hello']
+    pre_tokenize("")          ->  []
+
+    Главное свойство: "".join(pre_tokenize(text)) == text, ничего не теряется.
+    Ловушка: соблазн сделать text.split() — он съедает пробелы, и обратной
+    сборки уже не будет; заодно исчезнет разница между "hello" и " hello".
+
+    Зачем это в AI: ровно так работает GPT-2/GPT-4 — пробел приклеен к
+    следующему слову, поэтому "hello" и " hello" получают РАЗНЫЕ токены.
+    SentencePiece делает то же самое, только рисует пробел символом "▁".
+    """
+    chunks = []
+    i = 0
+    n = len(text)
+    while i < n:
+        start = i
+        # сначала съедаем весь пробельный префикс...
+        while i < n and text[i].isspace():
+            i += 1
+        # ...потом весь непробельный хвост. Хвост может быть пустым — это
+        # случай пробелов в самом конце текста, их тоже нельзя терять.
+        while i < n and not text[i].isspace():
+            i += 1
+        chunks.append(text[start:i])
+    return chunks
+
+
+def word_to_symbols(word):
+    """Разложить кусок текста на стартовые символы BPE: байты + маркер '</w>'.
+
+    word_to_symbols("hi")    ->  ['h', 'i', '</w>']
+    word_to_symbols(" low")  ->  [' ', 'l', 'o', 'w', '</w>']
+    word_to_symbols("é")     ->  ['Ã', '©', '</w>']   (один символ = два байта)
+
+    Разбираем слово именно на БАЙТЫ (word.encode("utf-8")), а каждый байт
+    показываем как chr(байт). Байтов всего 256, поэтому базовый алфавит
+    конечен и закрыт: любая строка мира раскладывается, [UNK] не бывает
+    в принципе. Это и есть byte-level BPE из GPT-2 и Llama.
+
+    Ловушка: list(word) даёт СИМВОЛЫ Unicode, а их больше миллиона — такой
+    алфавит в словарь не влезет, и редкий иероглиф придётся выкидывать в [UNK].
+
+    '</w>' в конце помечает конец слова, чтобы "low" как отдельное слово и
+    "low" как начало "lower" не склеились в один и тот же токен.
+    """
+    # chr(b) для b < 256 всегда даёт ровно один символ, так что длина списка
+    # равна числу байтов — считать токены потом можно просто len()
+    return [chr(b) for b in word.encode("utf-8")] + ["</w>"]
+
+
+def pair_counts(vocab):
+    """Сосчитать все соседние пары символов, взвесив их частотой слова.
+
+    vocab — словарь {кортеж символов: сколько раз слово встретилось}.
+    Вернуть Counter {(a, b): суммарная частота}.
+
+    pair_counts({('l', 'o', 'w', '</w>'): 5})
+        ->  {('l','o'): 5, ('o','w'): 5, ('w','</w>'): 5}
+    pair_counts({('a', 'b'): 1, ('c', 'b'): 4})
+        ->  {('a','b'): 1, ('c','b'): 4}
+    pair_counts({('x',): 9})
+        ->  {}                      (в слове из одного символа пар нет)
+
+    Ловушка: считать пары «по одной за слово». Слово, встретившееся 5 раз,
+    даёт каждой своей паре +5, а не +1 — иначе редкое длинное слово перевесит
+    частое короткое, и BPE выучит мусор.
+
+    Зачем это в AI: это единственное место, где BPE вообще смотрит на данные.
+    Вся «обученность» токенизатора — из этих частот.
+    """
+    pairs = Counter()
+    for symbols, freq in vocab.items():
+        # zip(symbols, symbols[1:]) — окно шириной 2 без ручного индекса
+        for a, b in zip(symbols, symbols[1:]):
+            pairs[(a, b)] += freq
+    return pairs
+
+
+def merge_vocab(vocab, pair):
+    """Склеить пару (a, b) в один символ a+b во всех словах словаря.
+
+    merge_vocab({('l','o','w','</w>'): 5}, ('l','o'))
+        ->  {('lo','w','</w>'): 5}
+    merge_vocab({('a','a','a'): 1}, ('a','a'))
+        ->  {('aa','a'): 1}          (слева направо, без нахлёста)
+
+    Две ловушки.
+    1) Перекрытия: в ('a','a','a') пара ('a','a') встречается дважды, но
+       склеить можно только один раз — после склейки надо шагать на 2, а не на 1.
+    2) Столкновение ключей: разные слова после склейки могут стать ОДНИМ
+       кортежем, например {('a','b','</w>'): 1, ('ab','</w>'): 2}. Частоты
+       обязаны СЛОЖИТЬСЯ (получится 3), а не затереть друг друга.
+
+    Исходный vocab менять нельзя — верни новый словарь.
+    """
+    a, b = pair
+    merged_symbol = a + b
+    new_vocab = Counter()
+    for symbols, freq in vocab.items():
+        new_symbols = []
+        i = 0
+        while i < len(symbols):
+            if i < len(symbols) - 1 and symbols[i] == a and symbols[i + 1] == b:
+                new_symbols.append(merged_symbol)
+                i += 2  # шаг через оба символа — иначе склеим внахлёст
+            else:
+                new_symbols.append(symbols[i])
+                i += 1
+        # Counter, а не dict: += сам складывает частоты столкнувшихся ключей
+        new_vocab[tuple(new_symbols)] += freq
+    return dict(new_vocab)
+
+
+def train_bpe(text, num_merges):
+    """Обучить BPE на тексте: вернуть УПОРЯДОЧЕННЫЙ список merge-ов.
+
+    train_bpe("low low low", 10)
+        ->  [('l','o'), ('lo','w'), ('low','</w>'), (' ','low</w>')]
+    train_bpe("low low low", 1)
+        ->  [('l','o')]
+
+    Цикл: посчитать пары -> взять самую частую -> записать её в список ->
+    склеить её в словаре -> повторить num_merges раз.
+
+    При РАВНЫХ частотах берём лексикографически наименьшую пару. Правило
+    искусственное, зато результат воспроизводим: без него ответ зависел бы
+    от порядка ключей в словаре.
+
+    Останавливаемся досрочно, если пар не осталось (все слова схлопнулись в
+    один символ). Пустой корпус — ValueError.
+
+    Ловушка: порядок в списке — это не украшение. Encode обязан применять
+    merge-и ровно в этом порядке, иначе ('lo','w') просто не найдёт 'lo'.
+
+    Зачем это в AI: то же самое делают tokenizers.trainers.BpeTrainer и
+    spm.SentencePieceTrainer.train(model_type="bpe"), только на миллиардах
+    слов и с приоритетной очередью вместо честного пересчёта.
+    """
+    words = pre_tokenize(text)
+    if not words:
+        raise ValueError("train_bpe: corpus produced no words")
+
+    # словарь строится ОДИН раз: дальше мы правим символы, а частоты слов
+    # уже не меняются
+    vocab = {}
+    for word, freq in Counter(words).items():
+        vocab[tuple(word_to_symbols(word))] = freq
+
+    merges = []
+    for _ in range(num_merges):
+        pairs = pair_counts(vocab)
+        if not pairs:
+            break
+        # -pairs[p] сортирует по убыванию частоты, сам p разруливает ничью
+        best = min(pairs, key=lambda p: (-pairs[p], p))
+        merges.append(best)
+        vocab = merge_vocab(vocab, best)
+    return merges
+
+
+def encode(text, merges):
+    """Закодировать текст в список токенов, применяя merge-и в порядке обучения.
+
+    m = train_bpe("x low low low low", 100)
+    encode(" low", m)   ->  [' low</w>']         (одно частое слово = 1 токен)
+    encode("low", m)    ->  ['l', 'o', 'w', '</w>']   (без пробела — 4 токена!)
+    encode("hi", [])    ->  ['h', 'i', '</w>']
+
+    Порядок обязателен: merge-и применяются подряд, каждый — ко всему слову
+    целиком. Перепутаешь порядок — поздние пары не найдут своих символов и
+    молча ничего не склеят.
+
+    Ловушка: не пиши второй цикл склейки — merge_vocab уже умеет склеивать
+    пару в кортеже символов, слово это словарь из одной записи.
+
+    Зачем это в AI: это ровно tiktoken.Encoding.encode / sp.encode, только
+    там вместо цикла по merge-ам стоит поиск по рангам, и это близко к
+    линейному времени вместо нашего O(длина слова * число merge-ов).
+    """
+    tokens = []
+    for chunk in pre_tokenize(text):
+        symbols = word_to_symbols(chunk)
+        for pair in merges:
+            # дешёвая проверка перед дорогой склейкой: если первого символа
+            # пары в слове нет, склеивать нечего
+            if pair[0] not in symbols:
+                continue
+            merged = merge_vocab({tuple(symbols): 1}, pair)
+            symbols = list(next(iter(merged)))
+        tokens.extend(symbols)
+    return tokens
+
+
+def decode(tokens):
+    """Собрать токены обратно в исходную строку.
+
+    decode(['h', 'i', '</w>'])          ->  'hi'
+    decode(['low</w>', ' low</w>'])     ->  'low low'
+    decode([])                          ->  ''
+
+    Два шага: склеить всё в одну строку и убрать маркеры '</w>', потом
+    вернуть байты обратно (каждый символ -> ord -> байт -> decode utf-8).
+
+    Ловушка: не пытайся резать по символам Unicode — 'Ã©' это ДВА байта
+    одной буквы 'é', и по отдельности они не декодируются.
+
+    Честная оговорка про '</w>': текст, где буквально написано "</w>",
+    round-trip не переживёт. Настоящие токенизаторы поэтому и не используют
+    строковый маркер — SentencePiece берёт "▁", byte-level BPE не берёт ничего.
+
+    Зачем это в AI: это tiktoken.Encoding.decode. Round-trip
+    decode(encode(t)) == t — первый тест, который пишут для токенизатора.
+    """
+    raw = "".join(tokens).replace("</w>", "")
+    # ord(c) здесь всегда < 256: символы пришли из chr(байт) в word_to_symbols
+    return bytes(ord(c) for c in raw).decode("utf-8")
+
+
+def tokenizer_stats(text, merges):
+    """Померить токенизатор на тексте: словарь с метриками сжатия.
+
+    Вернуть {"chars", "words", "tokens", "tokens_per_word", "compression_ratio"},
+    где tokens_per_word = tokens / words, compression_ratio = chars / tokens.
+
+    tokenizer_stats("hi", [])
+        ->  {'chars': 2, 'words': 1, 'tokens': 3,
+             'tokens_per_word': 3.0, 'compression_ratio': 0.666...}
+
+    Без единого merge-а токенов ровно «байты + по одному '</w>' на слово» —
+    от этого числа и считается выигрыш обучения.
+
+    Ловушка: пустой текст даёт ноль токенов и ZeroDivisionError. Проверь на
+    входе и брось ValueError.
+
+    Зачем это в AI: compression_ratio (символов на токен) — это деньги.
+    У GPT-4 на английском ~4, на японском было ~1, отсюда и разница в счёте
+    за один и тот же промпт. tokens_per_word показывает то же самое с другой
+    стороны: 1.0 значит «слово = токен», 4.0 значит «словарь этот язык не знает».
+    """
+    words = pre_tokenize(text)
+    tokens = encode(text, merges)
+    if not tokens or not words:
+        raise ValueError("tokenizer_stats: empty text")
+    return {
+        "chars": len(text),
+        "words": len(words),
+        "tokens": len(tokens),
+        "tokens_per_word": len(tokens) / len(words),
+        "compression_ratio": len(text) / len(tokens),
+    }
