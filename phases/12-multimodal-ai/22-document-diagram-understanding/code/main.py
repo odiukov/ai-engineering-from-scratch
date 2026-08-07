@@ -8,6 +8,7 @@ counts across (OCR-pipeline, Donut, Nougat, VLM-native).
 from __future__ import annotations
 
 import json
+import zlib
 from dataclasses import dataclass
 
 
@@ -31,10 +32,24 @@ def mock_page() -> list[Token]:
     ]
 
 
-def layoutlm_input(tokens: list[Token], patch_grid: tuple[int, int] = (16, 16)) -> dict:
-    """Produce the three-stream input: text, bbox, patch-ids."""
-    text_ids = [hash(t.text) % 10000 for t in tokens]
-    bbox_stream = [t.bbox for t in tokens]
+def layoutlm_input(tokens: list[Token], patch_grid: tuple[int, int] = (16, 16),
+                   page_size: tuple[int, int] = (612, 792)) -> dict:
+    """Produce the three-stream input: text, bbox, patch-ids.
+
+    Boxes are normalized to integers in 0..1000, which is what LayoutLM's 2D
+    position embedding table is sized for — feeding raw pixels would index a
+    table that only has 1001 rows, and would make the input DPI-dependent.
+
+    zlib.crc32, not hash(): str hashing is randomized per process unless
+    PYTHONHASHSEED is pinned, so hash() would print different ids every run.
+    """
+    width, height = page_size
+    text_ids = [zlib.crc32(t.text.encode()) % 10000 for t in tokens]
+    bbox_stream = [
+        (round(x0 * 1000 / width), round(y0 * 1000 / height),
+         round(x1 * 1000 / width), round(y1 * 1000 / height))
+        for x0, y0, x1, y1 in (t.bbox for t in tokens)
+    ]
     n_patches = patch_grid[0] * patch_grid[1]
     patch_ids = list(range(n_patches))
     return {"text_ids": text_ids, "bbox_stream": bbox_stream,

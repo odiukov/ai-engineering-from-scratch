@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-SKILL_ROOT = Path("/tmp/lesson-21-skills")
+SKILL_ROOT = Path("/tmp/lesson-22-skills")
 
 
 # ------------------------------------------------------------------
@@ -163,7 +163,7 @@ User task: {user_task}
 
 def demo() -> None:
     print("=" * 72)
-    print("PHASE 13 LESSON 21 - SKILLS AND AGENT SDK LOADER")
+    print("PHASE 13 LESSON 22 - SKILLS AND AGENT SDK LOADER")
     print("=" * 72)
 
     setup_fixtures()

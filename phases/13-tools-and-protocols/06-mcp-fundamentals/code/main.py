@@ -143,7 +143,9 @@ def run_sequence() -> None:
         "name": "notes_delete",
         "arguments": {"id": "unknown"},
     }))
-    pretty("server", error(4, -32601, "Method not found",
+    # -32601 would be wrong here: the METHOD tools/call exists, it is the tool
+    # name inside params that does not. Unknown tool is a params problem.
+    pretty("server", error(4, -32602, "Unknown tool: notes_delete",
                            data={"tool": "notes_delete"}))
 
     print("--- PHASE 3: shutdown (transport-level, no JSON-RPC method) ---")

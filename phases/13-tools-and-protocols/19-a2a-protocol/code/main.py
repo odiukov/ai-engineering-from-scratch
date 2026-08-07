@@ -114,7 +114,7 @@ def finish(task: Task, length: str) -> None:
 
 def research_agent_flow() -> None:
     print("=" * 72)
-    print("PHASE 13 LESSON 18 - A2A CALL FROM RESEARCH TO WRITER")
+    print("PHASE 13 LESSON 19 - A2A CALL FROM RESEARCH TO WRITER")
     print("=" * 72)
 
     print("\n--- research agent fetches writer Agent Card ---")

@@ -73,7 +73,7 @@ Not every client supports prompts yet — check capability negotiation. A server
 
 ### The "list changed" notification
 
-Both resources and prompts emit `notifications/list_changed` when the set mutates. A notes server that just imported 20 new notes emits `notifications/resources/list_changed`; the client re-calls `resources/list` to pick up the additions.
+Both resources and prompts emit a list-changed notification when the set mutates — there is no bare `notifications/list_changed`; the methods are `notifications/resources/list_changed` and `notifications/prompts/list_changed`. A notes server that just imported 20 new notes emits `notifications/resources/list_changed`; the client re-calls `resources/list` to pick up the additions.
 
 ### Content type conventions
 
@@ -120,7 +120,7 @@ This lesson produces `outputs/skill-primitive-splitter.md`. Given a proposed MCP
 
 1. Run `code/main.py`. Observe the initial resource list, then trigger a note edit and verify the `notifications/resources/updated` event fires.
 
-2. Add a `resources/list_changed` emitter: when a new note is created, send the notification so clients re-discover.
+2. Add a `notifications/resources/list_changed` emitter: when a new note is created, send the notification so clients re-discover.
 
 3. Design three prompts for a GitHub MCP server: `summarize_pr`, `triage_issue`, `release_notes`. Each with argument schemas. The prompt body should be runnable without further edits.
 

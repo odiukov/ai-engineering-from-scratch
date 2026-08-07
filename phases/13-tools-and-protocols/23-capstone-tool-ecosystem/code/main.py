@@ -212,8 +212,9 @@ def demo() -> None:
         "async tasks (L13)", "ui:// apps (L14)",
         "security poisoning (L15 via pinned hashes)",
         "OAuth 2.1 (L16 via gateway scopes)", "gateway (L17)",
-        "A2A (L18)", "OTel GenAI (L19)", "routing (L20 pattern)",
-        "AGENTS.md + SKILL.md (L21 packaging)",
+        "production auth (L18 via gateway scopes)",
+        "A2A (L19)", "OTel GenAI (L20)", "routing (L21 pattern)",
+        "AGENTS.md + SKILL.md (L22 packaging)",
     ]
     for c in covered:
         print(f"  + {c}")

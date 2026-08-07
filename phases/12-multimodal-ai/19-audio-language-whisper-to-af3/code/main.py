@@ -75,7 +75,7 @@ def demo_melspec() -> None:
     print("-" * 60)
     wave = synth_waveform(1.0, 16000)
     frames = window_frames(wave, 16000, 25, 10)
-    print(f"  frames : {len(frames)} (should be ~99 at 1s)")
+    print(f"  frames : {len(frames)} (98 at 1s: 1 + (16000-400)//160)")
 
     spec = naive_dft_mag(frames[0], n_bins=64)
     fbank = mel_filterbank(n_bins=64, n_mels=20)

@@ -67,7 +67,7 @@ No task-specific heads. Just different prompt templates. Same checkpoint.
 
 From Emu3 paper (September 2024):
 
-- Image generation: beats SDXL on MJHQ-30K FID (5.4 vs 5.6), GenEval overall (0.54 vs 0.55 — statistical tie), and Deep-Eval's composite on-par.
+- Image generation: beats SDXL on MJHQ-30K FID (5.4 vs 5.6), ties it on GenEval overall (0.54 vs 0.55 — higher is better there, so this is a wash not a win), and matches it on Deep-Eval's composite.
 - Image perception: beats LLaVA-1.6 on VQAv2 (75.1 vs 72.4) and roughly matches on MMMU.
 - Video generation: 4-second-clip quality at competitive FVD with Sora-era publicly benchmarked models.
 
@@ -75,7 +75,7 @@ The numbers are not always winning — Emu3 trades a point here for a point ther
 
 ### Compute cost
 
-Emu3 was trained on ~300 billion multimodal tokens with a 7B-parameter model. GPU-hours roughly comparable to Llama-2-7B pretraining (2k-4k GPU-years on A100-class silicon). Diffusion models like Stable Diffusion 3 train in similar budgets but need separate text encoders and more complex pipelines.
+Emu3 was trained on ~300 billion multimodal tokens with a 7B-parameter model. GPU-hours roughly comparable to Llama-2-7B pretraining (~184k A100-hours, about 21 GPU-years). Diffusion models like Stable Diffusion 3 train in similar budgets but need separate text encoders and more complex pipelines.
 
 At inference, Emu3 is slower than SDXL per image: 4096 image tokens at 30 tok/s is ~2 minutes per 512x512 image, vs 2-5 seconds for SDXL. Speculative decoding and KV-cache optimization narrow the gap but do not close it. Autoregressive image gen is compute-heavy; this is the standing trade-off.
 

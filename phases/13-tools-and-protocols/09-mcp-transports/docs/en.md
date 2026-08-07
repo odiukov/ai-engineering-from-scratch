@@ -18,7 +18,7 @@
 
 The first MCP remote transport (2024-11) was HTTP+SSE: two endpoints, one for the client's POSTs and one Server-Sent-Events channel for the server-to-client stream. It worked. It was also clumsy: two endpoints per session, broken caches in front of some CDNs, and a hard dependency on long-lived SSE connections that some WAFs terminate aggressively.
 
-The 2025-03-26 spec replaced it with Streamable HTTP: one endpoint, POST for client requests, GET for establishing a session stream, both sharing a `Mcp-Session-Id` header. Every server built or migrated since then uses Streamable HTTP. The old SSE mode is being deprecated — Atlassian Rovo removed it June 30, 2026; Keboola April 1, 2026; most remaining enterprise servers by end of 2026.
+The 2025-03-26 spec replaced it with Streamable HTTP: one endpoint, POST for client requests, GET for establishing a session stream, both sharing a `Mcp-Session-Id` header. Every server built or migrated since then uses Streamable HTTP. The old SSE mode has been retired across the major hosts — Keboola dropped it April 1, 2026; Atlassian Rovo June 30, 2026; the remaining enterprise stragglers are expected to follow by the end of 2026.
 
 And stdio still matters for local servers. Claude Desktop, VS Code, and every IDE-shaped client spawn servers via stdio. The right mental model: stdio for "this machine", Streamable HTTP for "over the network". No cross-over.
 
@@ -72,7 +72,7 @@ A client that wants to support both old and new servers:
 
 1. POST to `/mcp`.
 2. If response is `200 OK` with JSON or SSE, this is Streamable HTTP.
-3. If response is `200 OK` with `Content-Type: text/event-stream` AND a `Location` header pointing to a secondary endpoint, this is legacy HTTP+SSE; follow the `Location`.
+3. If response is `200 OK` with `Content-Type: text/event-stream` and the stream opens with an `endpoint` event naming a secondary URL, this is legacy HTTP+SSE; POST to the URL that event carries. (The address arrives as an SSE event, not as an HTTP `Location` header.)
 
 ### Cloudflare, ngrok, and hosting
 

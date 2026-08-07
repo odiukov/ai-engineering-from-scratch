@@ -34,11 +34,15 @@ Pre-OneVision, the default answer was "train one scenario, ignore the others." V
 
 LLaVA-OneVision picks a unified visual-token budget of approximately 3000-4000 tokens per sample, allocated differently per scenario:
 
-- Single image: AnyRes-9 (3x3 tiles + thumbnail), each tile at 384 with 729 patches, aggressive bilinear pooling 2x2 → 182 per tile. Total: 9 * 182 + 182 = 1820 tokens. Or AnyRes-4 at 729-per-tile = 2916 + 729.
+- Single image: AnyRes-9 (3x3 tiles + thumbnail), each tile at 384 with a 27x27 = 729 patch grid, bilinear pooling by 2 → a 14x14 grid = 196 per tile. Total: 9 * 196 + 196 = 1960 tokens. Or AnyRes-4 at 729-per-tile = 2916 + 729.
 - Multi-image: each image at moderate resolution (384, no tiling), 729 tokens with no pooling. Budget 6 images → 4374 tokens.
-- Video: 32 frames at 384 resolution with aggressive 3x3 bilinear pool → 81 tokens per frame. Total: 32 * 81 = 2592 tokens.
+- Video: 32 frames at 384 resolution with bilinear pooling by 3 → a 9x9 grid = 81 tokens per frame. Total: 32 * 81 = 2592 tokens.
 
-The allocation maintains roughly constant total tokens. The LLM never sees a batch that blows its context. The encoder produces different geometry per scenario, but the LLM consumes the same budget.
+Every count above pools the same 27x27 grid by a different factor — that is what
+makes the three scenarios comparable. The totals are not identical (1960 / 4374 /
+2592), but they all land in the same few-thousand-token band, so the LLM never
+sees a batch that blows its context. The encoder produces different geometry per
+scenario; the budget stays in one order of magnitude.
 
 ### The three-stage curriculum
 
@@ -70,7 +74,7 @@ These are not trained tasks; they emerge from the curriculum's compositional str
 
 ### Visual-token pooling
 
-The token budget requires pooling. OneVision uses bilinear interpolation on the 2D patch grid: 24x24 = 576 patches becomes 12x12 = 144 (2x factor) or 8x8 = 64 (3x factor). Pooling is done in patch-grid space, not token space, to preserve locality.
+The token budget requires pooling. OneVision uses bilinear interpolation on the 2D patch grid: the 27x27 = 729 patches from SigLIP at 384 become 14x14 = 196 (2x factor) or 9x9 = 81 (3x factor). Pooling is done in patch-grid space, not token space, to preserve locality — which is why the counts come from the side length, never from dividing the token count.
 
 The choice of pooling factor per scenario is itself a hyperparameter. Less pooling = more tokens = richer representation. More pooling = fewer tokens = more frames / images fit.
 

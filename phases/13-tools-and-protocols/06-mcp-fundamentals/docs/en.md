@@ -101,7 +101,7 @@ This is what prevents ecosystem drift. A client that does not support sampling i
 
 `tools/call` returns a `content` array of typed blocks: `text`, `image`, `resource`. Phase 13 · 14 adds MCP Apps (`ui://` interactive UI) to that list.
 
-Errors use JSON-RPC error codes. The spec-defined additions: `-32002` "Resource not found", `-32603` "Internal error", plus MCP-specific error data as `error.data`.
+Errors use JSON-RPC error codes. `-32700`/`-32600`/`-32601`/`-32602`/`-32603` are standard JSON-RPC 2.0; the MCP-specific addition is `-32002` "Resource not found", plus MCP-specific error data as `error.data`.
 
 ### Client capabilities vs tool call details
 

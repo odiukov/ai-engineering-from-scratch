@@ -46,9 +46,9 @@ VideoChat kept the Video-LLaMA idea but dropped audio and simplified. Video-LLaV
 
 Neither handles long video. Both are 8-16 frame systems.
 
-### Qwen2.5-VL and TMRoPE
+### Qwen2.5-VL's M-RoPE and Qwen2.5-Omni's TMRoPE
 
-Qwen2.5-VL introduced TMRoPE — Temporal-Modality Rotary Position Embedding. Each patch token carries an (t, h, w) position where t is the actual timestamp (not frame index).
+Qwen2.5-VL introduced M-RoPE, a multimodal rotary position embedding whose temporal axis is aligned to absolute time; Qwen2.5-Omni extended it to TMRoPE (Time-aligned Multimodal RoPE) to interleave audio and video. Each patch token carries an (t, h, w) position where t is the actual timestamp (not frame index).
 
 Key differences from simple temporal embedding:
 
@@ -56,7 +56,7 @@ Key differences from simple temporal embedding:
 - Per-token rotation, not per-clip. Each visual token rotates independently by its timestamp.
 - Compatible with dynamic FPS. If you sample at 2 FPS here and 4 FPS there, TMRoPE handles the uneven spacing natively.
 
-TMRoPE enables "at what second does the cat jump?" queries. The model can output "at 4.2 seconds." Video-LLaMA could only say "early in the clip."
+Absolute-time position encoding enables "at what second does the cat jump?" queries. The model can output "at 4.2 seconds." Video-LLaMA could only say "early in the clip."
 
 ### Frame sampling strategies
 
@@ -99,7 +99,7 @@ Token-based is most accurate for downstream use. Qwen2.5-VL's JSON output format
 
 For video VLMs in 2026:
 
-- Encoder: SigLIP 2 with M-RoPE or TMRoPE (Qwen2.5-VL).
+- Encoder: SigLIP 2 with M-RoPE (Qwen2.5-VL) or TMRoPE (Qwen2.5-Omni).
 - Frame sampling: dynamic FPS (1-4 depending on motion) with max-frame cap.
 - Per-frame pooling: 3x3 bilinear.
 - Output: structured JSON with time + event fields.
@@ -138,7 +138,7 @@ This lesson produces `outputs/skill-video-vlm-frame-planner.md`. Given a video t
 | Term | What people say | What it actually means |
 |------|-----------------|------------------------|
 | Temporal grounding | "Time-localized answers" | VLM outputs a specific timestamp range for when an event happens |
-| TMRoPE | "Time-Multimodal RoPE" | 3D rotary position with absolute timestamps, used by Qwen2.5-VL |
+| TMRoPE | "Time-aligned Multimodal RoPE" (Qwen2.5-Omni; Qwen2.5-VL uses M-RoPE) | 3D rotary position with absolute timestamps, used by Qwen2.5-VL |
 | Dynamic FPS | "Motion-aware sampling" | Sample more frames in high-motion segments, fewer in static ones |
 | Frame pooling | "Spatial compress per frame" | Reduce patches per frame with bilinear interpolation before the LLM |
 | Video Q-former | "Clip compressor" | Cross-attention bottleneck mapping N frames to K learned queries |

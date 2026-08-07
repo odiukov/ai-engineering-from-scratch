@@ -1,6 +1,6 @@
 # Janus-Pro: Decoupled Encoders for Unified Multimodal Models
 
-> Unified multimodal models have an unavoidable tension. Understanding wants semantic features — SigLIP or DINOv2 output vectors rich with concept-level information. Generation wants reconstruction-friendly codes — VQ tokens that compose back into crisp pixels. The two goals are not compatible in a single encoder. Janus (DeepSeek, October 2024) and Janus-Pro (DeepSeek, January 2025) argue the fix is to stop trying: decouple the two encoders. Share the transformer body between tasks, but route understanding through SigLIP and generation through a VQ tokenizer. At 7B, Janus-Pro beats DALL-E 3 on GenEval while matching LLaVA on MMMU. This lesson reads why two encoders work where one fails.
+> Unified multimodal models have an unavoidable tension. Understanding wants semantic features — SigLIP or DINOv2 output vectors rich with concept-level information. Generation wants reconstruction-friendly codes — VQ tokens that compose back into crisp pixels. The two goals are not compatible in a single encoder. Janus (DeepSeek, October 2024) and Janus-Pro (DeepSeek, January 2025) argue the fix is to stop trying: decouple the two encoders. Share the transformer body between tasks, but route understanding through SigLIP and generation through a VQ tokenizer. At 7B, Janus-Pro beats DALL-E 3 on GenEval while holding its own against LLaVA on MMMU. This lesson reads why two encoders work where one fails.
 
 **Type:** Build
 **Languages:** Python (stdlib, dual-encoder routing + shared-body signal)
@@ -54,7 +54,7 @@ Janus (original, arXiv 2410.13848) introduced the decoupling but at small scale 
 - 72M for stage 2 (unified) up from 26M.
 - Added 200k image-gen instruction samples for stage 3.
 
-The upshot: Janus-Pro-7B matches LLaVA on MMMU (60.3 vs ~58) and beats DALL-E 3 on GenEval (0.80 vs 0.67). One open model, competitive on both sides of the unified spectrum.
+The upshot: Janus-Pro-7B edges out LLaVA-1.5-7B on MMMU (41.0 vs ~36) and beats DALL-E 3 on GenEval (0.80 vs 0.67). One open model, competitive on both sides of the unified spectrum.
 
 ### JanusFlow — the rectified flow variant
 

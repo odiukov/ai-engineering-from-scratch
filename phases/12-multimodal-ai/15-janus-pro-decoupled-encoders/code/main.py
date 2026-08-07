@@ -115,7 +115,7 @@ def data_scale_table() -> None:
         ("stage 2 (unified)",     "26M pairs",  "72M pairs",  "+176%"),
         ("stage 3 (instruction)", "1.2M inst",  "1.4M inst",  "+17%"),
         ("model params",          "1.3B",       "7B",         "5.4x"),
-        ("MMMU",                  "30.5",       "60.3",       "+29.8"),
+        ("MMMU",                  "30.5",       "41.0",       "+10.5"),
         ("GenEval",               "0.61",       "0.80",       "+0.19"),
     ]
     print(f"  {'axis':<20}{'Janus':<14}{'Janus-Pro':<14}{'delta'}")

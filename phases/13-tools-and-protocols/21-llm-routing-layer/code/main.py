@@ -10,11 +10,9 @@ Run: python code/main.py
 
 from __future__ import annotations
 
-import json
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Callable
 
 
 # cost per 1M tokens (input, output); fake rates for demo
@@ -102,7 +100,7 @@ def route(alias: str, messages: list[dict]) -> Invocation:
             inv.cost_usd = (u["prompt_tokens"] * in_rate +
                             u["completion_tokens"] * out_rate) / 1_000_000
             return inv
-        except RuntimeError as e:
+        except RuntimeError:
             continue
     inv.error = "all providers failed"
     return inv
@@ -110,7 +108,7 @@ def route(alias: str, messages: list[dict]) -> Invocation:
 
 def demo() -> None:
     print("=" * 72)
-    print("PHASE 13 LESSON 20 - LLM ROUTING GATEWAY")
+    print("PHASE 13 LESSON 21 - LLM ROUTING GATEWAY")
     print("=" * 72)
 
     print("\n--- scenario 1: smart route, primary available ---")

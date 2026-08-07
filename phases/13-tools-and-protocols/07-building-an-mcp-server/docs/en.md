@@ -18,7 +18,7 @@
 
 Before you can use a remote transport (Phase 13 · 09) or an auth layer (Phase 13 · 16), you need a clean local server. Local means stdio: the server is spawned by the client as a child process, messages flow over stdin/stdout newline-delimited.
 
-The 2025-11-25 spec prescribes that stdio messages are encoded as JSON objects with an explicit `\n` separator. No SSE here; SSE was the old remote mode and is being removed in mid-2026 (Atlassian's Rovo MCP server deprecated it on June 30, 2026; Keboola on April 1, 2026). For stdio, one JSON object per line is the whole wire format.
+The 2025-11-25 spec prescribes that stdio messages are encoded as JSON objects with an explicit `\n` separator. No SSE here; SSE was the old remote mode and was removed through the first half of 2026 (Keboola dropped it on April 1, 2026; Atlassian's Rovo MCP server on June 30, 2026). For stdio, one JSON object per line is the whole wire format.
 
 A notes server is a good shape because it exercises all three server primitives. Tools do mutations (`notes_create`). Resources expose data (`notes://{id}`). Prompts ship templates (`review_note`). The shape of this lesson generalizes to any domain.
 
@@ -107,7 +107,7 @@ The client uses these to decide UX (confirmation dialogs, status indicators) and
 
 ### Graduation path
 
-The stdlib server in `code/main.py` is about 180 lines. FastMCP (Python) collapses the same logic to decorator-style:
+The stdlib server in `code/main.py` is about 280 lines. FastMCP (Python) collapses the same logic to decorator-style:
 
 ```python
 from fastmcp import FastMCP

@@ -52,7 +52,7 @@ Every provider needs five things:
 | Result block | role `tool`, `tool_call_id` | `user` with `tool_result`, `tool_use_id` | `functionResponse` with matching `id` |
 | Force-a-tool | `tool_choice: {type: "function", function: {name}}` | `tool_choice: {type: "tool", name}` | `tool_config: {function_calling_config: {mode: "ANY"}}` |
 | Forbid tools | `tool_choice: "none"` | `tool_choice: {type: "none"}` | `mode: "NONE"` |
-| Strict schema | `strict: true` | schema-is-schema (always enforced) | `responseSchema` at request level |
+| Strict schema | `strict: true` | `strict: true` on the tool (needs `additionalProperties: false` + `required`); best-effort without it | `responseSchema` at request level |
 
 ### Limits you will actually hit
 
@@ -94,7 +94,7 @@ Invalid-argument errors look different too.
 
 - **OpenAI (non-strict).** Model returns `arguments: "{bad json}"`, your JSON parse fails, you inject an error message and re-call.
 - **OpenAI (strict).** Validation happens during decoding; invalid JSON is impossible but `refusal` can appear.
-- **Anthropic.** `input` may contain unexpected fields; schema is advisory. Validate server-side.
+- **Anthropic.** Without `strict: true`, `input` may contain unexpected fields and the schema is best-effort. Validate server-side, or set `strict: true` to have the API guarantee the input validates.
 - **Gemini.** OpenAPI 3.0 quirk: `enum` on object fields silently ignored; validate yourself.
 
 ### The translator pattern

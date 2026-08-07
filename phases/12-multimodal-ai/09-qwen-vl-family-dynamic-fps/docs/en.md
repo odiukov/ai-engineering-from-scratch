@@ -53,7 +53,7 @@ Result: Qwen2-VL-7B matched GPT-4o on several multimodal benchmarks and beat it 
 
 Qwen2.5-VL's big shift was video. Dynamic FPS is not just "sample more frames when needed." The paper formalized:
 
-- Absolute time tokens. Instead of positional indices (frame 0, 1, 2...), use actual timestamps. "At 0:04, the cat jumps." The model sees `<time>0.04</time>` tokens interleaved with frame tokens.
+- Absolute time tokens. Instead of positional indices (frame 0, 1, 2...), use actual timestamps. "At 0:04, the cat jumps." The model sees `<time>4.0</time>` tokens (seconds, not mm:ss) interleaved with frame tokens.
 - Dynamic FPS. Sample at 1 FPS for slow footage, 4+ FPS for action. The user or trainer chooses; M-RoPE adapts.
 - Window attention in ViT. Spatial attention is windowed (local within blocks) for throughput; global attention every few layers.
 - Explicit JSON output format. Trained on tool-call data: "{\"tool\": \"click\", \"coords\": [380, 220]}". Agent-ready out of the box.

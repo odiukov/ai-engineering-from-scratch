@@ -83,7 +83,7 @@ None of this touches the image directly — only the text description. GPT-4 hal
 LLaVA-1.5 (October 2023) added:
 - Academic-task data (VQA, OKVQA, RefCOCO) mixed into instruction tuning.
 - Better system prompt.
-- 2048 → 32k context.
+- 2048 → 4096 context (Vicuna-1.3 → Vicuna-1.5).
 
 LLaVA-NeXT (January 2024) added:
 - AnyRes: split high-res images into a 2x2 or 1x3 grid of 336x336 crops, plus one global low-res thumbnail. Each crop becomes 576 tokens; total around 2880 visual tokens per image. OCR and chart tasks jumped.

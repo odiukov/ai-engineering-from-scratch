@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor
+import zlib
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 
@@ -28,7 +29,9 @@ SIMULATED_LATENCY_MS = {"Bengaluru": 400, "Tokyo": 600, "Zurich": 800}
 def executor_weather(city: str) -> dict:
     latency = SIMULATED_LATENCY_MS.get(city, 500)
     time.sleep(latency / 1000.0)
-    return {"city": city, "temp_c": hash(city) % 35}
+    # zlib.crc32, not hash(): str hashing is randomized per process, so hash()
+    # would print a different "temperature" on every run of the demo.
+    return {"city": city, "temp_c": zlib.crc32(city.encode()) % 35}
 
 
 def run_sequential(cities: list[str]) -> tuple[float, list[dict]]:
@@ -103,7 +106,7 @@ def fake_openai_stream():
 def replay_and_execute() -> dict[str, dict]:
     acc = StreamAccumulator()
     results: dict[str, dict] = {}
-    in_flight: dict[str, "Future"] = {}  # type: ignore
+    in_flight: dict[str, Future] = {}
     with ThreadPoolExecutor(max_workers=4) as pool:
         for event in fake_openai_stream():
             completed = acc.on_event(event)

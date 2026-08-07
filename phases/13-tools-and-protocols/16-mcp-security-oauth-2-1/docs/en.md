@@ -84,7 +84,8 @@ User grants `notes:read`. They later ask the agent to delete a note. The server 
 ```
 HTTP/1.1 403 Forbidden
 WWW-Authenticate: Bearer error="insufficient_scope",
-    scope="notes:delete", resource="https://notes.example.com"
+    scope="notes:delete",
+    resource_metadata="https://notes.example.com/.well-known/oauth-protected-resource"
 ```
 
 Client sees the insufficient_scope error, prompts the user with a consent dialog for the additional scope, performs a mini OAuth flow for it, retries the request with the new token.
@@ -101,9 +102,11 @@ Access tokens SHOULD be short-lived (1 hour default). Refresh tokens rotate on e
 
 Sampling servers (Phase 13 · 11) MUST NOT pass the client's token through to other services. The sampling request is the boundary.
 
-### Confused deputy prevention
+### Audience binding (and why it is not quite the confused deputy)
 
 Token binds to `aud`. Client binds to `client_id`. Every request validated against both. The spec explicitly bans the old "pass-the-token" pattern that was common in pre-MCP remote tool ecosystems.
+
+Terminology, because the two get conflated: replaying a token issued for Server A at Server B is **token reuse across audiences**, and audience binding is the fix. The **confused deputy** proper is a different shape — an MCP server acting as an OAuth proxy with one static client ID, so the upstream provider's consent screen is skipped for a client the user never approved. Lesson 18 covers that one.
 
 ### Client ID discovery
 
@@ -155,7 +158,7 @@ This lesson produces `outputs/skill-oauth-scope-planner.md`. Given a remote MCP 
 | Protected-resource metadata | "Discovery doc" | RFC 9728 `.well-known/oauth-protected-resource` |
 | Step-up authorization | "Incremental consent" | SEP-835 flow for adding scopes on demand |
 | `insufficient_scope` | "403 with WWW-Authenticate" | Server signal to re-consent for a larger scope |
-| Confused deputy | "Token reuse across services" | Attack where a trusted holder forwards a token inappropriately |
+| Audience binding | "Token reuse across services" | Attack where a trusted holder forwards a token inappropriately |
 | Short-lived token | "Access token TTL" | Bearer that expires quickly; refresh token renews |
 | Scope hierarchy | "Least privilege stack" | Graduated scope set with step-up between levels |
 | Client ID metadata | "Client discovery doc" | URL at which the client publishes its own OAuth metadata |

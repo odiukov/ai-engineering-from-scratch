@@ -51,7 +51,7 @@ The mask:
 M[i, j] = 1 if:
   (i is text and j is text and j <= i)   # causal for text
   OR (i is image and j is image and same_image_block(i, j))   # bidirectional within image
-  OR (i is text and j is image and j < i_image_end)   # text attends to previous images
+  OR (i is text and j is image and j < i)   # text attends to previous images
   OR (i is image and j is text and j < i_image_start)   # image attends to preceding text
 ```
 

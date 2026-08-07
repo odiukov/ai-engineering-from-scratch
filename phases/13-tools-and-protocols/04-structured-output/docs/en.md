@@ -27,7 +27,7 @@ An agent reading a purchase-order email needs to turn free text into `{customer,
 Every 2026 frontier provider ships some form of approach three.
 
 - **OpenAI.** `response_format: {type: "json_schema", strict: true}` plus `refusal` in the response if the model declines.
-- **Anthropic.** Schema enforcement on `tool_use` inputs; `stop_reason: "refusal"` is not a thing, but `end_turn` with no tool call is the signal.
+- **Anthropic.** Schema enforcement on `tool_use` inputs; `stop_reason: "refusal"` does exist (with a `stop_details` category) — check it before reading `content`, since a refusal can arrive with `content` empty.
 - **Gemini.** `responseSchema` at request level; in 2026 Gemini ships token-level grammar constraints for selected types.
 - **Pydantic AI.** `output_type=InvoiceModel` emits a structured `RunResult` typed to `InvoiceModel`.
 - **Zod (TypeScript).** Runtime parser that validates provider output against a Zod schema; pairs with OpenAI's `beta.chat.completions.parse`.

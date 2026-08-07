@@ -50,7 +50,7 @@ Total: ~48k vocabulary. The input embedding and output projection span all of it
 
 ### Streaming decode
 
-Speech generation uses residual-VQ. The transformer predicts the base (layer 0) speech tokens; a parallel-decoded residual quantizer predicts the subsequent layers. Each layer 0 token is roughly 50ms of audio at 16kHz.
+Speech generation uses residual-VQ. The transformer predicts the base (layer 0) speech tokens; a parallel-decoded residual quantizer predicts the subsequent layers. Each layer 0 token is roughly 20ms of audio at 16kHz (the base quantizer runs at 50 Hz).
 
 The streaming pattern:
 
@@ -134,7 +134,7 @@ This lesson produces `outputs/skill-any-to-any-pipeline-auditor.md`. Given a con
 
 2. SpeechTokenizer residual-VQ uses 8 codebooks. Propose why parallel-decoding the residual levels is necessary (vs sequential) and what latency savings it brings.
 
-3. Your vocabulary has 32k text + 4k image + 4k speech. Add 8k music and ~10 separators. What is the embedding-matrix parameter cost at hidden dim 4096?
+3. Your vocabulary has 32k text + 4k image + 4k speech. Add 8k music and the 7 separators. What is the embedding-matrix parameter cost at hidden dim 4096?
 
 4. Chain-of-visual-thought emits an intermediate image. What kinds of questions benefit? What kinds are hurt by the extra tokens?
 

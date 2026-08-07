@@ -103,7 +103,7 @@ ALIGN (Google, 2021): same idea as CLIP, 1.8B pair scale, 90% noisy. Proved nois
 
 ### The zero-shot ceiling
 
-CLIP-class models cap around 76% ImageNet zero-shot (CLIP-G, OpenCLIP-G). Beyond requires either much larger data (SigLIP 2 gets 80%+) or architecture changes (supervised heads, more parameters). The benchmark is saturating; the real value is the embedding space that downstream VLMs consume.
+OpenAI's own CLIP caps around 76% ImageNet zero-shot (ViT-L/14 at 336px). Open reproductions go higher: OpenCLIP ViT-bigG/14 on LAION-2B reaches about 80%. Beyond requires either much larger data (SigLIP 2 gets 80%+) or architecture changes (supervised heads, more parameters). The benchmark is saturating; the real value is the embedding space that downstream VLMs consume.
 
 ```figure
 multimodal-fusion

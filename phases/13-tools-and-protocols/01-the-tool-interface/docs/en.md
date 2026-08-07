@@ -41,7 +41,7 @@ The model receives the list. Modern providers serialize these declarations into 
 Given the user's message and the available tools, the model chooses one of three behaviors.
 
 1. **Answer directly** in text. No tool call.
-2. **Call one or more tools.** Emit structured call objects. Under `parallel_tool_calls: true` (default on OpenAI and Gemini, opt-in on Anthropic) the model can emit multiple calls in one turn.
+2. **Call one or more tools.** Emit structured call objects. Parallel calls are the default on OpenAI, Gemini, and Anthropic (Claude 3.5 and up); the model can emit multiple calls in one turn. Each provider gives you a switch to turn it off — `parallel_tool_calls: false` on OpenAI, `disable_parallel_tool_use: true` on Anthropic.
 3. **Refuse.** Strict-mode structured outputs can produce a typed `refusal` block instead of a call.
 
 A tool call payload has three stable fields: a call `id`, a tool `name`, and a JSON `arguments` object. The id exists so the host can correlate the later result with the specific call, which matters when parallel calls come back out of order.

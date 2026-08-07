@@ -80,12 +80,17 @@ The full calculation lives in `code/main.py`. For ViT-B/16 at 224:
 ```
 patch_embed = 3 * 16 * 16 * 768 + 768  =  591k
 cls + pos    = 768 + 197 * 768          =  152k
-block        = 4 * 768^2 (QKVO) + 2 * 4 * 768^2 (MLP) + 2 * 2*768 (LN)
-             = 12 * 768^2 + 3k          =  7.1M
-12 blocks    = 85M
+block        = 4 * 768^2 (QKVO) + 2 * 4 * 768^2 (MLP)      <- weights
+             + 4*768 (QKVO bias) + 5*768 (MLP bias)        <- biases
+             + 2 * 2*768 (LN)
+             = 12 * 768^2 + 13 * 768    =  7.09M
+12 blocks    = 85.1M
 final LN    = 1.5k
-total       ≈ 86M
+total       ≈ 85.8M  (the familiar "86M")
 ```
+
+Do not drop the bias terms: they are only 13 * 768 per block, but leaving them
+out is what turns an exact count into a number that only works after rounding.
 
 Ball-park every ViT this way before you load the checkpoint. The backbone size sets your VRAM floor in any downstream VLM.
 
@@ -93,7 +98,9 @@ Ball-park every ViT this way before you load the checkpoint. The backbone size s
 
 The encoder most open VLMs ship with in 2026 is SigLIP 2 SO400m/14 at native resolution (NaFlex). It has:
 - 400M parameters.
-- Patch size 14, default resolution 384 → 729 patch tokens per image.
+- Patch size 14, default resolution 384 → 729 patch tokens per image. Note 384
+  is not divisible by 14: the grid is 27x27 = 729, computed as (384 // 14)^2,
+  so the last few pixels on each edge are dropped.
 - Mean pool for image-level tasks; all 729 patches flow into the LLM for VQA.
 - 4 register tokens, discarded before LLM handoff.
 - 2D-RoPE with image-level scaling for native aspect ratio.

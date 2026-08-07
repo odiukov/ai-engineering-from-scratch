@@ -4,7 +4,7 @@
 
 **Type:** Build
 **Languages:** Python (stdlib, end-to-end ecosystem harness)
-**Prerequisites:** Phase 13 · 01 through 21
+**Prerequisites:** Phase 13 · 01 through 22
 **Time:** ~120 minutes
 
 ## Learning Objectives
@@ -101,10 +101,11 @@ Users deploy with `docker compose up`. Claude Code, Cursor, Codex, and opencode 
 | 06-10 | MCP primitives, server, client, transports, resources + prompts |
 | 11-14 | Sampling, roots + elicitation, async tasks, `ui://` apps |
 | 15-17 | Tool poisoning, OAuth 2.1, gateway + registry |
-| 18 | A2A sub-agent delegation |
-| 19 | OTel GenAI tracing |
-| 20 | Routing gateway for the LLM layer |
-| 21 | SKILL.md + AGENTS.md packaging |
+| 18 | Production MCP auth |
+| 19 | A2A sub-agent delegation |
+| 20 | OTel GenAI tracing |
+| 21 | Routing gateway for the LLM layer |
+| 22 | SKILL.md + AGENTS.md packaging |
 
 ```figure
 t3-capstone-chain

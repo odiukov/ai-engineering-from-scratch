@@ -28,7 +28,7 @@ Three scaling paths emerged.
 
 Throw hardware at the problem. Scale context to millions of tokens, process everything in one forward pass.
 
-Gemini 1.5 Pro launched with 1M tokens; Gemini 1.5 Ultra to 10M; Gemini 2.5 Pro in 2026 does hours of video reliably. The paper (arXiv:2403.05530) documents needle-in-a-haystack recall at 99.7% up to ~9.5M tokens.
+Gemini 1.5 Pro launched with 1M tokens and was demonstrated up to 10M in the research paper; Gemini 2.5 Pro in 2026 does hours of video reliably. The paper (arXiv:2403.05530) documents needle-in-a-haystack recall at 99.7% up to ~9.5M tokens.
 
 Engineering: a custom attention implementation with memory hierarchy (local + global + sparse) plus MoE expert routing for long-context efficiency. Not published in full detail. Not open-source.
 
@@ -116,9 +116,9 @@ This lesson produces `outputs/skill-long-video-strategy-planner.md`. Given a vid
 
 2. Design a needle-in-a-haystack test: at what minute do you inject the marker, and what is the exact query format?
 
-3. Compare brute-context Qwen2.5-VL-72B (80k context) to VideoAgent (Claude 3.5 + retrieval) on a 1-hour video. Which wins on recall? Which wins on latency?
+3. Compare brute-context Qwen2.5-VL-72B (128k context) to VideoAgent (Claude 3.5 + retrieval) on a 1-hour video. Which wins on recall? Which wins on latency?
 
-4. Ring attention's memory cost scales linearly in sequence length and linearly in device count. Explain why and what fails if you drop the ring-rotation phase.
+4. Ring attention's per-device memory scales linearly in sequence length and inversely in device count. Explain why and what fails if you drop the ring-rotation phase.
 
 5. Read Gemini 1.5 Section 5 on needle-in-a-haystack. What did the paper find about recall at the 1M vs 10M token boundary?
 

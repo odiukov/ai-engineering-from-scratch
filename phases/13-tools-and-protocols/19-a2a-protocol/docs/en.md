@@ -62,10 +62,10 @@ The AP2 extension (September 2025) adds cryptographic signatures to Agent Cards.
 
 ```
 submitted -> working -> completed | failed | canceled | rejected
-             -> input_required -> working (loop via message)
+             -> input-required -> working (loop via message)
 ```
 
-Clients initiate with `tasks/send`. The called agent transitions through states; clients subscribe to state updates via SSE or poll.
+Clients initiate with `message/send` (named `tasks/send` before v0.2). The called agent transitions through states; clients subscribe to state updates via SSE or poll.
 
 ### Messages and Parts
 

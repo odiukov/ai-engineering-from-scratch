@@ -17,8 +17,12 @@ MASK = -1
 
 
 def cosine_schedule(T: int) -> list[float]:
-    """Mask ratio at step t, in [0, 1]. Goes 1.0 -> 0.0."""
-    return [math.cos(math.pi * (t + 1) / (2 * T)) for t in range(T)]
+    """Mask ratio at the start of step t, in [0, 1]. Starts at 1.0.
+
+    Matches docs/en.md: mask_ratio(t) = cos(pi * t / (2 * T)). The (t + 1)
+    shift would never emit 1.0, contradicting "at step 0, all tokens masked".
+    """
+    return [math.cos(math.pi * t / (2 * T)) for t in range(T)]
 
 
 def mock_logits(tokens: list[int], prompt_seed: int = 0) -> list[list[float]]:

@@ -18,6 +18,8 @@ import os
 import random
 import time
 import uuid
+
+_RNG = random.Random(0)  # seeded: the demo prints spans meant to be compared run to run
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -81,7 +83,7 @@ def fake_llm_call(span: Span, prompt: str) -> str:
         "gen_ai.response.id": resp_id,
         "gen_ai.response.model": "gpt-4o-2024-08-06",
         "gen_ai.usage.input_tokens": len(prompt) // 4,
-        "gen_ai.usage.output_tokens": random.randint(20, 80),
+        "gen_ai.usage.output_tokens": _RNG.randint(20, 80),
     })
     if CAPTURE_CONTENT:
         span.add_event("gen_ai.content.prompt", {"content": prompt[:200]})
@@ -149,7 +151,7 @@ def agent_loop() -> None:
 
 def main() -> None:
     print("=" * 72)
-    print("PHASE 13 LESSON 19 - OTEL GENAI SPAN EMITTER")
+    print("PHASE 13 LESSON 20 - OTEL GENAI SPAN EMITTER")
     print(f"  content capture : {'ON' if CAPTURE_CONTENT else 'off (set OTEL_CAPTURE_CONTENT=1)'}")
     print("=" * 72)
 

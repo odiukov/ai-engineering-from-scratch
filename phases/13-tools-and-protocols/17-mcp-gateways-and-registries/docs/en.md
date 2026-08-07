@@ -62,7 +62,7 @@ When a user's session includes a mix of servers, the gateway multiplexes: the de
 
 ### Namespace merging
 
-Gateways merge tool namespaces from all backends, typically with prefix-on-collision. `github.open_pr`, `notes.search`. This makes routing unambiguous.
+Gateways merge tool namespaces from all backends, typically with prefix-on-collision: when two backends expose the same tool name, EVERY colliding tool gets its server prefix, not just the second one seen. Prefixing only the later arrival would make the winning name depend on backend iteration order. Two servers both exposing `search` become `github.search` and `notes.search`; a tool with no collision keeps its bare name.
 
 ### Registries
 

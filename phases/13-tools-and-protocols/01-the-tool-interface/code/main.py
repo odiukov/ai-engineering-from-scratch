@@ -42,9 +42,14 @@ def tool_add(args: dict) -> dict:
 
 
 def tool_get_time(args: dict) -> dict:
+    # This toy only knows UTC. Echoing back a requested zone we did not convert
+    # to would look like a working conversion, so say so instead.
     tz = args.get("timezone", "UTC")
     now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
-    return {"now": now, "timezone": tz}
+    if tz != "UTC":
+        return {"now": now, "timezone": "UTC",
+                "note": f"requested {tz}; this toy only computes UTC"}
+    return {"now": now, "timezone": "UTC"}
 
 
 def tool_get_weather(args: dict) -> dict:
@@ -115,9 +120,16 @@ def validate(schema: dict, value: Any) -> list[str]:
         for field in schema.get("required", []):
             if field not in value:
                 errors.append(f"missing required field '{field}'")
-        for key, sub in schema.get("properties", {}).items():
+        props = schema.get("properties", {})
+        for key, sub in props.items():
             if key in value:
                 errors.extend(validate(sub, value[key]))
+        # Exercise 2 turns on this branch: with additionalProperties false an
+        # unknown field is an error; without it, it passes through silently.
+        if schema.get("additionalProperties") is False:
+            for key in value:
+                if key not in props:
+                    errors.append(f"unexpected field '{key}'")
         return errors
     if t == "number" and not isinstance(value, (int, float)):
         errors.append(f"expected number, got {type(value).__name__}")

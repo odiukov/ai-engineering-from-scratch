@@ -32,14 +32,14 @@ Chameleon rejects the premise: images are just sequences of discrete tokens from
 
 The tokenizer is a vector-quantized variational autoencoder. The architecture:
 
-- Encoder: CNN + ViT that maps image to a spatial feature map, say 32x32 features of dim 256.
+- Encoder: a VQ-GAN convolutional encoder that maps image to a spatial feature map, say 32x32 features of dim 256.
 - Codebook: a learned vocabulary of K vectors (Chameleon uses 8192), also dim 256.
 - Quantization: for each spatial feature, look up the nearest codebook entry by L2 distance. Replace the continuous feature with the integer index.
 - Decoder: CNN that takes quantized features back to pixels.
 
 Training: VAE reconstruction loss + commitment loss + codebook loss. The codebook indices form a discrete alphabet for images.
 
-For Chameleon: one image becomes 32*32 = 1024 tokens drawn from a vocabulary of 8192. Concatenate with text tokens (from the LLM's BPE vocabulary, say 32000). Final vocabulary: 40192. The transformer sees one sequence, one loss.
+For Chameleon: one image becomes 32*32 = 1024 tokens drawn from a vocabulary of 8192. Concatenate with text tokens (from the LLM's BPE vocabulary, say 32000). Final vocabulary: 40192, plus the modality separators below. The transformer sees one sequence, one loss.
 
 ### The shared vocabulary
 

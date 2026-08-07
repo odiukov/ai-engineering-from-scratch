@@ -1,6 +1,6 @@
 # Roots and Elicitation — Scoping and Mid-Flight User Input
 
-> Hard-coded paths break the moment a user opens a different project. Pre-filled tool arguments break when the user under-specifies. Roots scope the server to a user-controlled set of URIs; elicitation pauses mid-tool-call to ask the user for structured input via a form or URL. Two client primitives, two fixes for common MCP failure modes. SEP-1036 (URL-mode elicitation, 2025-11-25) is experimental through H1 2026 — check SDK versions before depending on it.
+> Hard-coded paths break the moment a user opens a different project. Pre-filled tool arguments break when the user under-specifies. Roots scope the server to a user-controlled set of URIs; elicitation pauses mid-tool-call to ask the user for structured input via a form or URL. Two client primitives, two fixes for common MCP failure modes. SEP-1036 (URL-mode elicitation, 2025-11-25) is experimental through H1 2026 (that window has now closed) — check SDK versions before depending on it.
 
 **Type:** Build
 **Languages:** Python (stdlib, roots + elicitation demo)
@@ -170,8 +170,8 @@ This lesson produces `outputs/skill-elicitation-form-designer.md`. Given a tool 
 
 ## Further Reading
 
-- [MCP — Client roots spec](https://modelcontextprotocol.io/specification/draft/client/roots) — canonical roots reference
-- [MCP — Client elicitation spec](https://modelcontextprotocol.io/specification/draft/client/elicitation) — canonical elicitation reference
+- [MCP — Client roots spec](https://modelcontextprotocol.io/specification/2025-11-25/client/roots) — canonical roots reference
+- [MCP — Client elicitation spec](https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation) — canonical elicitation reference
 - [Cisco — What's new in MCP elicitation, structured content, OAuth enhancements](https://blogs.cisco.com/developer/whats-new-in-mcp-elicitation-structured-content-and-oauth-enhancements) — 2025-11-25 additions walk-through
 - [MCP — GitHub SEP-1036](https://github.com/modelcontextprotocol/modelcontextprotocol) — URL-mode elicitation proposal (experimental, drift-risk)
 - [The New Stack — How elicitation brings human-in-the-loop to AI tools](https://thenewstack.io/how-elicitation-in-mcp-brings-human-in-the-loop-to-ai-tools/) — UX walkthrough
