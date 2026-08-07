@@ -139,18 +139,32 @@ class Mem0:
         for rel, record in vector_hits:
             if scope is not None and record.scope != scope:
                 continue
-            if record.user_id != user_id and record.scope == "user":
+            # Every record carries a user_id, whatever its scope. Gating on
+            # scope == "user" let another user's session- and agent-scoped
+            # records through — the "assistant told Alice about Bob's project"
+            # leak the lesson warns about. Cross-user is never in scope.
+            if record.user_id != user_id:
                 continue
             recency = self._recency_score(record, now)
             score = (self.config.w_relevance * rel
                      + self.config.w_importance * record.importance
                      + self.config.w_recency * recency)
             fused[record.rid] = (score, record)
+        # KV records must earn their place on the query too. A flat 0.4 pulled
+        # in every fact the user owns, so search("refund invoice") surfaced
+        # unrelated records and made the scope check below look like it worked.
+        q_tokens = set(query.lower().split())
         for record in self.kv.by_user(user_id):
             if record.rid in fused:
                 continue
+            if scope is not None and record.scope != scope:
+                continue
+            r_tokens = set(record.text.lower().split())
+            if not (q_tokens & r_tokens):
+                continue
+            rel = len(q_tokens & r_tokens) / len(q_tokens | r_tokens)
             recency = self._recency_score(record, now)
-            score = (self.config.w_relevance * 0.4
+            score = (self.config.w_relevance * rel
                      + self.config.w_importance * record.importance
                      + self.config.w_recency * recency)
             fused[record.rid] = (score, record)

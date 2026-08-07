@@ -51,16 +51,21 @@ class QueueRuntime:
         self.queue.append(Job(jid=jid, payload=payload))
         return jid
 
-    def worker(self, fail_policy: Callable[[Job], bool]) -> list[tuple[str, str]]:
+    def worker(self, fail_policy: Callable[[Job], bool],
+               max_attempts: int = 3) -> list[tuple[str, str]]:
         results: list[tuple[str, str]] = []
         while self.queue:
             job = self.queue.popleft()
             job.attempt += 1
-            if fail_policy(job) and job.attempt < 3:
+            # Call the policy ONCE per attempt. Calling it twice broke any
+            # policy that counts or logs — which is exactly what exercise 2
+            # in docs/en.md asks the reader to write.
+            failed = fail_policy(job)
+            if failed and job.attempt < max_attempts:
                 self.queue.append(job)
                 results.append((job.jid, "retry"))
                 continue
-            if fail_policy(job):
+            if failed:
                 self.dlq.append(job)
                 results.append((job.jid, "DLQ"))
                 continue

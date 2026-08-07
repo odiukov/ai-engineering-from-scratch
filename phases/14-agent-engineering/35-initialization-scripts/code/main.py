@@ -199,7 +199,11 @@ def main(argv: list[str] | None = None) -> int:
             LKG_PATH.write_text(json.dumps({"commit": head, "written_at": time.time()}, indent=2) + "\n")
             print(f"pinned LKG -> {head[:7]}")
             return 0
-        except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        except (FileNotFoundError, subprocess.CalledProcessError,
+                subprocess.TimeoutExpired) as exc:
+            # timeout=2.0 above can raise TimeoutExpired on a wedged git; the
+            # lesson requires failing in one place with a message, not a
+            # traceback. probe_lkg_diff already handles it.
             print(f"lkg pin failed: {exc}", file=sys.stderr)
             return 1
 

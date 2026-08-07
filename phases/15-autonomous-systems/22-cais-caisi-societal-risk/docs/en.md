@@ -1,6 +1,6 @@
 # CAIS, CAISI, and Societal-Scale Risk
 
-> The Center for AI Safety (CAIS, San Francisco, founded 2022 by Hendrycks and Zhang) publishes the four-risk framework — malicious use, AI races, organizational risks, rogue AIs — and the May 2023 statement on extinction risk signed by hundreds of professors and company leaders. 2026 releases from CAIS: AI Dashboard for frontier-model evaluation, Remote Labor Index (with Scale AI), Superintelligence Strategy Paper, AI Frontiers newsletter. A distinct entity: NIST Center for AI Standards and Innovation (CAISI) — US-government-facing voluntary agreements and unclassified capability evaluations focused on cyber, bio, and chemical-weapons risks. CAIS flags organizational risk as one of four top-level risks: safety culture, rigorous audits, multi-layered defenses, and information security are foundational but routinely traded off against deployment speed. California SB-53, if signed, would be the first US state-level catastrophic-risk regulation.
+> The Center for AI Safety (CAIS, San Francisco, founded 2022 by Dan Hendrycks and colleagues) publishes the four-risk framework — malicious use, AI races, organizational risks, rogue AIs — and the May 2023 statement on extinction risk signed by hundreds of professors and company leaders. 2026 releases from CAIS: AI Dashboard for frontier-model evaluation, Remote Labor Index (with Scale AI), Superintelligence Strategy Paper, AI Frontiers newsletter. A distinct entity: NIST Center for AI Standards and Innovation (CAISI) — US-government-facing voluntary agreements and unclassified capability evaluations focused on cyber, bio, and chemical-weapons risks. CAIS flags organizational risk as one of four top-level risks: safety culture, rigorous audits, multi-layered defenses, and information security are foundational but routinely traded off against deployment speed. California SB-53, signed in September 2025, is the first US state-level catastrophic-risk regulation.
 
 **Type:** Learn
 **Languages:** Python (stdlib, four-risk inventory and mitigation matcher)
@@ -13,7 +13,7 @@ Lessons 19 and 20 covered lab-internal scaling policies. Lesson 21 covered indep
 
 Two distinct entities matter. CAIS is a non-profit research org that publishes frameworks for thinking about AI risk and coordinates public statements. CAISI is a US-government center within NIST that runs voluntary agreements with labs and unclassified capability evaluations. The names rhyme; the missions do not overlap. A practitioner should know both.
 
-The practical content: CAIS's four-risk framework is the most widely cited societal-scale-risk taxonomy in the literature. Safety culture and organizational risk are one of those four, and this is the one most directly under a practitioner's control. SB-53 (California) would be the first US state-level catastrophic-risk regulation if signed; the bill's framing matters because state-level regulation has historically led federal action in US tech policy.
+The practical content: CAIS's four-risk framework is the most widely cited societal-scale-risk taxonomy in the literature. Safety culture and organizational risk are one of those four, and this is the one most directly under a practitioner's control. SB-53 (California), signed in September 2025, is the first US state-level catastrophic-risk regulation; its framing matters because state-level regulation has historically led federal action in US tech policy.
 
 ## The Concept
 
@@ -57,13 +57,13 @@ CAISI's role is the public, government-facing counterpart to METR's private lab 
 
 ### California SB-53
 
-The California Senate bill (2025–2026 session) addresses catastrophic risk from frontier models. Key provisions as drafted:
+The Transparency in Frontier Artificial Intelligence Act, signed in September 2025, addresses catastrophic risk from frontier models. Key provisions:
 
 - Specific capability thresholds that trigger state-level obligations.
 - Whistleblower protections for AI lab employees.
 - Incident reporting requirements for catastrophic failures.
 
-If signed, it would be the first US state-level catastrophic-risk regulation. Regardless of signing status, the bill's framing shapes how other state legislatures approach the problem. Practitioners in California should track the bill's status; practitioners elsewhere should read it to understand what US state-level regulation will likely look like.
+It is the first US state-level catastrophic-risk regulation, and its framing shapes how other state legislatures approach the problem. Practitioners in California are in scope; practitioners elsewhere should read it to understand what US state-level regulation looks like in practice.
 
 ### Societal-scale risk is not a single-layer problem
 
@@ -112,7 +112,7 @@ a5-four-risks
 | AI races | "Competitive pressure" | Labs/companies/nations push deployment past safety |
 | Organizational risk | "Lab internal failure" | Safety culture, audit, defenses, infosec |
 | Rogue AI | "Misaligned agent" | Capable AI pursuing goals conflicting with human welfare |
-| California SB-53 | "State-level regulation" | 2025–2026 bill; first US state catastrophic-risk regulation if signed |
+| California SB-53 | "State-level regulation" | Transparency in Frontier AI Act, signed September 2025; first US state catastrophic-risk regulation |
 
 ## Further Reading
 

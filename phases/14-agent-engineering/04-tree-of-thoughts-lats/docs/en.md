@@ -29,12 +29,27 @@ Each node is a coherent intermediate step ("a thought"). Each node can expand to
 ```
                      (root: "find 24 from 4 6 4 1")
                     /               |            \
-           ("6 - 4 = 2")    ("4 + 1 = 5")    ("4 * 6 = 24")  <- Score: HIGH
-              /   \              |                  |
-          ...    ...          ...                finish
+           ("6 - 4 = 2")    ("6 - 1 = 5")    ("4 * 6 = 24")  <- looks HIGH
+              /   \           /      \               |
+          ...    ...   ("5 * 4 = 20")  ...     leftover: 4, 1
+                            |                        |
+                     ("20 + 4 = 24")            DEAD END
+                            |
+                          finish
 ```
 
-Self-evaluation is the load-bearing piece. The paper shows three variants: `sure / likely / impossible` classification, `1..10` numeric score, and vote among candidates. All three beat CoT substantially on Game of 24 (4% -> 74% with GPT-4).
+Note which branch wins. `4 * 6 = 24` hits the target on move one and any
+naive scorer rates it highest — but 4 and 1 are still on the table, and Game
+of 24 requires consuming every number. From `(24, 4, 1)` nothing reaches 24.
+The branch that actually finishes, `(6-1)*4+4`, looks mediocre at depth 1.
+
+That is why self-evaluation is the load-bearing piece, and why scoring an
+unfinished state by "is the target among my numbers?" defeats the search. The
+value function has to estimate what the state can still *reach*, not what it
+already contains — `code/main.py` does this with a one-step lookahead, and the
+comment there shows what breaks without it.
+
+The paper shows three scoring variants: `sure / likely / impossible` classification, `1..10` numeric score, and vote among candidates. All three beat CoT substantially on Game of 24 (4% -> 74% with GPT-4).
 
 ### LATS (Zhou et al., ICML 2024)
 

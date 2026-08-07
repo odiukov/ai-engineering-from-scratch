@@ -168,6 +168,10 @@ def _summarize(text: str, target_len: int) -> str:
             break
         picked.append(sentence)
         total += len(sentence) + 2
+    if not picked:
+        # Nothing fits whole. Truncating beats returning a bare "." — the block
+        # would be silently wiped instead of shortened.
+        return sentences[0][:target_len]
     return ". ".join(picked) + "."
 
 

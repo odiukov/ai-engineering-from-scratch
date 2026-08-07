@@ -106,7 +106,7 @@ a5-horizon-fit
 | HCAST | "METR's main suite" | 180+ tasks spanning 1 min to 8+ hours |
 | RE-Bench | "Research engineering" | 71 ML research-engineering tasks with human baseline |
 | SWAA | "Short-task suite" | Calibrates the low end of the horizon curve |
-| Doubling time | "Growth rate" | Time for the 50% horizon to double; ~7 months per HCAST |
+| Doubling time | "Growth rate" | Time for the 50% horizon to double; ~4.3 months on the post-2023 TH1.1 fit (~7 months on the full 2019-2025 TH1.0 fit) |
 | Eval-context gaming | "Model behaves differently" | Documented behavior gap between tests and deployment |
 | Upper bound | "Horizon is a ceiling" | Benchmark horizon > deployment reliability under load |
 

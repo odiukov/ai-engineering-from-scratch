@@ -47,24 +47,46 @@ def hardcoded_block(action: str) -> str | None:
     return None
 
 
+# (field, verdict, direction), highest priority first. Reorder to change the
+# constitution's priority ranking — that is exercise 1.
+#
+# Direction matters: safety/ethics/guidelines are VIOLATION scores (>= 3 is
+# bad), while helpfulness is a QUALITY score (<= 2 is bad — an over-refusal or
+# a needlessly useless answer). Treating them all the same way would flag a
+# maximally helpful haiku as a violation.
+TIER_ORDER = (
+    ("safety", "refuse", "violation"),
+    ("ethics", "refuse", "violation"),
+    ("guidelines", "modify", "violation"),
+    ("helpfulness", "modify", "quality"),
+)
+
+
 def resolve(action: str, score: TierScore) -> tuple[str, str]:
     # Layer 1: hardcoded prohibitions
     block = hardcoded_block(action)
     if block:
         return "refuse", f"hardcoded prohibition: {block}"
 
-    # Layer 2: four-tier priority. Higher tier wins on conflict.
-    # We interpret a violation score of >= 3 as blocking at that tier.
-    if score.safety >= 3:
-        return "refuse", f"safety violation (score={score.safety})"
-    if score.ethics >= 3:
-        return "refuse", f"ethics violation (score={score.ethics})"
-    if score.guidelines >= 3:
-        return "modify", f"guideline conflict (score={score.guidelines}); modify"
+    # Layer 2: four-tier priority, walked in order. Higher tier wins on
+    # conflict; a violation score >= 3 blocks at that tier.
+    #
+    # The order is data, not control flow, so exercise 1 ("weight helpfulness
+    # above ethics") is a one-line edit to TIER_ORDER. Hard-coding the ifs and
+    # never reading score.helpfulness made that exercise impossible: every
+    # case set the field and nothing consumed it.
+    for tier, verdict, direction in TIER_ORDER:
+        level = getattr(score, tier)
+        triggered = level >= 3 if direction == "violation" else level <= 2
+        if not triggered:
+            continue
+        if direction == "quality":
+            return verdict, f"{tier} too low (score={level}); {verdict}"
+        if verdict == "refuse":
+            return "refuse", f"{tier} violation (score={level})"
+        return verdict, f"{tier} conflict (score={level}); {verdict}"
 
-    # Helpfulness is lowest priority; by this point we already cleared
-    # higher tiers. Proceed.
-    return "allow", "all higher tiers clear; helpfulness respected"
+    return "allow", f"all tiers clear (helpfulness={score.helpfulness})"
 
 
 # ---------- Cases ----------

@@ -99,11 +99,13 @@ def run_one(cfg: LoopConfig) -> Outcome:
         )
 
     polished_ok = not has_experiment_flaw and not has_novelty_flaw
-    # Any submitted paper with a flaw counts as polished_but_flawed: the
-    # weak internal reviewer let it through whether or not the polish
-    # stage hid it. This makes the two buckets exhaustive over submitted
-    # papers (polished_ok + polished_but_flawed == len(submitted)).
-    polished_but_flawed = has_experiment_flaw or has_novelty_flaw
+    # polished_but_flawed is the thing docs/en.md asks you to measure: a paper
+    # whose experiment weakness the figure-polish stage papered over. Deriving
+    # it from the flags alone made cfg.polish_masks_weakness inert, so the
+    # exercise measured a knob the simulator did not read. A novelty flaw
+    # always slips past the weak reviewer; an experiment flaw only counts here
+    # when the polish stage actually hid it.
+    polished_but_flawed = has_novelty_flaw or polished_hides_weakness
     return Outcome(
         submitted=True,
         has_novelty_flaw=has_novelty_flaw,

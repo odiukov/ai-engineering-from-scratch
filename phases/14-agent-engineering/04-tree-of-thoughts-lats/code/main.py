@@ -6,7 +6,8 @@ evaluates to 24. This mirrors the Game of 24 benchmark from Yao et al.
 ToT is a BFS with a prompted value function. LATS is MCTS over the same
 search space with UCT selection.
 
-Stdlib only; no LLM. Value function is symbolic (distance from 24).
+Stdlib only; no LLM. Value function is symbolic: distance from 24
+after a one-step lookahead (see value() for why the lookahead matters).
 """
 
 from __future__ import annotations
@@ -65,15 +66,29 @@ def expand(node: Node) -> list[Node]:
     return children
 
 
+def _closest(state: tuple[float, ...]) -> float:
+    return min(abs(v - TARGET) for v in state)
+
+
 def value(node: Node) -> float:
+    """Prompted-value stand-in: distance from TARGET, with a one-step lookahead.
+
+    Scoring an unfinished state by `min |v - TARGET|` alone is the obvious
+    heuristic and it is wrong here: (24, 4) contains a 24 and scores perfect,
+    but every op on it (96, 28, 20, 6) misses, so it is a dead end. Game of 24
+    requires consuming ALL numbers, so an intermediate state is only as good as
+    what one more op can reach from it. Without the lookahead the beam fills up
+    with dead ends that merely contain the target.
+    """
     if len(node.state) == 1:
         result = node.state[0]
         return 1.0 if abs(result - TARGET) < 1e-6 else -abs(result - TARGET) / 100.0
-    best_distance = min(abs(v - TARGET) for v in node.state)
+    reachable = [child.state for child in expand(node)]
+    best_distance = min(_closest(s) for s in reachable) if reachable else _closest(node.state)
     return -best_distance / 100.0
 
 
-def tot_bfs(root: Node, max_expansions_per_level: int = 8,
+def tot_bfs(root: Node, max_expansions_per_level: int = 16,
             max_depth: int = 3) -> tuple[Node | None, int]:
     frontier = [root]
     expansions = 0
@@ -122,11 +137,8 @@ def backprop(path: list[Node], reward: float) -> None:
 def mcts(root: Node, iterations: int, rng: random.Random) -> tuple[Node, int]:
     expansions = 0
     for _ in range(iterations):
-        path = [root]
-        cur = root
-        while cur.children:
-            cur = max(cur.children, key=lambda ch: uct(cur, ch))
-            path.append(cur)
+        cur = select(root)
+        path = _path_to(root, cur)
         if cur.visits > 0 and len(cur.state) > 1:
             cur.children = expand(cur)
             expansions += len(cur.children)
@@ -135,8 +147,33 @@ def mcts(root: Node, iterations: int, rng: random.Random) -> tuple[Node, int]:
                 path.append(cur)
         reward = simulate(cur, depth=max(0, 3 - len(cur.trace)), rng=rng)
         backprop(path, reward)
-    best_leaf = max(_all_leaves(root), key=value, default=root)
-    return best_leaf, expansions
+    # Report what the search LEARNED, not the prettiest leaf it happened to see.
+    # max(_all_leaves(root), key=value) would rank leaves by the symbolic value
+    # function and ignore visits/q entirely — that is "best node encountered",
+    # which is exactly the thing backprop is supposed to replace.
+    return _most_visited_leaf(root), expansions
+
+
+def _path_to(root: Node, target: Node) -> list[Node]:
+    """Root-to-target path. select() returns only the leaf; backprop needs the path."""
+    if root is target:
+        return [root]
+    for ch in root.children:
+        sub = _path_to(ch, target)
+        if sub:
+            return [root] + sub
+    return []
+
+
+def _most_visited_leaf(root: Node) -> Node:
+    """Follow the most-visited child down. Ties break on q, then on value."""
+    node = root
+    while node.children:
+        visited = [ch for ch in node.children if ch.visits > 0]
+        if not visited:
+            break
+        node = max(visited, key=lambda ch: (ch.visits, ch.q, value(ch)))
+    return node
 
 
 def _all_leaves(node: Node) -> list[Node]:
@@ -168,7 +205,9 @@ def main() -> None:
     root_lats.children = expand(root_lats)
     for ch in root_lats.children:
         ch.visits = 0
-    best_lats, n_lats = mcts(root_lats, iterations=80, rng=rng)
+    # 80 iterations stops on an unfinished line; MCTS needs enough rollouts
+    # for backprop to actually separate the branches.
+    best_lats, n_lats = mcts(root_lats, iterations=400, rng=rng)
     print("\nLATS MCTS")
     print("-" * 60)
     print(f"  best trace: {best_lats.trace}")

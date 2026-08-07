@@ -43,16 +43,32 @@ def evaluator_optimizer(case: EvalCase) -> CaseResult:
                       candidate, feedback or "unknown")
 
 
-def ci_gate(results: list[CaseResult], baseline_pass_rate: float,
+def ci_gate(results: list[CaseResult], baseline: dict[str, bool],
             regression_threshold: float = 0.05) -> tuple[bool, str]:
+    """Gate on per-case regressions, not on the aggregate pass rate.
+
+    A scalar baseline_pass_rate cannot see a case that broke while another one
+    got fixed — the average is unchanged and the gate stays green. Baselines
+    are stored per case id so a newly-red case fails CI on its own, and a case
+    that vanished from the suite is a regression too.
+    """
     if not results:
         return False, "no cases"
+    by_id = {r.cid: r.passed for r in results}
+    newly_failing = sorted(cid for cid, was_passing in baseline.items()
+                           if was_passing and not by_id.get(cid, False))
+    missing = sorted(cid for cid in baseline if cid not in by_id)
+    if newly_failing:
+        return False, "regressed: " + ", ".join(newly_failing)
     pass_rate = sum(1 for r in results if r.passed) / len(results)
-    regression = baseline_pass_rate - pass_rate
+    baseline_rate = (sum(1 for v in baseline.values() if v) / len(baseline)
+                     if baseline else 0.0)
+    regression = baseline_rate - pass_rate
     if regression > regression_threshold:
         return False, (f"regression {regression:.1%} > threshold "
                        f"{regression_threshold:.1%}")
-    return True, f"pass_rate={pass_rate:.1%} baseline={baseline_pass_rate:.1%}"
+    note = f" (dropped from suite: {', '.join(missing)})" if missing else ""
+    return True, f"pass_rate={pass_rate:.1%} baseline={baseline_rate:.1%}{note}"
 
 
 def _benchmark_case() -> EvalCase:
@@ -158,8 +174,9 @@ def main() -> None:
         print(f"    final: {result.final}")
         print(f"    reason: {result.reason}")
 
-    baseline = 0.95
-    ok, message = ci_gate(results, baseline_pass_rate=baseline)
+    # Per-case baseline: the previous run's verdict for each case id.
+    baseline = {r.cid: True for r in results}
+    ok, message = ci_gate(results, baseline=baseline)
     print(f"\nCI gate: {'ALLOW' if ok else 'BLOCK'}  ({message})")
 
     print("\nper-category breakdown")

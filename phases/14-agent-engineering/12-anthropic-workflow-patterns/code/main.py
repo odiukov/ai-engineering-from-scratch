@@ -77,9 +77,12 @@ def orchestrator_workers(task: str, workers: list[Worker],
 def evaluator_optimizer(task: str, proposer: Callable[[str, str | None], str],
                         evaluator: Callable[[str, str], tuple[bool, str]],
                         max_iter: int = 5) -> tuple[str, list[tuple[str, str, str]]]:
+    if max_iter < 1:
+        raise ValueError("max_iter must be at least 1")
     trace: list[tuple[str, str, str]] = []
     feedback: str | None = None
-    for i in range(max_iter):
+    candidate = ""  # bound before the loop: max_iter=0 used to hit UnboundLocalError
+    for _ in range(max_iter):
         candidate = proposer(task, feedback)
         ok, judge = evaluator(task, candidate)
         trace.append((candidate, "PASS" if ok else "FAIL", judge))

@@ -10,7 +10,7 @@ Run: python3 code/main.py
 
 from __future__ import annotations
 
-import fnmatch
+from pathlib import PurePosixPath
 import json
 import time
 from dataclasses import asdict, dataclass, field
@@ -65,7 +65,16 @@ class ScopeReport:
 
 
 def matches_any(path: str, patterns: list[str]) -> bool:
-    return any(fnmatch.fnmatch(path, p) for p in patterns)
+    """Glob match that respects directory separators.
+
+    fnmatch treats "/" as an ordinary character, so it gets scope checks wrong
+    in BOTH directions: fnmatch("app/x.py", "app/**/*.py") is False (an allowed
+    file at the package root reads as off-scope) and fnmatch("app/sub/x.py",
+    "app/*.py") is True (an edit one directory deeper sails through as allowed).
+    PurePosixPath.full_match implements real ** semantics.
+    """
+    target = PurePosixPath(path)
+    return any(target.full_match(pattern) for pattern in patterns)
 
 
 def merge_contracts(parent: ScopeContract, child: ScopeContract) -> ScopeContract:
