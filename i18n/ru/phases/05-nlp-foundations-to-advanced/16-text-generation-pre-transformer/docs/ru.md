@@ -137,14 +137,12 @@ def laplace_probability(ngrams, contexts, vocab_size, context, word):
 
 ```python
 def kneser_ney_bigram_model(corpus_tokens, discount=0.75):
-    unigrams = Counter()
     bigrams = Counter()
     unigram_contexts = defaultdict(set)
 
     for sentence in corpus_tokens:
         padded = ["<s>"] + sentence + ["</s>"]
         for i, w in enumerate(padded):
-            unigrams[w] += 1
             if i > 0:
                 prev = padded[i - 1]
                 bigrams[(prev, w)] += 1
@@ -163,7 +161,8 @@ def kneser_ney_bigram_model(corpus_tokens, discount=0.75):
     for (prev, w) in bigrams:
         unique_follow[prev].add(w)
 
-    def prob(prev, w):
+    def prob(context, w):
+        prev = context[-1]
         count = bigrams.get((prev, w), 0)
         denom = context_totals.get(prev, 0)
         if denom == 0:
@@ -175,7 +174,9 @@ def kneser_ney_bigram_model(corpus_tokens, discount=0.75):
     return prob
 ```
 
-Три подвижные части. `continuation_prob` отвечает на вопрос «в скольких разных контекстах встречается это слово?» (это и есть находка Kneser-Ney). `lambda_prev` — масса, освобождённая скидкой, она задаёт вес отката. Итоговая вероятность — уменьшенный основной член плюс взвешенный continuation-член.
+Три подвижные части. `continuation_prob` отвечает на вопрос «в скольких разных контекстах встречается это слово?» (это и есть находка Kneser-Ney). `lambda_prev` — масса, освобождённая скидкой, она задаёт вес отката. Итоговая вероятность — уменьшенный основной член плюс взвешенный continuation-член. Ни одного сырого униграммного счётчика внутри этой функции нет, и это принципиально: у Kneser-Ney модель младшего порядка — continuation probability, а не частота.
+
+Возвращаемая `prob` имеет ту же форму `(context, word)`, что `raw_probability` и `laplace_probability` из Шагов 1-2: `context` — кортеж из предыдущих `n-1` токенов, здесь кортеж из одного элемента. Именно единая сигнатура у всех трёх моделей и позволяет Шагам 4 и 5 принимать любую из них.
 
 > 🎒 **На пальцах.** Смотрите на `discount=0.75`. Если биграмма встретилась 4 раза при контексте, встреченном 10 раз, основной член даёт (4 − 0.75) / 10 = 0.325 вместо 0.4. Отнятые 0.075 уходят в `lambda_prev` и раздаются словам пропорционально continuation probability.
 
@@ -185,11 +186,12 @@ def kneser_ney_bigram_model(corpus_tokens, discount=0.75):
 import random
 
 
-def generate(prob_fn, vocab, prefix, max_len=30, seed=0):
+def generate(prob_fn, vocab, prefix, n=2, max_len=30, seed=0):
     rng = random.Random(seed)
     tokens = list(prefix)
     for _ in range(max_len):
-        candidates = [(w, prob_fn(tokens[-1], w)) for w in vocab]
+        context = tuple(tokens[-(n - 1):])
+        candidates = [(w, prob_fn(context, w)) for w in vocab]
         total = sum(p for _, p in candidates)
         r = rng.random() * total
         acc = 0.0
@@ -213,17 +215,33 @@ def generate(prob_fn, vocab, prefix, max_len=30, seed=0):
 import math
 
 
-def perplexity(prob_fn, sentences):
+def perplexity(prob_fn, sentences, n=2):
     total_log_prob = 0.0
     total_tokens = 0
     for sentence in sentences:
-        padded = ["<s>"] + sentence + ["</s>"]
-        for i in range(1, len(padded)):
-            p = prob_fn(padded[i - 1], padded[i])
+        padded = ["<s>"] * (n - 1) + sentence + ["</s>"]
+        for i in range(n - 1, len(padded)):
+            context = tuple(padded[i - n + 1:i])
+            p = prob_fn(context, padded[i])
             total_log_prob += math.log(max(p, 1e-12))
             total_tokens += 1
     return math.exp(-total_log_prob / total_tokens)
 ```
+
+`n` должно совпадать с порядком модели, стоящей за `prob_fn`: паддинг и ширина контекста обязаны быть одинаковыми на обучении и на тесте. Любая из трёх моделей Шагов 1-3 подставляется напрямую — это и есть Упражнение 2:
+
+```python
+ngrams, contexts = train_ngram(train, n=3)
+vocab_size = len({w for s in train for w in s} | {"<s>", "</s>"})
+
+kn = kneser_ney_bigram_model(train)
+laplace = lambda ctx, w: laplace_probability(ngrams, contexts, vocab_size, ctx, w)
+
+print(perplexity(kn, test, n=2))
+print(perplexity(laplace, test, n=3))
+```
+
+Сравнивать можно только модели, посчитанные на одних и тех же токенах: биграммная и триграммная модели здесь видят один и тот же тестовый набор токенов, а вот сравнение через разные токенизации не значит вообще ничего.
 
 Меньше — лучше. На корпусе Brown хорошо настроенная 4-граммная KN-модель выходит на perplexity около 140. Трансформерная языковая модель на том же тесте даёт 15–30. Разрыв примерно десятикратный. Из-за этого разрыва область и пошла дальше.
 
@@ -266,7 +284,7 @@ Refuse to report perplexity computed with different tokenization between systems
 2. **Medium.** Реализуйте perplexity для своей KN-модели на отложенной части Шекспира. Сравните с Laplace. Вы должны увидеть, что KN снижает perplexity на 30–50%.
 3. **Hard.** Постройте триграммный корректор опечаток: по неверно написанному слову и его контексту генерируйте варианты исправления и ранжируйте их по вероятности в контексте под вашей LM. Оцените на корпусе опечаток Birkbeck (открытый).
 
-> 🎒 **На пальцах.** Подсказка ко второму заданию: считайте perplexity на одних и тех же предложениях и с одинаковой токенизацией, иначе числа несравнимы вообще. Ожидайте примерно такую картину: Laplace ≈ 300, Kneser-Ney ≈ 180. Это падение на 40% — как раз обещанные 30–50%.
+> 🎒 **На пальцах.** Подсказка ко второму заданию: готовый сниппет лежит в Шаге 5. Главное — не перепутать `n`: KN-модель из Шага 3 биграммная, поэтому `perplexity(kn, test, n=2)`, а Laplace обучен на триграммах, поэтому `n=3`. Передадите не то `n` — и `prob_fn` получит контекст не той ширины, а число на выходе окажется мусором. И считайте perplexity на одних и тех же предложениях с одинаковой токенизацией, иначе числа несравнимы вообще. Ожидайте примерно такую картину: Laplace ≈ 300, Kneser-Ney ≈ 180. Это падение на 40% — как раз обещанные 30–50%.
 
 ## Key Terms
 

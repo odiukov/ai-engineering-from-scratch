@@ -83,12 +83,16 @@ def mask_logits(logits, valid_token_ids):
     return mask
 
 
-def generate_constrained(model, tokenizer, prompt, fsm):
+def generate_constrained(model, tokenizer, prompt, fsm, sample, max_tokens=256):
     ids = tokenizer.encode(prompt)
     state = fsm.initial_state
-    while not fsm.is_accept(state):
+    for _ in range(max_tokens):
+        if fsm.is_accept(state):
+            break
         logits = model.next_token_logits(ids)
         valid = fsm.valid_tokens(state, tokenizer)
+        if not valid:
+            break
         logits = mask_logits(logits, valid)
         tok = sample(logits)
         ids.append(tok)
@@ -96,9 +100,13 @@ def generate_constrained(model, tokenizer, prompt, fsm):
     return tokenizer.decode(ids)
 ```
 
-Автомат отслеживает, какие части grammar мы уже выполнили. `valid_tokens(state, tokenizer)` вычисляет, какие токены vocabulary могут продвинуть автомат, не уводя его с пути в принимающее состояние.
+Автомат отслеживает, какие части grammar мы уже выполнили. `valid_tokens(state, tokenizer)` вычисляет, какие токены vocabulary могут продвинуть автомат, не уводя его с пути в принимающее состояние. `sample` — это тот же сэмплер, которым вы пользуетесь и так: функция вида `(logits) -> token_id`.
 
 > 🎒 **На пальцах.** Автомат — это как турникеты в метро. В каждом состоянии открыт только один или несколько проходов, остальные закрыты. `mask_logits` и есть тот сотрудник, который закрывает лишние турникеты: он ставит `-inf` во все позиции, кроме перечисленных в `valid`.
+
+Потолок `max_tokens` и проверка на пустой `valid` — не украшение. Grammar с циклом (или автомат, из текущего состояния которого принимающее просто недостижимо) никогда не выполнит условие `is_accept`, и бесконечный `while` превращает эту ошибку в описании грамматики в намертво повисшую генерацию. Всегда ограничивайте цикл и всегда обрабатывайте случай «здесь нет ни одного допустимого токена».
+
+> 🎒 **На пальцах.** Разница между `while not fsm.is_accept(state)` и `for _ in range(max_tokens)` — это разница между «висим до конца времён» и «сдаёмся через 256 шагов». Ошиблись в грамматике, забыли выход из состояния — с `while` процесс просто перестаёт отвечать, и вы полдня ищете, где он застрял. С `for` вы получаете обрезанный ответ, но получаете его через секунду, и по обрезку сразу видно, на каком месте автомат заблудился. То же и с пустым `valid`: если допустимых токенов ноль, генерировать нечего — надо выходить, а не маскировать все 100 000 логитов в `-inf` и сэмплировать из ничего.
 
 ### Step 2: Outlines for JSON Schema
 

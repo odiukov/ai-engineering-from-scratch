@@ -106,19 +106,36 @@ def score_niah(model, haystack, question, expected):
 ### Step 2: a multi-needle variant
 
 ```python
-def build_multi_needle(filler, needles, total_tokens):
-    depths = [0.1, 0.4, 0.7]
-    chunks = [filler[:int(total_tokens * 0.1)]]
-    for depth, needle in zip(depths, needles):
-        chunks.append(needle)
-        next_chunk = filler[int(total_tokens * depth): int(total_tokens * (depth + 0.3))]
-        chunks.append(next_chunk)
-    return " ".join(chunks)
+def build_multi_needle(filler_text, needles, total_tokens, depths=(0.1, 0.4, 0.7)):
+    filler_tokens = tokenize(filler_text)
+    if not filler_tokens:
+        raise ValueError("filler_text produced no tokens")
+
+    needle_tokens = [tokenize(n) for n in needles]
+    body_len = max(total_tokens - sum(len(n) for n in needle_tokens), 0)
+    while len(filler_tokens) < body_len:
+        filler_tokens = filler_tokens + filler_tokens
+    filler_tokens = filler_tokens[:body_len]
+
+    out, cursor = [], 0
+    for depth, needle in sorted(zip(depths, needle_tokens)):
+        pos = min(int(body_len * depth), body_len)
+        out.extend(filler_tokens[cursor:pos])
+        out.extend(needle)
+        cursor = pos
+    out.extend(filler_tokens[cursor:])
+    return " ".join(out)
 ```
 
 Вопросы вроде «What are the three magic words?» требуют достать все три. Успех на одной иголке не предсказывает успех на трёх.
 
+Следите за единицами измерения: `total_tokens` — это количество токенов, поэтому каждый срез здесь тоже токенный. Если резать *строку* наполнителя по `total_tokens`, вы отмеряете символы, и построенный стог окажется в несколько раз короче той длины, которую вы подписываете на оси X своего heatmap. Единственный курсор, проходящий по наполнителю, вдобавок гарантирует, что окна глубин выкладывают документ встык, а не перекрывают друг друга.
+
 > 🎒 **На пальцах.** Три иголки на глубинах 0.1, 0.4 и 0.7 — это как попросить запомнить три числа из разных концов длинной лекции. Модель, которая находит одну иголку в 95% случаев, на трёх легко даёт 60%: вероятности не складываются, а перемножаются. 0.95³ ≈ 0.86, и это ещё оптимистичная оценка.
+
+> 🎒 **На пальцах.** Функция построена по тому же рецепту, что `build_haystack` в Step 1, только точек вставки не одна, а три. Сначала считаем, сколько токенов останется на наполнитель: `body_len = total_tokens - сумма длин иголок`. Потом повторяем наполнитель, пока его не хватит, и обрезаем ровно до `body_len`. Дальше идём по глубинам от меньшей к большей (за это отвечает `sorted`) и на каждой доливаем наполнитель от `cursor` до `pos`, а затем кладём иголку. Последняя строка `out.extend(filler_tokens[cursor:])` доливает хвост после самой глубокой иголки. Итоговая длина получается ровно `total_tokens` — а именно это число вы подписываете на графике.
+
+> 🎒 **На пальцах.** Почему нельзя было обойтись срезом строки вроде `filler[:int(total_tokens * 0.1)]`. Потому что `total_tokens` — токены, а срез строки в Python отсчитывает символы. Один токен в среднем весит примерно 4 символа, значит на `total_tokens = 64000` такой срез отмерит 6 400 символов — это около 1 600 токенов, а не 6 400. Вы напишете в отчёте «на 64k модель нашла все три иголки», хотя реально проверили примерно 16k, то есть в четыре раза меньше. Ошибка в единицах измерения не роняет программу — она молча делает весь замер неправдой.
 
 ### Step 3: multi-hop variable tracing (RULER-style)
 

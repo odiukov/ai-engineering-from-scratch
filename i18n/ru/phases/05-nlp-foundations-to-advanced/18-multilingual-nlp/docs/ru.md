@@ -77,6 +77,11 @@ import torch
 tok = AutoTokenizer.from_pretrained("joeddav/xlm-roberta-large-xnli")
 model = AutoModelForSequenceClassification.from_pretrained("joeddav/xlm-roberta-large-xnli")
 
+# Never hardcode the entailment index. NLI checkpoints disagree on label order.
+ENTAILMENT_ID = next(
+    i for i, name in model.config.id2label.items() if name.lower().startswith("entail")
+)
+
 
 def classify(text, candidate_labels, hypothesis_template="This text is about {}."):
     scores = {}
@@ -85,7 +90,7 @@ def classify(text, candidate_labels, hypothesis_template="This text is about {}.
         inputs = tok(text, hypothesis, return_tensors="pt", truncation=True)
         with torch.no_grad():
             logits = model(**inputs).logits[0]
-        entail_score = torch.softmax(logits, dim=-1)[2].item()
+        entail_score = torch.softmax(logits, dim=-1)[ENTAILMENT_ID].item()
         scores[label] = entail_score
     return dict(sorted(scores.items(), key=lambda x: -x[1]))
 
@@ -99,7 +104,11 @@ print(classify("J'adore ce produit !", ["positive", "negative", "neutral"]))
 
 > 🎒 **На пальцах.** Трюк с entailment: вместо «к какому классу относится текст» модель спрашивают «следует ли из текста утверждение „This text is about positive"?». Для каждой из трёх меток задаётся свой вопрос, и берётся тот, где вероятность entailment выше. Три метки — три прогона модели, вот почему `for label in candidate_labels`.
 
-> 🎒 **На пальцах.** Обратите внимание на `[2]` в `torch.softmax(logits, dim=-1)[2]`. Модель NLI выдаёт три числа: contradiction, neutral, entailment. Нас интересует только третье. Индекс 2 — это и есть «текст подтверждает гипотезу», и именно он превращается в оценку класса.
+Поиск индекса через `id2label` — не перестраховка ради красоты. У этого чекпоинта метки идут в порядке `contradiction, neutral, entailment`, так что индекс 2 для него правильный, но никакой другой NLI-чекпоинт этот порядок соблюдать не обязан, а подмена имени модели — первая правка, которую делают все. Неверный индекс не бросает исключение. Он молча берёт оценку contradiction вместо entailment, и все предсказания оказываются перевёрнутыми.
+
+> 🎒 **На пальцах.** Модель NLI выдаёт три числа: contradiction, neutral, entailment. Нас интересует только entailment — «текст подтверждает гипотезу», именно это число и превращается в оценку класса. Но какое оно по счёту — первое, второе или третье, — решает не логика, а автор чекпоинта. Поэтому мы не пишем `[2]` руками, а спрашиваем у самой модели: `model.config.id2label` — это словарь вида `{0: 'contradiction', 1: 'neutral', 2: 'entailment'}`, и `next(...)` вытаскивает из него номер той метки, чьё имя начинается на `entail`.
+
+> 🎒 **На пальцах.** Почему это важнее, чем кажется. Представьте, что вы взяли другой чекпоинт, где entailment стоит под индексом 0. С зашитой двойкой код продолжит работать без единой ошибки, только вместо «подтверждает ли текст гипотезу» вы начнёте измерять «противоречит ли», и у отрицательного отзыва в лидеры выйдет метка «positive». Ошибка на весь пайплайн — и ни одной красной строчки в логах. Такие баги ловятся не тестами, а привычкой никогда не зашивать индексы меток.
 
 ### Step 2: multilingual embedding space
 
@@ -130,7 +139,7 @@ for eng, other in pairs:
 ### Step 3: few-shot fine-tuning strategy
 
 ```python
-from transformers import TrainingArguments, Trainer
+from transformers import DataCollatorWithPadding, TrainingArguments, Trainer
 from datasets import Dataset
 
 
@@ -142,7 +151,7 @@ def few_shot_finetune(base_model, base_tokenizer, examples):
         out["labels"] = ex["label"]
         return out
 
-    ds = ds.map(tokenize_fn)
+    ds = ds.map(tokenize_fn, remove_columns=ds.column_names)
     args = TrainingArguments(
         output_dir="out",
         per_device_train_batch_size=8,
@@ -150,7 +159,12 @@ def few_shot_finetune(base_model, base_tokenizer, examples):
         learning_rate=2e-5,
         save_strategy="no",
     )
-    trainer = Trainer(model=base_model, args=args, train_dataset=ds)
+    trainer = Trainer(
+        model=base_model,
+        args=args,
+        train_dataset=ds,
+        data_collator=DataCollatorWithPadding(base_tokenizer),
+    )
     trainer.train()
     return base_model
 ```
@@ -158,6 +172,12 @@ def few_shot_finetune(base_model, base_tokenizer, examples):
 Для 100–500 примеров на целевом языке `num_train_epochs=5` и `learning_rate=2e-5` — безопасные значения по умолчанию. Более высокий learning rate разрушает многоязычное выравнивание, и вы получаете модель только для английского.
 
 > 🎒 **На пальцах.** 300 примеров при `per_device_train_batch_size=8` — это около 38 шагов на эпоху, то есть примерно 190 шагов за 5 эпох. Обучение занимает минуты. А вот `learning_rate` в 10 раз больше (2e-4) за те же 190 шагов сотрёт общее многоязычное пространство — модель запомнит примеры и забудет остальные 99 языков.
+
+`data_collator` здесь обязателен, а не желателен. Токенизация с `truncation=True` и без `padding` оставляет каждый пример своей длины, а без padding-коллатора `Trainer` берёт коллатор по умолчанию, который складывает тензоры батча как есть и падает на первом же батче со смешанными длинами. `DataCollatorWithPadding` добивает каждый батч до его собственного самого длинного примера — это дешевле, чем добивать всё до `max_length=128`.
+
+> 🎒 **На пальцах.** Коллатор — это сборщик батча. Восемь примеров длиной 12, 30, 7, 41, 19, 8, 25 и 11 токенов в один тензор не складываются: тензор — прямоугольник, а тут рваный край. `DataCollatorWithPadding` дописывает в короткие строки padding до 41 — до длины самого длинного примера *в этом батче*, а не до 128. Если бы мы padding'ом добивали всё до 128, модель считала бы втрое больше пустых позиций за те же деньги.
+
+> 🎒 **На пальцах.** `remove_columns=ds.column_names` из строки с `map` — из той же истории. Без него в датасете рядом с `input_ids` останутся исходные колонки `text` и `label`, коллатор попытается собрать в тензор ещё и строки текста, и вы получите ошибку в самом неочевидном месте. Правило простое: после токенизации сырые колонки выбрасываются.
 
 ## Evaluation that actually works
 

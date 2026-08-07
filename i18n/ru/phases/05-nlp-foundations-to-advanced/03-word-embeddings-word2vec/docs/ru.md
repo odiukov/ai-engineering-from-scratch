@@ -119,7 +119,6 @@ def train_pair(W, W_prime, center_idx, context_idx, negative_indices, lr):
     for i, u in enumerate(u_negs):
         grad_center += neg_scores[i] * u
 
-    W[context_idx] = W[context_idx]
     W_prime[context_idx] -= lr * (pos_score - 1) * v_c
     for i, neg_idx in enumerate(negative_indices):
         W_prime[neg_idx] -= lr * neg_scores[i] * v_c
@@ -133,6 +132,16 @@ def train_pair(W, W_prime, center_idx, context_idx, negative_indices, lr):
 ### Step 4: train on a toy corpus
 
 ```python
+def sample_negatives(rng, vocab_size, k_neg, forbidden):
+    if vocab_size <= len(forbidden):
+        return []
+    negs = []
+    while len(negs) < k_neg:
+        draw = rng.integers(0, vocab_size, size=k_neg)
+        negs.extend(int(n) for n in draw if n not in forbidden)
+    return negs[:k_neg]
+
+
 def train(docs, dim=16, window=2, k_neg=5, epochs=100, lr=0.05, seed=0):
     vocab = build_vocab(docs)
     vocab_size = len(vocab)
@@ -145,15 +154,16 @@ def train(docs, dim=16, window=2, k_neg=5, epochs=100, lr=0.05, seed=0):
         for center, context in pairs:
             c_idx = vocab[center]
             ctx_idx = vocab[context]
-            negs = rng.integers(0, vocab_size, size=k_neg)
-            negs = [n for n in negs if n != ctx_idx and n != c_idx]
+            negs = sample_negatives(rng, vocab_size, k_neg, {c_idx, ctx_idx})
             train_pair(W, W_prime, c_idx, ctx_idx, negs, lr)
     return vocab, W
 ```
 
+`sample_negatives` досэмплирует, пока не наберёт ровно `k_neg` негативов. Соблазнительный короткий путь — насэмплировать один раз и потом выкинуть центральное и контекстное слово, — но тогда одни пары молча обучаются против четырёх негативов, другие против трёх, а иногда и вовсе ни против одного: `k_neg`, который вы передали, перестаёт быть тем `k_neg`, который вы получили.
+
 После достаточного числа эпох на большом corpus слова, делящие контексты, получают похожие центральные embeddings. На игрушечном corpus эффект едва заметен. На миллиардах tokens — заметен драматически.
 
-> 🎒 **На пальцах.** Посчитайте объём работы для одного предложения из 5 слов: 14 пар × 100 эпох = 1400 обновлений, и на каждое приходится 1 положительный и до 5 отрицательных примеров, то есть около 8400 скалярных произведений. Звучит много — но это меньше, чем один шаг обучения трансформера. Word2Vec на corpus в миллион слов спокойно обучается на ноутбуке.
+> 🎒 **На пальцах.** Посчитайте объём работы для одного предложения из 5 слов: 14 пар × 100 эпох = 1400 обновлений, и на каждое приходится 1 положительный и ровно 5 отрицательных примеров (за это и отвечает `sample_negatives`), то есть 8400 скалярных произведений. Звучит много — но это меньше, чем один шаг обучения трансформера. Word2Vec на corpus в миллион слов спокойно обучается на ноутбуке.
 
 ### Step 5: the analogy trick
 

@@ -63,6 +63,11 @@ ner-bio-tagging
 def spans_to_bio(tokens, spans):
     labels = ["O"] * len(tokens)
     for start, end, label in spans:
+        if any(labels[i] != "O" for i in range(start, end)):
+            raise ValueError(
+                f"span ({start}, {end}, {label}) overlaps an existing span; "
+                "BIO gives each token exactly one label and cannot nest"
+            )
         labels[start] = f"B-{label}"
         for i in range(start + 1, end):
             labels[i] = f"I-{label}"
@@ -70,6 +75,8 @@ def spans_to_bio(tokens, spans):
 
 
 def bio_to_spans(tokens, labels):
+    if len(tokens) != len(labels):
+        raise ValueError("tokens and labels must be the same length")
     spans = []
     current = None
     for i, label in enumerate(labels):
@@ -96,6 +103,8 @@ def bio_to_spans(tokens, labels):
 ```
 
 > 🎒 **На пальцах.** Проследите за `bio_to_spans` по этому примеру. Семь токенов на входе, три span на выходе. Span `(0, 1, 'ORG')` читается как «с токена 0 по токен 1, не включая, тип ORG» — то есть ровно слово `Apple`. Это питоновские срезы: `tokens[0:1]`. Хранить границы, а не сами слова, удобно тем, что вы всегда можете вернуться к исходному тексту.
+
+Проверка на пересечение в `spans_to_bio` — самая честная часть этого хелпера. BIO хранит по одной метке на token, поэтому «Bank of America Tower» физически нельзя разметить одновременно как ORG и как FACILITY. Без проверки второй span молча затирает первый, и разметка теряется где-то между загрузчиком данных и обучающим набором. Лучше упасть ровно там, где формат кончился, — смотрите «Nested entities» в разделе *Where it falls apart*. Заодно обратите внимание на `len(tokens) != len(labels)` в `bio_to_spans`: без этой строки параметр `tokens` вообще ни на что не влиял бы, а рассинхрон длин уехал бы в спаны с границами за пределами предложения.
 
 ### Step 2: hand-crafted features
 
@@ -156,6 +165,8 @@ def rule_based_ner(tokens):
             labels.append("O")
     return labels
 ```
+
+Заметьте, чего этот цикл не может сделать в принципе: он умеет выдавать только теги `B-`. Поиск идёт по одному token за раз, поэтому сущность из двух слов возвращается двумя отдельными односложными сущностями (`New` — `B-GPE`, `York` — `B-GPE`), а многословная запись газетира не сматчится вообще никогда. Дешёвое лечение — склеивать подряд идущие срабатывания одного типа в цепочку `B-` / `I-`; настоящее — искать по газетиру фразами, выбирая самое длинное совпадение (longest match).
 
 Продакшен-газетиры содержат миллионы записей, собранных из Википедии и DBpedia. Покрытие хорошее. Разрешение неоднозначностей (`Apple` компания или фрукт) — ужасное. Поэтому статистические модели и победили.
 

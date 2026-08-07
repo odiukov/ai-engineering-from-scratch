@@ -71,6 +71,8 @@ from collections import Counter
 
 
 def train_nb(docs_by_class, vocab, alpha=1.0):
+    if alpha <= 0:
+        raise ValueError("alpha must be > 0; alpha=0 leaves zero probabilities and predict_nb logs them")
     class_priors = {}
     class_word_probs = {}
     total_docs = sum(len(d) for d in docs_by_class.values())
@@ -81,7 +83,7 @@ def train_nb(docs_by_class, vocab, alpha=1.0):
         for doc in docs:
             for token in doc:
                 counts[token] += 1
-        total = sum(counts.values()) + alpha * len(vocab)
+        total = sum(counts[w] for w in vocab) + alpha * len(vocab)
         class_word_probs[cls] = {
             w: (counts[w] + alpha) / total for w in vocab
         }
@@ -99,9 +101,11 @@ def predict_nb(doc, class_priors, class_word_probs):
     return max(scores, key=scores.get)
 ```
 
-Аддитивное сглаживание (alpha=1.0) — это сглаживание Лапласа. Без него слово, не встреченное в классе, имеет вероятность ноль, и логарифм улетает в бесконечность. На практике часто берут `alpha=0.01`. `alpha=1.0` — учебное значение по умолчанию.
+Аддитивное сглаживание (alpha=1.0) — это сглаживание Лапласа. Без него слово, не встреченное в классе, имеет вероятность ноль, и логарифм улетает в бесконечность — поэтому `train_nb` отказывается работать с `alpha=0` сразу, а не даёт `predict_nb` умереть на `math.log(0)` уже во время инференса. На практике часто берут `alpha=0.01`. `alpha=1.0` — учебное значение по умолчанию.
 
-> 🎒 **На пальцах.** Смотрите, что чинит alpha. Слово `brilliant` не встречается ни в одном негативном отзыве, значит `P(brilliant | negative) = 0/24 = 0`. Умножьте на это ноль — и весь отзыв получает вероятность негатива ноль, что бы в нём ещё ни стояло. С alpha=1 вместо нуля выходит 1/(24 + размер словаря): маленькое число, но не приговор.
+Приглядитесь к знаменателю. Он суммирует счётчики только по `vocab`, а не берёт `sum(counts.values())`. Эти два выражения совпадают лишь тогда, когда словарь покрывает каждый обучающий token. Как только вы отсечёте редкие слова порогом по частоте, `counts` всё равно продолжит хранить выброшенные tokens, и полная сумма сделает так, что `class_word_probs[cls]` в сумме даст меньше единицы. Распределение, которое не распределение, — это баг, которого вы не увидите в цифре accuracy, только в калибровке.
+
+> 🎒 **На пальцах.** Смотрите, что чинит alpha. Слово `brilliant` не встречается ни в одном негативном отзыве, значит `P(brilliant | negative) = 0/24 = 0`. Умножьте на это ноль — и весь отзыв получает вероятность негатива ноль, что бы в нём ещё ни стояло. С alpha=1 вместо нуля выходит 1/(24 + размер словаря): маленькое число, но не приговор. А `alpha=0` теперь и не примут: `train_nb` бросит `ValueError` на входе, потому что «сглаживание без сглаживания» — это не настройка, а отложенная поломка в `predict_nb`.
 
 > 🎒 **На пальцах.** Почему в `predict_nb` складывают логарифмы, а не перемножают вероятности. Отзыв из 20 слов, каждое с вероятностью около 0.001, даёт произведение 10 в минус шестидесятой. Такое число float просто округлит до нуля, и оба класса получат одинаковый счёт. Логарифмы превращают умножение в сложение: 20 × log(0.001) ≈ −138. Число как число, сравнивать можно.
 
@@ -198,9 +202,9 @@ def evaluate(y_true, y_pred):
     fp = sum(1 for t, p in zip(y_true, y_pred) if t == 0 and p == 1)
     fn = sum(1 for t, p in zip(y_true, y_pred) if t == 1 and p == 0)
     tn = sum(1 for t, p in zip(y_true, y_pred) if t == 0 and p == 0)
-    precision = tp / (tp + fp) if tp + fp else 0
-    recall = tp / (tp + fn) if tp + fn else 0
-    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
     return {"tp": tp, "fp": fp, "tn": tn, "fn": fn, "precision": precision, "recall": recall, "f1": f1}
 ```
 
