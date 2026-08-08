@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Gram-Schmidt — вычитаем тень</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --ink: #e8eaf0;
+    --muted: #8b93a7;
+    --v1: #4da3ff;
+    --v2: #ffb454;
+    --u1: #35d07f;
+    --u2: #ff5f8f;
+    --proj: #7a6cff;
+    --grid: #232733;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    background: var(--bg); color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  .wrap { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+  canvas { background: var(--panel); border-radius: 12px; cursor: grab; touch-action: none; }
+  canvas.dragging { cursor: grabbing; }
+  .panel { flex: 1 1 320px; min-width: 300px; }
+  .card {
+    background: var(--panel); border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+             color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; justify-content: space-between; gap: 12px;
+         font-variant-numeric: tabular-nums; padding: 3px 0; }
+  .row .k { color: var(--muted); }
+  .row .val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+            margin-right: 7px; vertical-align: middle; }
+  .step { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          font-size: 13px; line-height: 1.9; }
+  .step .hl { color: var(--proj); }
+  .ok { color: var(--u1); font-weight: 600; }
+  .warn { color: var(--u2); font-weight: 600; }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 14px; }
+  label { display: flex; align-items: center; gap: 8px; color: var(--muted);
+          font-size: 13px; margin-top: 8px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Gram-Schmidt: вычитаем тень</h1>
+<p class="sub">Тащите мышкой синий <b>v1</b> и оранжевый <b>v2</b>. Смотрите, как строятся зелёный <b>u1</b> и розовый <b>u2</b>.</p>
+
+<div class="wrap">
+  <canvas id="cv" width="560" height="560"></canvas>
+
+  <div class="panel">
+    <div class="card">
+      <h2>Входные векторы</h2>
+      <div class="row"><span class="k"><i class="swatch" style="background:var(--v1)"></i>v1</span><span class="val" id="o-v1"></span></div>
+      <div class="row"><span class="k"><i class="swatch" style="background:var(--v2)"></i>v2</span><span class="val" id="o-v2"></span></div>
+      <div class="row"><span class="k">v1 · v2</span><span class="val" id="o-dot-in"></span></div>
+      <div class="row"><span class="k">угол между ними</span><span class="val" id="o-ang-in"></span></div>
+    </div>
+
+    <div class="card">
+      <h2>Шаг за шагом</h2>
+      <div class="step">
+        u1 = v1 / |v1| = <span id="s-u1"></span><br>
+        v2 · u1 = <span id="s-scal"></span><br>
+        <span class="hl">тень = (v2·u1)·u1 = <span id="s-proj"></span></span><br>
+        w2 = v2 − тень = <span id="s-w2"></span><br>
+        u2 = w2 / |w2| = <span id="s-u2"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Проверка ортонормированности</h2>
+      <div class="row"><span class="k">|u1|</span><span class="val" id="c-n1"></span></div>
+      <div class="row"><span class="k">|u2|</span><span class="val" id="c-n2"></span></div>
+      <div class="row"><span class="k">u1 · u2</span><span class="val" id="c-dot"></span></div>
+      <div class="row"><span class="k">итог</span><span class="val" id="c-verdict"></span></div>
+    </div>
+
+    <div class="card">
+      <label><input type="checkbox" id="showResidual" checked> показывать пунктиром вычитание тени</label>
+      <label><input type="checkbox" id="showGrid" checked> сетка координат</label>
+    </div>
+
+    <p class="hint">Поставьте v2 почти вдоль v1 — увидите, как тень съедает его почти целиком, а w2 становится крошечным. Именно поэтому Gram-Schmidt численно неустойчив на почти-зависимых векторах.</p>
+  </div>
+</div>
+
+<script>
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+const CX = W / 2, CY = H / 2;
+const SCALE = 52;               // пикселей на единицу
+
+let v1 = { x: 3, y: 1 };
+let v2 = { x: 1, y: 3 };
+let dragging = null;
+
+const toPx = v => ({ x: CX + v.x * SCALE, y: CY - v.y * SCALE });
+const toWorld = (px, py) => ({ x: (px - CX) / SCALE, y: (CY - py) / SCALE });
+const dot = (a, b) => a.x * b.x + a.y * b.y;
+const mag = a => Math.hypot(a.x, a.y);
+const scale = (a, k) => ({ x: a.x * k, y: a.y * k });
+const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
+const fmt = v => `[${v.x.toFixed(2)}, ${v.y.toFixed(2)}]`;
+
+function arrow(v, color, label, width = 3, dash = null) {
+  const p = toPx(v);
+  ctx.save();
+  ctx.strokeStyle = color; ctx.fillStyle = color;
+  ctx.lineWidth = width; ctx.lineCap = 'round';
+  if (dash) ctx.setLineDash(dash);
+  ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(p.x, p.y); ctx.stroke();
+  ctx.setLineDash([]);
+  const ang = Math.atan2(p.y - CY, p.x - CX);
+  const h = 11;
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y);
+  ctx.lineTo(p.x - h * Math.cos(ang - 0.42), p.y - h * Math.sin(ang - 0.42));
+  ctx.lineTo(p.x - h * Math.cos(ang + 0.42), p.y - h * Math.sin(ang + 0.42));
+  ctx.closePath(); ctx.fill();
+  if (label) {
+    ctx.font = '600 14px -apple-system, sans-serif';
+    const off = 16;
+    ctx.fillText(label, p.x + off * Math.cos(ang), p.y + off * Math.sin(ang) + 5);
+  }
+  ctx.restore();
+}
+
+function handle(v, color) {
+  const p = toPx(v);
+  ctx.save();
+  ctx.fillStyle = color; ctx.globalAlpha = 0.25;
+  ctx.beginPath(); ctx.arc(p.x, p.y, 13, 0, 7); ctx.fill();
+  ctx.restore();
+}
+
+function drawGrid() {
+  ctx.strokeStyle = 'var(--grid)';
+  ctx.strokeStyle = '#232733'; ctx.lineWidth = 1;
+  for (let i = -6; i <= 6; i++) {
+    ctx.beginPath();
+    ctx.moveTo(CX + i * SCALE, 0); ctx.lineTo(CX + i * SCALE, H); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, CY + i * SCALE); ctx.lineTo(W, CY + i * SCALE); ctx.stroke();
+  }
+  ctx.strokeStyle = '#39404f'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(0, CY); ctx.lineTo(W, CY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(CX, 0); ctx.lineTo(CX, H); ctx.stroke();
+}
+
+function rightAngleMark(a, b) {
+  // маленький квадратик в начале координат между направлениями a и b
+  const s = 16;
+  const ua = scale(a, 1 / mag(a)), ub = scale(b, 1 / mag(b));
+  const p0 = { x: CX, y: CY };
+  const pa = { x: CX + ua.x * s, y: CY - ua.y * s };
+  const pb = { x: CX + ub.x * s, y: CY - ub.y * s };
+  const pc = { x: CX + (ua.x + ub.x) * s, y: CY - (ua.y + ub.y) * s };
+  ctx.save();
+  ctx.strokeStyle = '#8b93a7'; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(pa.x, pa.y); ctx.lineTo(pc.x, pc.y); ctx.lineTo(pb.x, pb.y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  if (document.getElementById('showGrid').checked) drawGrid();
+
+  const m1 = mag(v1);
+  const degenerate = m1 < 0.15;
+  const u1 = degenerate ? { x: 0, y: 0 } : scale(v1, 1 / m1);
+  const s = dot(v2, u1);
+  const proj = scale(u1, s);
+  const w2 = sub(v2, proj);
+  const m2 = mag(w2);
+  const u2 = m2 < 1e-9 ? { x: 0, y: 0 } : scale(w2, 1 / m2);
+
+  const showRes = document.getElementById('showResidual').checked;
+
+  if (showRes && !degenerate) {
+    // тень (проекция) вдоль u1
+    arrow(proj, '#7a6cff', 'тень', 6, null);
+    // пунктир от конца тени к концу v2 — это и есть w2, перенесённый
+    const a = toPx(proj), b = toPx(v2);
+    ctx.save();
+    ctx.strokeStyle = '#ff5f8f'; ctx.lineWidth = 2; ctx.setLineDash([6, 5]);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.restore();
+  }
+
+  arrow(v1, '#4da3ff', 'v1', 2.5);
+  arrow(v2, '#ffb454', 'v2', 2.5);
+  if (!degenerate) {
+    arrow(u1, '#35d07f', 'u1', 4);
+    if (m2 > 1e-6) {
+      arrow(u2, '#ff5f8f', 'u2', 4);
+      rightAngleMark(u1, u2);
+    }
+  }
+  handle(v1, '#4da3ff');
+  handle(v2, '#ffb454');
+
+  // readouts
+  const set = (id, txt, cls) => {
+    const el = document.getElementById(id);
+    el.textContent = txt;
+    el.className = 'val' + (cls ? ' ' + cls : '');
+  };
+  document.getElementById('o-v1').textContent = fmt(v1);
+  document.getElementById('o-v2').textContent = fmt(v2);
+  document.getElementById('o-dot-in').textContent = dot(v1, v2).toFixed(3);
+  const cosIn = dot(v1, v2) / (mag(v1) * mag(v2) || 1);
+  document.getElementById('o-ang-in').textContent =
+    (Math.acos(Math.max(-1, Math.min(1, cosIn))) * 180 / Math.PI).toFixed(1) + '°';
+
+  document.getElementById('s-u1').textContent = fmt(u1);
+  document.getElementById('s-scal').textContent = s.toFixed(3);
+  document.getElementById('s-proj').textContent = fmt(proj);
+  document.getElementById('s-w2').textContent = fmt(w2);
+  document.getElementById('s-u2').textContent = fmt(u2);
+
+  const n1 = mag(u1), n2 = mag(u2), d = dot(u1, u2);
+  set('c-n1', n1.toFixed(6), Math.abs(n1 - 1) < 1e-6 ? 'ok' : '');
+  set('c-n2', n2.toFixed(6), Math.abs(n2 - 1) < 1e-6 ? 'ok' : '');
+  set('c-dot', d.toFixed(6), Math.abs(d) < 1e-6 ? 'ok' : '');
+
+  const vd = document.getElementById('c-verdict');
+  if (m2 < 0.02 || degenerate) {
+    vd.textContent = 'вырождено — векторы почти на одной прямой';
+    vd.className = 'val warn';
+  } else {
+    vd.textContent = 'ортонормированный базис ✓';
+    vd.className = 'val ok';
+  }
+}
+
+function nearest(px, py) {
+  const c1 = toPx(v1), c2 = toPx(v2);
+  const d1 = Math.hypot(px - c1.x, py - c1.y);
+  const d2 = Math.hypot(px - c2.x, py - c2.y);
+  if (Math.min(d1, d2) > 26) return null;
+  return d1 < d2 ? 'v1' : 'v2';
+}
+
+function pos(e) {
+  const r = cv.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+cv.addEventListener('pointerdown', e => {
+  const p = pos(e);
+  dragging = nearest(p.x, p.y);
+  if (dragging) { cv.setPointerCapture(e.pointerId); cv.classList.add('dragging'); }
+});
+cv.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const p = pos(e);
+  const w = toWorld(p.x, p.y);
+  if (dragging === 'v1') v1 = w; else v2 = w;
+  render();
+});
+cv.addEventListener('pointerup', e => {
+  dragging = null; cv.classList.remove('dragging');
+});
+document.getElementById('showResidual').addEventListener('change', render);
+document.getElementById('showGrid').addEventListener('change', render);
+
+render();
+</script>
+</body>
+</html>

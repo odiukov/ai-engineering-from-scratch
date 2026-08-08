@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Косинусная близость — длина не важна</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --ink: #e8eaf0; --muted: #8b93a7;
+    --a: #4da3ff; --b: #ffb454; --arc: #7a6cff;
+    --good: #35d07f; --bad: #ff5f8f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  .wrap { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+  canvas { background: var(--panel); border-radius: 12px; cursor: grab; touch-action: none; }
+  canvas.dragging { cursor: grabbing; }
+  .panel { flex: 1 1 340px; min-width: 320px; }
+  .card { background: var(--panel); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+             color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; justify-content: space-between; gap: 12px;
+         font-variant-numeric: tabular-nums; padding: 4px 0; align-items: baseline; }
+  .row .k { color: var(--muted); font-size: 14px; }
+  .row .val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .big { font-size: 26px; font-weight: 700; font-family: ui-monospace, Menlo, monospace; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+            margin-right: 7px; vertical-align: middle; }
+  .bar { height: 10px; background: #232733; border-radius: 5px; overflow: hidden;
+         margin-top: 6px; position: relative; }
+  .bar i { position: absolute; top: 0; bottom: 0; border-radius: 5px; }
+  .barlab { display: flex; justify-content: space-between; color: var(--muted);
+            font-size: 11px; margin-top: 3px; font-family: ui-monospace, Menlo, monospace; }
+  .verdict { font-weight: 600; }
+  button { background: #232733; color: var(--ink); border: 0; border-radius: 8px;
+           padding: 7px 12px; font-size: 13px; cursor: pointer; margin: 3px 4px 0 0; }
+  button:hover { background: #2c3140; }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 12px; }
+  .hint b { color: var(--ink); }
+</style>
+</head>
+<body>
+<h1>Косинусная близость: длина не важна, важен только угол</h1>
+<p class="sub">Тащите синий <b>a</b> и оранжевый <b>b</b>. Следите за двумя нижними числами.</p>
+
+<div class="wrap">
+  <canvas id="cv" width="520" height="520"></canvas>
+
+  <div class="panel">
+    <div class="card">
+      <h2>Векторы</h2>
+      <div class="row"><span class="k"><i class="swatch" style="background:var(--a)"></i>a</span><span class="val" id="o-a"></span></div>
+      <div class="row"><span class="k">|a| (длина)</span><span class="val" id="o-la"></span></div>
+      <div class="row"><span class="k"><i class="swatch" style="background:var(--b)"></i>b</span><span class="val" id="o-b"></span></div>
+      <div class="row"><span class="k">|b| (длина)</span><span class="val" id="o-lb"></span></div>
+      <div class="row"><span class="k">угол между ними</span><span class="val" id="o-ang"></span></div>
+    </div>
+
+    <div class="card">
+      <h2>Скалярное произведение — портится от длины</h2>
+      <div class="row">
+        <span class="k">a · b</span>
+        <span class="big" id="o-dot"></span>
+      </div>
+      <div class="hint">Удлините любой вектор, не меняя направления — это число вырастет, хотя похожесть не изменилась.</div>
+    </div>
+
+    <div class="card">
+      <h2>Косинусная близость — только угол</h2>
+      <div class="row">
+        <span class="k">(a·b) / (|a|·|b|)</span>
+        <span class="big" id="o-cos"></span>
+      </div>
+      <div class="bar"><i id="bar"></i></div>
+      <div class="barlab"><span>−1</span><span>0</span><span>+1</span></div>
+      <div class="row" style="margin-top:8px">
+        <span class="k">вердикт</span><span class="verdict" id="o-verdict"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Проверьте сами</h2>
+      <button data-act="grow">удлинить b в 2 раза</button>
+      <button data-act="shrink">укоротить b в 2 раза</button>
+      <button data-act="same">поставить b вдоль a</button>
+      <button data-act="perp">поставить b под 90°</button>
+      <button data-act="opp">поставить b навстречу a</button>
+      <div class="hint" style="margin-top:10px">Нажмите <b>«удлинить b»</b> несколько раз подряд.
+      Скалярное произведение будет расти без остановки. Косинус не сдвинется ни на сотую —
+      направление-то не менялось. В этом весь смысл.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height, CX = W/2, CY = H/2, S = 46;
+
+let a = { x: 3, y: 1 };
+let b = { x: 1, y: 3 };
+let drag = null;
+
+const toPx = v => ({ x: CX + v.x*S, y: CY - v.y*S });
+const toW  = (px,py) => ({ x: (px-CX)/S, y: (CY-py)/S });
+const dot  = (p,q) => p.x*q.x + p.y*q.y;
+const mag  = p => Math.hypot(p.x, p.y);
+const fmt  = v => `[${v.x.toFixed(2)}, ${v.y.toFixed(2)}]`;
+
+function grid() {
+  ctx.strokeStyle = '#232733'; ctx.lineWidth = 1;
+  for (let i = -6; i <= 6; i++) {
+    ctx.beginPath(); ctx.moveTo(CX+i*S, 0); ctx.lineTo(CX+i*S, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, CY+i*S); ctx.lineTo(W, CY+i*S); ctx.stroke();
+  }
+  ctx.strokeStyle = '#39404f'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(0, CY); ctx.lineTo(W, CY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(CX, 0); ctx.lineTo(CX, H); ctx.stroke();
+}
+
+function arrow(v, color, label) {
+  const p = toPx(v);
+  ctx.save();
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(p.x, p.y); ctx.stroke();
+  const ang = Math.atan2(p.y-CY, p.x-CX), h = 12;
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y);
+  ctx.lineTo(p.x - h*Math.cos(ang-0.42), p.y - h*Math.sin(ang-0.42));
+  ctx.lineTo(p.x - h*Math.cos(ang+0.42), p.y - h*Math.sin(ang+0.42));
+  ctx.closePath(); ctx.fill();
+  ctx.font = '700 16px -apple-system, sans-serif';
+  ctx.fillText(label, p.x + 18*Math.cos(ang), p.y + 18*Math.sin(ang) + 5);
+  // ruchka
+  ctx.globalAlpha = .22; ctx.beginPath(); ctx.arc(p.x, p.y, 14, 0, 7); ctx.fill();
+  ctx.restore();
+}
+
+function angleArc() {
+  const aa = Math.atan2(a.y, a.x), ab = Math.atan2(b.y, b.x);
+  const r = 62;
+  ctx.save();
+  ctx.strokeStyle = '#7a6cff'; ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(CX, CY, r, -aa, -ab, ((ab - aa + Math.PI*3) % (Math.PI*2)) - Math.PI > 0);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function render() {
+  ctx.clearRect(0,0,W,H);
+  grid();
+  if (mag(a) > .12 && mag(b) > .12) angleArc();
+  arrow(a, '#4da3ff', 'a');
+  arrow(b, '#ffb454', 'b');
+
+  const d = dot(a,b), la = mag(a), lb = mag(b);
+  const cos = (la < 1e-9 || lb < 1e-9) ? 0 : d/(la*lb);
+  const c = Math.max(-1, Math.min(1, cos));
+
+  document.getElementById('o-a').textContent  = fmt(a);
+  document.getElementById('o-b').textContent  = fmt(b);
+  document.getElementById('o-la').textContent = la.toFixed(3);
+  document.getElementById('o-lb').textContent = lb.toFixed(3);
+  document.getElementById('o-ang').textContent = (Math.acos(c)*180/Math.PI).toFixed(1) + '°';
+  document.getElementById('o-dot').textContent = d.toFixed(2);
+  document.getElementById('o-cos').textContent = c.toFixed(4);
+
+  const bar = document.getElementById('bar');
+  const mid = 50, half = c * 50;
+  bar.style.left  = (c >= 0 ? mid : mid + half) + '%';
+  bar.style.width = Math.abs(half) + '%';
+  bar.style.background = c >= 0 ? '#35d07f' : '#ff5f8f';
+
+  const v = document.getElementById('o-verdict');
+  let t, col;
+  if (c > 0.9)       { t = 'почти одно направление'; col = '#35d07f'; }
+  else if (c > 0.3)  { t = 'похожи';                 col = '#35d07f'; }
+  else if (c > -0.05 && c < 0.05) { t = 'перпендикулярны — ничего общего'; col = '#8b93a7'; }
+  else if (c > -0.3) { t = 'почти не связаны';       col = '#8b93a7'; }
+  else if (c > -0.9) { t = 'непохожи';               col = '#ff5f8f'; }
+  else               { t = 'противоположны';         col = '#ff5f8f'; }
+  v.textContent = t; v.style.color = col;
+}
+
+function pos(e){ const r = cv.getBoundingClientRect(); return {x:e.clientX-r.left, y:e.clientY-r.top}; }
+cv.addEventListener('pointerdown', e => {
+  const p = pos(e), pa = toPx(a), pb = toPx(b);
+  const da = Math.hypot(p.x-pa.x, p.y-pa.y), db = Math.hypot(p.x-pb.x, p.y-pb.y);
+  if (Math.min(da,db) > 28) return;
+  drag = da < db ? 'a' : 'b';
+  cv.setPointerCapture(e.pointerId); cv.classList.add('dragging');
+});
+cv.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const p = pos(e), w = toW(p.x, p.y);
+  if (drag === 'a') a = w; else b = w;
+  render();
+});
+cv.addEventListener('pointerup', () => { drag = null; cv.classList.remove('dragging'); });
+
+document.querySelectorAll('button[data-act]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const act = btn.dataset.act, la = mag(a) || 1;
+    if (act === 'grow')   b = { x: b.x*2, y: b.y*2 };
+    if (act === 'shrink') b = { x: b.x/2, y: b.y/2 };
+    if (act === 'same')   b = { x: a.x/la*3, y: a.y/la*3 };
+    if (act === 'perp')   b = { x: -a.y/la*3, y: a.x/la*3 };
+    if (act === 'opp')    b = { x: -a.x/la*3, y: -a.y/la*3 };
+    render();
+  });
+});
+
+render();
+</script>
+</body>
+</html>

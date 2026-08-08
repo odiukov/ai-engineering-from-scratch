@@ -112,9 +112,11 @@ Re-post the checklist with covered items ticked every time you finish a `##`
 group, so both of you can see what is left. Carry the map through the whole
 session — it is what Step 5 checks against.
 
-A learner saying "I know this, speed up" changes the *depth* of a section,
-never its presence: compress it to a single check question, tick it, and say
-out loud that it was compressed rather than taught.
+A learner saying "I know this, speed up" drops the intuition build-up and the
+analogies. It does not drop the section, its formulas, or its worked numbers
+— those are what the practice runs on. Fast mode for a subsection is: post
+its formulas and worked example, ask one question, move on. Say out loud that
+it was compressed.
 
 ## Step 3 — Teach the sections
 
@@ -122,11 +124,26 @@ Work the map top to bottom, in file order.
 
 1. **The Problem**: frame it in 2-3 sentences, connected to the learner's
    Mission from LEARNING.md when it fits naturally. Do not recite the file.
-2. **The Concept**: one `###` subsection at a time. Explain it in your own
-   words at the learner's level, then pause with a comprehension question
-   before any math. Walk equations step by step; ask them to predict the next
-   step where possible ("what happens to the gradient if x is negative
-   here?"). Tick the subsection only after they have answered something.
+2. **The Concept**: one `###` subsection at a time, at the depth of the file.
+   "In your own words" governs the *framing* — the analogy, the order you
+   reach for, the connection to their Mission. It never governs the
+   *content*: the file's formulas, worked numbers, and named terms are the
+   material, not optional detail. A taught subsection contains, in this
+   order:
+
+   a. The intuition in your own words — 2-4 sentences, before any notation.
+   b. **Every formula the subsection states**, written out and walked term by
+      term: what each symbol is, why it is there, what breaks without it.
+   c. **Every worked example the file gives**, computed through with its own
+      numbers. If the file shows `dot([1,2,3],[4,5,6]) = 32`, the learner
+      sees where 32 comes from — not a different example you invented.
+   d. One prediction or comprehension question, answered by them before you
+      move on ("what happens to the gradient if x is negative here?").
+
+   Tick the subsection only after (b), (c) and (d) have all happened. A
+   subsection summarized without its formulas is not taught — it is
+   previewed, and the practice in Step 3a will land on material they have
+   only heard about.
 3. **Build It**: see Step 3a — this section is the learner's to write, not
    yours to walk.
 4. **Use It**: show the production-library version and ask the learner what
@@ -214,6 +231,10 @@ hour ago, and the next lesson's title as a hook ("Next: attention — why
 
 - The quiz was asked while map items were still unticked.
 - A `###` heading in the file never appeared in the session at all.
+- A subsection was ticked after a paraphrase, with a formula or a worked
+  example from the file never shown.
+- A concept was illustrated with an example you invented while the file's own
+  worked numbers went unused.
 - `Ship It`, `Connections`, `Exercises` or `Key Terms` were dropped as
   "housekeeping".
 - Build It was taught by reading the reference code out loud while an
