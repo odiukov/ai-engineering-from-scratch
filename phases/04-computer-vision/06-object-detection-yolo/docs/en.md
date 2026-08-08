@@ -264,11 +264,11 @@ def assign_targets(boxes_xyxy, classes, anchors, stride, grid_size, num_classes)
     for box, cls in zip(boxes_xyxy, classes):
         x1, y1, x2, y2 = box
         cx, cy = 0.5 * (x1 + x2), 0.5 * (y1 + y2)
-        gx_raw, gy_raw = int(cx / stride), int(cy / stride)
-        if not (0 <= gx_raw < grid_size and 0 <= gy_raw < grid_size):
+        img_size = grid_size * stride
+        if not (0 <= cx <= img_size and 0 <= cy <= img_size):
             continue
-        gx = min(gx_raw, grid_size - 1)
-        gy = min(gy_raw, grid_size - 1)
+        gx = min(int(cx / stride), grid_size - 1)
+        gy = min(int(cy / stride), grid_size - 1)
         bw, bh = x2 - x1, y2 - y1
 
         ious = np.array([

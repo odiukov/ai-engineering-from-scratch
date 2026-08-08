@@ -52,6 +52,8 @@ Input sequence structure:
 
 Position embeddings encode both scale index and spatial position within the scale. Attention is causal in scale order only: a token being predicted at scale k, position (i, j), attends to **all** tokens of scales 1..k-1 and to **none** of the tokens at scale k itself. There is no intra-scale causality and no intra-scale ordering — every position of scale k is predicted in the same forward pass, in parallel, from exactly the same context. (`code/main.py` prints this: scale k attends to `sum(s*s for s in SCALES[:k])` prior tokens.)
 
+One implementation detail is worth knowing, because reading the paper's code without it is confusing. The mask is described there as block-wise causal with each block attending to `r_≤k` — including its own block, bidirectionally. That is not a contradiction: during teacher forcing the *inputs* occupying block k are the up-interpolated tokens of scale k-1, not scale k. So attention that reaches "its own block" still never reaches `r_k`'s own content, and the factorization stays `p(r_k | r_1..r_{k-1})`. Bidirectional attention within the block is exactly what lets all of scale k be predicted in parallel.
+
 Training loss: at each scale k, predict the tokens z_k given all prior-scale tokens. Cross-entropy loss on the discrete VQ codes. Same structure as GPT except the "sequence" is now scale-structured.
 
 ### Generation
@@ -127,7 +129,7 @@ This lesson produces `outputs/skill-var-tokenizer-designer.md` — a skill for d
 | Multi-scale VQ tokenizer | "Residual VQ" | VQ-VAE that produces K token grids of increasing resolution, with decoder summing all scales |
 | Scale k | "Pyramid level k" | One of K resolution levels, from 1x1 at k=1 up to (H/p)x(W/p) at k=K |
 | Parallel-within-scale | "One forward per scale" | All tokens at scale k are predicted in one transformer pass, not autoregressively |
-| Causal-across-scales | "Scale-ordered attention" | Token at scale k can attend to all of scales 1..k-1, but not to scale k itself nor to scales k+1..K |
+| Causal-across-scales | "Scale-ordered attention" | Prediction of scale k is conditioned on scales 1..k-1 and never on k+1..K; within its own block attention is bidirectional, but that block holds up-interpolated scale k-1, not scale k |
 | Residual VQ | "Additive tokenization" | Each scale's tokens encode the residual left by lower scales; decoder sums all scale embeddings |
 | VAR scaling law | "Image GPT scaling" | FID follows a predictable power law in compute, like language models' perplexity |
 | HART | "Hybrid VAR + text" | Text-conditional VAR variant combining MaskGIT-style iterative decoding with VAR's scale structure |

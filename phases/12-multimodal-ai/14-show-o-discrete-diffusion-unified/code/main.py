@@ -17,12 +17,16 @@ MASK = -1
 
 
 def cosine_schedule(T: int) -> list[float]:
-    """Mask ratio at the start of step t, in [0, 1]. Starts at 1.0.
+    """Mask ratio at the start of step t, in [0, 1]. Returns T + 1 values.
 
-    Matches docs/en.md: mask_ratio(t) = cos(pi * t / (2 * T)). The (t + 1)
-    shift would never emit 1.0, contradicting "at step 0, all tokens masked".
+    Matches docs/en.md: mask_ratio(t) = cos(pi * t / (2 * T)) for t = 0..T,
+    so the schedule runs the full 1.0 -> 0.0 range. Both endpoints matter:
+    a (t + 1) shift never emits 1.0 ("at step 0, all tokens masked") and
+    range(T) never emits 0.0 ("at step T, none masked"). The sampling loop
+    takes T steps and indexes ratios[0..T-1]; the final 0.0 is the end state,
+    not a step.
     """
-    return [math.cos(math.pi * t / (2 * T)) for t in range(T)]
+    return [math.cos(math.pi * t / (2 * T)) for t in range(T + 1)]
 
 
 def mock_logits(tokens: list[int], prompt_seed: int = 0) -> list[list[float]]:
@@ -75,11 +79,14 @@ def sample(prompt_seed: int, T: int = 8) -> list[list[int]]:
         remaining = sum(1 for t in tokens if t == MASK)
         if remaining == 0:
             break
-        keep_ratio = max(0.15, 1 - ratios[step])
-        tokens = step_unmask(tokens, prompt_seed, keep_ratio)
-        traces.append(list(tokens))
-    while any(t == MASK for t in tokens):
-        tokens = step_unmask(tokens, prompt_seed, 1.0)
+        # The schedule says how many tokens should STILL be masked once this
+        # step is done, so the step unmasks the difference. Because
+        # ratios[T] == 0, the last step always empties the grid — no straggler
+        # cleanup pass, and exactly T steps. Setting keep_ratio from
+        # 1 - ratios[step] instead would leave a remainder and need a fallback.
+        target_masked = round(SEQ_LEN * ratios[step + 1])
+        n_unmask = max(1, remaining - target_masked)
+        tokens = step_unmask(tokens, prompt_seed, n_unmask / remaining)
         traces.append(list(tokens))
     return traces
 

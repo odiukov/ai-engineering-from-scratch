@@ -111,21 +111,23 @@ Bias affects selection, not gate weight. That is the DeepSeek-V3 trick — bias 
 
 ### Step 2: run 100 tokens through the router
 
-Track which experts fire how often. Without the bias, usage is skewed. With a bias update loop (`-γ` for over-used experts, `+γ` for under-used), usage flattens out and then *oscillates* around uniform instead of converging to it: the update is a fixed step of `±γ` regardless of how far off the count is, so once an expert crosses the target the next step pushes it back over. γ sets the amplitude of that wobble — small γ means a tight orbit around uniform, large γ means the counts overshoot and bounce. Run `code/main.py` and you will see entropy climb close to `ln(E)` and then settle into a repeating cycle, not a fixed point.
+Track which experts fire how often. Without the bias, usage is skewed. With a bias update loop (`-γ` for over-used experts, `+γ` for under-used), usage flattens out and then *oscillates* around uniform instead of converging to it: the update is a fixed step of `±γ` regardless of how far off the count is, so once an expert crosses the target the next step pushes it back over. γ sets the amplitude of that wobble — small γ means a tight orbit around uniform, large γ means the counts overshoot and bounce. Run `code/main.py` and watch the entropy column. With 100 tokens over 8 experts it already starts near `ln(8) = 2.079` — random routing is close to uniform at this scale, so there is no dramatic climb to watch. What you *can* watch is the failure to converge: from iteration 1 onward the usage counts lock into an exact period-2 cycle (2.076, 2.073, 2.076, 2.073, …), alternating between two states forever. A fixed step size cannot land on the target, so it hops across it instead. This is the point of the step — not that the bias fixes balance, but that it orbits balance.
 
 ### Step 3: param count comparison
 
-Print the "dense equivalent" of an MoE config. DeepSeek-V3-shaped: 256 routed + 1 shared, 8 active, d_model=7168. The total parameter count is eye-watering: ~806B of FFN weights across 61 layers, roughly **14× the ~56B of FFN** in a dense Llama 3 70B (80 layers, d_model 8192, SwiGLU hidden 28672).
+Print the "dense equivalent" of an MoE config, using DeepSeek-V3's real geometry: 256 routed + 1 shared expert, 8 active, `d_model` 7168, expert hidden 2048, 61 layers of which the first 3 are ordinary dense FFNs. One expert is a SwiGLU triple, `3 × 7168 × 2048` ≈ 44M, so an MoE layer stores 257 × 44M ≈ 11.3B. Across 58 MoE layers plus 3 dense ones that is **~658B of FFN weights**, roughly **12× the ~56B of FFN** in a dense Llama 3 70B (80 layers, `d_model` 8192, SwiGLU hidden 28672).
 
-Be explicit about which two numbers you are dividing, because "5%" and "half" both describe this model:
+That 658B is worth a sanity check, because it is easy to produce a number that cannot be right. Add the ~11B of MLA attention and ~2B of embeddings and you land on 671B — DeepSeek-V3's published total. Do the same on the active side and you get 37B, the published activated count. If your FFN figure alone exceeds 671B, you have gone wrong somewhere.
+
+Be explicit about which two numbers you are dividing, because "3%" and "43%" both describe this model:
 
 | Comparison | Ratio |
 |------------|-------|
-| DeepSeek active FFN vs its own total FFN | 28B / 806B ≈ 3.5% (this is the `k/E` expert sparsity) |
-| DeepSeek active FFN vs Llama-3-70B's FFN | 28B / 56B ≈ **half** |
+| DeepSeek active FFN vs its own total FFN | 24B / 658B ≈ **3.7%** (9 of 257 experts fire; the routed-only sparsity `k/E` is 8/256 ≈ 3.1%) |
+| DeepSeek active FFN vs Llama-3-70B's FFN | 24B / 56B ≈ **43%** |
 | DeepSeek active model params vs Llama-3-70B total | 37B / 70B ≈ **53%** |
 
-So MoE is not doing a seventh of the dense model's work — it is doing about half the per-token compute of a dense 70B while carrying ~14× the stored knowledge. That is the whole trade: compute per token from `k`, knowledge from `E`.
+So MoE is not doing a thirtieth of the dense model's work — it is doing a bit under half the per-token FFN compute of a dense 70B while carrying ~12× the stored knowledge. That is the whole trade: compute per token from `k`, knowledge from `E`.
 
 ## Use It
 

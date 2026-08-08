@@ -20,30 +20,30 @@
   <text x="480" y="24" text-anchor="middle" class="title">LLaVA-OneVision — unified token budget and three-stage curriculum</text>
 
   <rect x="30" y="50" width="900" height="200" class="box"/>
-  <text x="480" y="72" text-anchor="middle" class="head">shared visual-token budget ~4000 across three scenarios</text>
+  <text x="480" y="72" text-anchor="middle" class="head">shared visual-token budget ~6000-9000 across three scenarios</text>
 
   <rect x="60" y="90" width="260" height="140" class="hot"/>
   <text x="190" y="110" text-anchor="middle" class="step">single-image</text>
   <text x="190" y="130" text-anchor="middle" class="small">AnyRes 9 tiles + thumbnail</text>
-  <text x="190" y="146" text-anchor="middle" class="small">each tile 384, 2x pool</text>
-  <text x="190" y="162" text-anchor="middle" class="small">182 tokens per tile</text>
-  <text x="190" y="182" text-anchor="middle" class="step">total 1820 tokens</text>
+  <text x="190" y="146" text-anchor="middle" class="small">each crop 384, no pooling</text>
+  <text x="190" y="162" text-anchor="middle" class="small">729 tokens per crop</text>
+  <text x="190" y="182" text-anchor="middle" class="step">total (1+9) x 729 = 7290</text>
   <text x="190" y="202" text-anchor="middle" class="small">perception + OCR + detail</text>
 
   <rect x="340" y="90" width="260" height="140" class="cool"/>
   <text x="470" y="110" text-anchor="middle" class="step">multi-image</text>
-  <text x="470" y="130" text-anchor="middle" class="small">6 images at 384</text>
+  <text x="470" y="130" text-anchor="middle" class="small">up to 12 images at 384</text>
   <text x="470" y="146" text-anchor="middle" class="small">no pooling, 729 per image</text>
   <text x="470" y="162" text-anchor="middle" class="small">cross-image reasoning</text>
-  <text x="470" y="182" text-anchor="middle" class="step">total 4374 tokens</text>
+  <text x="470" y="182" text-anchor="middle" class="step">total 12 x 729 = 8748</text>
   <text x="470" y="202" text-anchor="middle" class="small">compare, count, diff</text>
 
   <rect x="620" y="90" width="280" height="140" class="cold"/>
   <text x="760" y="110" text-anchor="middle" class="step">video</text>
   <text x="760" y="130" text-anchor="middle" class="small">32 frames at 384</text>
-  <text x="760" y="146" text-anchor="middle" class="small">3x pool -&gt; 81 per frame</text>
+  <text x="760" y="146" text-anchor="middle" class="small">2x pool -&gt; 196 per frame</text>
   <text x="760" y="162" text-anchor="middle" class="small">temporal grounding</text>
-  <text x="760" y="182" text-anchor="middle" class="step">total 2592 tokens</text>
+  <text x="760" y="182" text-anchor="middle" class="step">total 32 x 196 = 6272</text>
   <text x="760" y="202" text-anchor="middle" class="small">events, action recog</text>
 
   <rect x="30" y="270" width="900" height="250" class="box"/>

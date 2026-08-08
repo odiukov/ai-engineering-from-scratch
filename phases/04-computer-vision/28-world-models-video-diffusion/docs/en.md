@@ -281,7 +281,7 @@ This lesson produces:
 
 ## Exercises
 
-1. **(Easy)** Compute the token count for a 5-second 360p video at 30 fps (150 frames of 480x360) with patch-t=2, patch-h=8, patch-w=8. Reason about memory for attention at this size.
+1. **(Easy)** Compute the token count for a 5-second 360p video at 30 fps (150 frames of 640x360) with patch-t=2, patch-h=8, patch-w=8. Reason about memory for attention at this size.
 2. **(Medium)** Swap the divided attention block above for a full joint attention block and measure the shape and parameter count. Explain why divided attention is necessary for real video models.
 3. **(Hard)** Build a minimal latent-action video model: take a dataset of (frame_t, action_t, frame_{t+1}) triples (any simple 2D game), train a tiny video DiT conditioned on action embeddings, and show that different actions produce different next frames.
 

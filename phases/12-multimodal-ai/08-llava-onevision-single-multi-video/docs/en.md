@@ -32,17 +32,15 @@ Pre-OneVision, the default answer was "train one scenario, ignore the others." V
 
 ### The OneVision token budget
 
-LLaVA-OneVision picks a unified visual-token budget of approximately 3000-4000 tokens per sample, allocated differently per scenario:
+SigLIP SO400M at 384x384 produces a 27x27 = 729 patch grid. That 729 is the unit every count below is built from. LLaVA-OneVision deliberately keeps the *maximum* token count similar across the three scenarios — the paper's Figure 3 caption says it outright: "The maximum number of visual tokens across different scenarios is designed to be similar, ensuring balanced visual representations to accommodate cross-scenario capability transfer."
 
-- Single image: AnyRes-9 (3x3 tiles + thumbnail), each tile at 384 with a 27x27 = 729 patch grid, bilinear pooling by 2 → a 14x14 grid = 196 per tile. Total: 9 * 196 + 196 = 1960 tokens. Or AnyRes-4 at 729-per-tile = 2916 + 729.
-- Multi-image: each image at moderate resolution (384, no tiling), 729 tokens with no pooling. Budget 6 images → 4374 tokens.
-- Video: 32 frames at 384 resolution with bilinear pooling by 3 → a 9x9 grid = 81 tokens per frame. Total: 32 * 81 = 2592 tokens.
+- Single image: AnyResMax-9 — a thumbnail plus up to 9 grid crops, each encoded at the full 729. Maximum: `(1 + 9) * 729 = 7290` tokens.
+- Multi-image: each image at base resolution, 729 tokens, no pooling. Up to 12 images per instance: `12 * 729 = 8748` tokens.
+- Video: 2x2 bilinear pooling on the patch grid, `ceil(27/2) = 14`, so `14 * 14 = 196` tokens per frame. Up to 32 frames: `32 * 196 = 6272` tokens.
 
-Every count above pools the same 27x27 grid by a different factor — that is what
-makes the three scenarios comparable. The totals are not identical (1960 / 4374 /
-2592), but they all land in the same few-thousand-token band, so the LLM never
-sees a batch that blows its context. The encoder produces different geometry per
-scenario; the budget stays in one order of magnitude.
+7290, 8748, 6272 — different geometry, one budget band. That is the design, and it is why the LLM can transfer capability between scenarios instead of learning each one's token scale separately.
+
+Two details are easy to get wrong. First, the single-image path does *not* pool by default: crops keep all 729 tokens, and bilinear downscaling only kicks in when the crop grid grows past the budget (the config allows grids up to 6x6). Pooling every scenario by some factor is the wrong mental model — it is the *video* path that pools, because 32 frames is where the token count would otherwise explode. Second, if you see `32 * 729` for video anywhere, that is a typo in arXiv v1 of the paper, corrected to `32 * 196` in v3; Figure 3 read 6272 in both.
 
 ### The three-stage curriculum
 
@@ -74,9 +72,9 @@ These are not trained tasks; they emerge from the curriculum's compositional str
 
 ### Visual-token pooling
 
-The token budget requires pooling. OneVision uses bilinear interpolation on the 2D patch grid: the 27x27 = 729 patches from SigLIP at 384 become 14x14 = 196 (2x factor) or 9x9 = 81 (3x factor). Pooling is done in patch-grid space, not token space, to preserve locality — which is why the counts come from the side length, never from dividing the token count.
+Where the budget does force pooling, OneVision uses bilinear interpolation on the 2D patch grid. The shipped video path pools by 2: `ceil(27 / 2) = 14`, so 729 patches become `14 * 14 = 196`. Pooling happens in patch-grid space, not token space, to preserve locality — which is why the count comes from the side length. Divide the token count instead and you get `729 / 4 = 182`, a number that corresponds to no grid at all.
 
-The choice of pooling factor per scenario is itself a hyperparameter. Less pooling = more tokens = richer representation. More pooling = fewer tokens = more frames / images fit.
+The pooling factor is a hyperparameter, and the trade is the obvious one: less pooling means more tokens and a richer per-frame representation, more pooling means more frames fit under the same budget. OneVision's answer is to pool video and leave single images alone, because a single image is where spatial detail earns its tokens and video is where frame count does.
 
 ### LLaVA-OneVision-1.5
 

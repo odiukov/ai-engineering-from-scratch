@@ -28,7 +28,9 @@ But Whisper is not a pipeline you can treat as a black box forever. Domain shift
 - Decoder: `N` transformer blocks with causal self-attn + cross-attn to encoder output. Same size as encoder.
 - Output: BPE tokens over a 51,865-token vocab.
 
-Large-v3 has 1.55B params. Turbo uses a 4-layer decoder (from 32), cutting latency 8× at near-parity WER on English read speech — see the table below: 1.58% vs 1.8% on LibriSpeech test-clean.
+Large-v3 has 1.55B params. Turbo cuts the decoder from 32 layers to 4 — the same depth as `tiny` — for 809M total. OpenAI describes the trade as "faster transcription speed with a minimal degradation in accuracy", and the numbers bear that out: on LibriSpeech test-clean turbo scores 2.10% against large-v3's 2.01%, and 4.24% vs 3.91% on the harder test-other. Slightly *worse*, not better — a pruned model does not beat the model it was pruned from.
+
+The "8× faster" figure needs the same care. It is OpenAI's relative-speed claim for the decoder, and turbo's **encoder is unchanged at 32 layers**. On short-form audio the encoder dominates the cost, so measured throughput on the Open ASR Leaderboard is only about 1.4× (RTFx 200 vs 146). Quote 8× as a decoder claim, not as end-to-end speedup you will observe.
 
 **The prompt format.** Whisper is a multitask model steered by special tokens in the decoder prompt:
 
@@ -54,8 +56,8 @@ The prompt is what lets one model do many tasks. Change `<|en|>` to `<|fr|>` and
 | Base | 74M | 1× | 4.1% |
 | Small | 244M | 1× | 3.0% |
 | Medium | 769M | 1× | 2.7% |
-| Large-v3 | 1.55B | 2× | 1.8% |
-| Large-v3-turbo | 809M | 8× | 1.58% |
+| Large-v3 | 1.55B | 2× | 2.01% |
+| Large-v3-turbo | 809M | 8× claimed, ~1.4× measured | 2.10% |
 | Whisper-Streaming (2024) | 1.55B | streaming | 2.0% |
 
 ### Fine-tuning
@@ -177,7 +179,7 @@ Save as `outputs/skill-whisper-tuner.md`. Design a Whisper fine-tune or inferenc
 | 30-sec window | Whisper's limit | Hard input cap; chunk longer audio. |
 | SOT | Start-of-transcript | `<\|startoftranscript\|>` kicks off the decoder prompt. |
 | Timestamps token | Temporal alignment | Every 0.02 s offset is a special token in the 51k vocab. |
-| Turbo | The fast variant | 4-decoder layers, 8× faster, near-parity WER on English. |
+| Turbo | The fast variant | Decoder pruned 32 → 4 layers, encoder untouched. 8× is the decoder claim; ~1.4× end-to-end. Slightly worse WER than large-v3 (2.10% vs 2.01% on LibriSpeech test-clean). |
 | WhisperX | The long-form wrapper | VAD + Whisper + wav2vec alignment + diarization. |
 | LoRA fine-tune | Efficient tuning | Add low-rank adapters to attention; train ~0.3% of params. |
 | Hallucination | The silent failure | Whisper produces fluent English from noise/silence. |

@@ -134,25 +134,33 @@ def main():
     print(f"  toy MoE       : total={toy_total:>10}  active={toy_active:>10}"
           f"  ({n_experts} x {d_model}x{d_hidden}, top-{top_k})")
 
-    # DeepSeek-V3 shape (per-layer FFN; real model has 61 layers)
+    # DeepSeek-V3, real config.json geometry. The first 3 of the 61 layers are
+    # ordinary dense FFNs (first_k_dense_replace); only the other 58 are MoE.
+    # Each expert is a full SwiGLU triple at the *expert* hidden size, which is
+    # much narrower than the dense one — that is what makes 257 of them affordable.
     d = 7168
     shared = 1
     routed = 256
     active = 8
     layers = 61
-    ffn_full = 3 * d * int(d * 2.67)
-    fine_expert = ffn_full // 8
-    total_moe_per_layer = (shared + routed) * fine_expert
-    active_moe_per_layer = (shared + active) * fine_expert
-    print(f"  deepseek-v3-ish per layer:  total={total_moe_per_layer / 1e9:.1f}B  active={active_moe_per_layer / 1e9:.1f}B")
-    print(f"  deepseek-v3 FFN total (×{layers} layers): ~{total_moe_per_layer * layers / 1e9:.0f}B total,  ~{active_moe_per_layer * layers / 1e9:.0f}B active")
+    dense_layers = 3
+    moe_layers = layers - dense_layers
+    expert = 3 * d * 2048            # moe_intermediate_size
+    dense_ffn = 3 * d * 18432        # intermediate_size, used by the 3 dense layers
+    total_moe_per_layer = (shared + routed) * expert
+    active_moe_per_layer = (shared + active) * expert
+    total_ffn = moe_layers * total_moe_per_layer + dense_layers * dense_ffn
+    active_ffn = moe_layers * active_moe_per_layer + dense_layers * dense_ffn
+    print(f"  deepseek-v3 per MoE layer:  total={total_moe_per_layer / 1e9:.1f}B  active={active_moe_per_layer / 1e9:.2f}B")
+    print(f"  deepseek-v3 FFN total ({moe_layers} MoE + {dense_layers} dense layers):"
+          f" ~{total_ffn / 1e9:.0f}B total,  ~{active_ffn / 1e9:.0f}B active")
     # Llama-3-70B (dense), real geometry: 80 layers, d_model 8192, SwiGLU hidden
     # 28672. Do NOT reuse deepseek's d here — the two models are shaped differently.
     llama_ffn = 80 * 3 * 8192 * 28672
     print(f"  llama-3-70b FFN total: ~{llama_ffn / 1e9:.0f}B  (all active every token)")
     print()
-    print(f"  deepseek stores {total_moe_per_layer * layers / llama_ffn:.0f}x llama's FFN weights, but its")
-    print(f"  active FFN per token is {active_moe_per_layer * layers / llama_ffn:.0%} of llama's always-on FFN.")
+    print(f"  deepseek stores {total_ffn / llama_ffn:.0f}x llama's FFN weights, but its")
+    print(f"  active FFN per token is {active_ffn / llama_ffn:.0%} of llama's always-on FFN.")
     print()
     print("takeaway: fewer active FLOPs than the dense 70B, vastly larger parameter footprint.")
 

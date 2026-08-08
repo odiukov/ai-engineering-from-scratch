@@ -11,7 +11,7 @@
 
 - Design a production vision pipeline that detects objects, classifies them, and emits structured JSON — with every failure path handled
 - Plug a detector (Mask R-CNN or YOLO), a classifier (ConvNeXt-Tiny), and a data contract (Pydantic) into one service
-- Benchmark the end-to-end pipeline and identify the first bottleneck (the detector on CPU; preprocessing once the models run on GPU)
+- Benchmark the end-to-end pipeline and identify the first bottleneck (the detector, on CPU and GPU alike — but preprocessing takes a much larger share of the total once the models run on GPU)
 - Ship a minimal FastAPI service that accepts an image upload, runs the pipeline, and returns detections with classifications
 
 ## The Problem
@@ -71,7 +71,7 @@ When a detector returns boxes in `(cx, cy, w, h)` instead of `(x1, y1, x2, y2)`,
 
 Three truths hold in nearly every vision pipeline:
 
-1. **Preprocessing is easy to underestimate.** Decoding JPEGs, converting colour spaces, resizing — these are CPU-bound and easy to forget. On a CPU-only box the detector still dwarfs them (see the numbers in Step 5); once the models move to GPU, preprocessing frequently becomes the biggest single block of wall-clock time.
+1. **Preprocessing is easy to underestimate.** Decoding JPEGs, converting colour spaces, resizing — these are CPU-bound and easy to forget. On a CPU-only box the detector dwarfs them (see the numbers in Step 5). Moving the models to GPU does not speed preprocessing up at all, so its *share* of the total grows sharply even though its absolute cost is unchanged — it is the part of the pipeline a faster GPU cannot fix.
 2. **The detector dominates GPU time.** 70-90% of GPU time is in the detection forward pass.
 3. **Postprocessing (NMS, RLE encode/decode) is cheap on GPU, expensive on CPU.** Always profile with the actual target.
 

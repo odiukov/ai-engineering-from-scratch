@@ -206,7 +206,7 @@ def compose(*fns):
     return _fn
 ```
 
-Reflect-pad before crop, not zero-pad, because black borders are a signal the model would learn to ignore in a non-useful way. Both augmentations draw from an explicit `np.random.Generator` you pass in, the same style as `synthetic_cifar` in Step 1 — reach for the global `np.random` here and the run stops being reproducible no matter what seed you set.
+Reflect-pad before crop, not zero-pad, because black borders are a signal the model would learn to ignore in a non-useful way. Both augmentations draw from an explicit `np.random.Generator` you pass in, rather than the global `np.random` — the same discipline as `synthetic_cifar` in Step 1, which builds its own generator from the `seed` argument. It matters here because the only seed this file sets is `torch.manual_seed(0)`, and that does not touch NumPy's global generator: reach for `np.random.uniform` in the augmentations and the run silently stops being reproducible unless you remember to seed NumPy separately too.
 
 ### Step 3: Mixup
 

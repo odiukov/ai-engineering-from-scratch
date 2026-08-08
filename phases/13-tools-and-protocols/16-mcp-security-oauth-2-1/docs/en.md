@@ -22,7 +22,7 @@ Three real-world needs:
 
 - **Ordinary remote servers.** User installs a remote MCP server that accesses their Notion / GitHub / Gmail. OAuth 2.1 with PKCE is the right shape.
 - **Scope escalation.** A notes server granted `notes:read` can later need `notes:write` for a specific action. Instead of re-doing the whole flow, step-up (SEP-835) asks for the additional scope.
-- **Confused deputy prevention.** Client holds a token audience-scoped for Server A. Server A is malicious and tries to present the token to Server B. Resource indicators (RFC 8707) pin the token to its intended audience.
+- **Audience binding.** Client holds a token audience-scoped for Server A. Server A is malicious and tries to present the token to Server B. Resource indicators (RFC 8707) pin the token to its intended audience. (This is token reuse across audiences, not the confused deputy — see below.)
 
 OAuth 2.1 is not new. What is new is MCP's profile: specific required flows (authorization code + PKCE only; no implicit, no client credentials by default), resource indicators mandatory on every token request, and protected-resource metadata published so clients know where to go.
 
@@ -158,7 +158,7 @@ This lesson produces `outputs/skill-oauth-scope-planner.md`. Given a remote MCP 
 | Protected-resource metadata | "Discovery doc" | RFC 9728 `.well-known/oauth-protected-resource` |
 | Step-up authorization | "Incremental consent" | SEP-835 flow for adding scopes on demand |
 | `insufficient_scope` | "403 with WWW-Authenticate" | Server signal to re-consent for a larger scope |
-| Audience binding | "Token reuse across services" | Attack where a trusted holder forwards a token inappropriately |
+| Audience binding | "This token only works here" | Pinning a token to one resource server via `aud` + resource indicators (RFC 8707), so replaying it at another server fails. The defence against token reuse across audiences — not against the confused deputy, which is an OAuth-proxy consent bug (Lesson 18) |
 | Short-lived token | "Access token TTL" | Bearer that expires quickly; refresh token renews |
 | Scope hierarchy | "Least privilege stack" | Graduated scope set with step-up between levels |
 | Client ID metadata | "Client discovery doc" | URL at which the client publishes its own OAuth metadata |

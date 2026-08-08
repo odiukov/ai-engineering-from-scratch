@@ -10,8 +10,8 @@ Run: python3 code/main.py
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
 import json
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -64,6 +64,34 @@ class ScopeReport:
         return not self.over_budget and not any(f.severity == "block" for f in self.findings)
 
 
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+    """Translate a path glob to a regex, treating "/" as a real separator.
+
+    Three tokens matter: "**/" spans any number of directories (including
+    none), "*" matches within one segment, and "?" matches one non-separator
+    character. Everything else is escaped literally.
+    """
+    out = []
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out.append(r"(?:[^/]+/)*")
+            i += 3
+        elif pattern.startswith("**", i):
+            out.append(r".*")
+            i += 2
+        elif pattern[i] == "*":
+            out.append(r"[^/]*")
+            i += 1
+        elif pattern[i] == "?":
+            out.append(r"[^/]")
+            i += 1
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    return re.compile("".join(out) + r"\Z")
+
+
 def matches_any(path: str, patterns: list[str]) -> bool:
     """Glob match that respects directory separators.
 
@@ -71,10 +99,13 @@ def matches_any(path: str, patterns: list[str]) -> bool:
     in BOTH directions: fnmatch("app/x.py", "app/**/*.py") is False (an allowed
     file at the package root reads as off-scope) and fnmatch("app/sub/x.py",
     "app/*.py") is True (an edit one directory deeper sails through as allowed).
-    PurePosixPath.full_match implements real ** semantics.
+    A scope contract that is wrong in the permissive direction is worse than no
+    contract at all, so this does the translation itself.
+
+    PurePosixPath.full_match has these semantics built in, but it is Python
+    3.13+ and the lesson code targets 3.10+.
     """
-    target = PurePosixPath(path)
-    return any(target.full_match(pattern) for pattern in patterns)
+    return any(_glob_to_regex(pattern).match(path) for pattern in patterns)
 
 
 def merge_contracts(parent: ScopeContract, child: ScopeContract) -> ScopeContract:

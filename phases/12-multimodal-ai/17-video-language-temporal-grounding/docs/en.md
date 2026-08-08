@@ -48,7 +48,7 @@ Neither handles long video. Both are 8-16 frame systems.
 
 ### Qwen2.5-VL's M-RoPE and Qwen2.5-Omni's TMRoPE
 
-Qwen2.5-VL introduced M-RoPE, a multimodal rotary position embedding whose temporal axis is aligned to absolute time; Qwen2.5-Omni extended it to TMRoPE (Time-aligned Multimodal RoPE) to interleave audio and video. Each patch token carries an (t, h, w) position where t is the actual timestamp (not frame index).
+Qwen2-VL introduced M-RoPE, a multimodal rotary position embedding that splits position into a (t, h, w) triple (see Lesson 09). Qwen2.5-VL then aligned the temporal axis to absolute time rather than frame index, and Qwen2.5-Omni extended it to TMRoPE (Time-aligned Multimodal RoPE) to interleave audio and video. Each patch token carries an (t, h, w) position where t is the actual timestamp (not frame index).
 
 Key differences from simple temporal embedding:
 
@@ -138,7 +138,7 @@ This lesson produces `outputs/skill-video-vlm-frame-planner.md`. Given a video t
 | Term | What people say | What it actually means |
 |------|-----------------|------------------------|
 | Temporal grounding | "Time-localized answers" | VLM outputs a specific timestamp range for when an event happens |
-| TMRoPE | "Time-aligned Multimodal RoPE" (Qwen2.5-Omni; Qwen2.5-VL uses M-RoPE) | 3D rotary position with absolute timestamps, used by Qwen2.5-VL |
+| TMRoPE | "Time-aligned Multimodal RoPE" (Qwen2.5-Omni) | Extends Qwen2.5-VL's absolute-time M-RoPE to interleave audio with video; M-RoPE itself came from Qwen2-VL |
 | Dynamic FPS | "Motion-aware sampling" | Sample more frames in high-motion segments, fewer in static ones |
 | Frame pooling | "Spatial compress per frame" | Reduce patches per frame with bilinear interpolation before the LLM |
 | Video Q-former | "Clip compressor" | Cross-attention bottleneck mapping N frames to K learned queries |
