@@ -46,7 +46,7 @@ def _client(request):
 
 
 BENCH = {
-    "model_preferences": (3, 1, 1, ["model-42", "model-7"]),
+    "model_preferences": (0.6, 0.2, 0.2, ["model-42", "model-7"]),
     "create_message_request": (1, _messages, "be terse", _prefs, 2048, "none"),
     "pick_model": (_catalog, _prefs),
     "sampling_result": (1, "x" * 500, "model-0", "endTurn"),

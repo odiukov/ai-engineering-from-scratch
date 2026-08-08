@@ -32,6 +32,7 @@ DEEPSEEK_V3 = {
     "num_attention_heads": 128,
     "head_dim": 128,
     "kv_lora_rank": 512,              # латентная размерность MLA
+    "qk_rope_head_dim": 64,            # несжатая RoPE-часть ключа
     "num_experts": 256,
     "num_experts_per_tok": 8,         # top-8 роутинг
     "shared_experts": 1,              # всегда включённый эксперт
@@ -40,19 +41,24 @@ DEEPSEEK_V3 = {
 }
 
 
-def mla_kv_cache_bytes(num_layers, kv_lora_rank, seq_len, bytes_per_element=2):
+def mla_kv_cache_bytes(
+    num_layers, kv_lora_rank, seq_len, qk_rope_head_dim=64, bytes_per_element=2
+):
     """Размер KV-кеша при Multi-Head Latent Attention, в байтах.
 
-    mla_kv_cache_bytes(61, 512, 131072)  ->  8187281408   (7.6 GiB)
-    mla_kv_cache_bytes(61, 512, 1)       ->  62464
+    mla_kv_cache_bytes(61, 512, 131072, 64)  ->  9210691584   (8.6 GiB)
+    mla_kv_cache_bytes(61, 512, 1, 64)       ->  70272
 
-    MLA хранит на токен и слой ОДИН латентный вектор длины kv_lora_rank —
-    K и V разворачиваются из него на лету. Ни числа голов, ни двойки за
-    «K и V» в формуле нет, и это вся суть приёма.
+    MLA хранит на токен и слой один KV-латент длины
+    kv_lora_rank и несжатую RoPE-часть ключа длины qk_rope_head_dim.
+    Содержательные K и V разворачиваются из латента на лету, но RoPE-
+    компонент нельзя восстановить без позиционной информации.
+    Двойки за «K и V» всё ещё нет: это один латент плюс RoPE-хвост.
 
     bytes_per_element по умолчанию 2: BF16.
     """
-    return num_layers * kv_lora_rank * seq_len * bytes_per_element
+    elements_per_token = kv_lora_rank + qk_rope_head_dim
+    return num_layers * elements_per_token * seq_len * bytes_per_element
 
 
 def gqa_kv_cache_bytes(num_layers, num_kv_heads, head_dim, seq_len, bytes_per_element=2):

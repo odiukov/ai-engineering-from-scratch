@@ -4,6 +4,8 @@
 Открывай ПОСЛЕ своих зелёных тестов.
 """
 
+import copy
+
 # Состояния агента из MegaAgent (arXiv:2408.09955) и разрешённые переходы.
 # Константа уровня модуля: тесты импортируют её из exercise.
 TRANSITIONS = {
@@ -39,11 +41,12 @@ def append_checkpoint(log, thread_id, step, state):
     Журнал append-only: старые записи не переписываются. Именно поэтому по
     нему можно и восстанавливаться, и проводить аудит постфактум.
 
-    Ловушка: state надо КОПИРОВАТЬ. Иначе следующий супершаг, меняющий тот
-    же словарь, задним числом испортит уже записанный чекпоинт, и
-    восстановление приведёт не туда.
+    Ловушка: нужен copy.deepcopy, не dict(state). Иначе вложенный список или
+    словарь останется общим, следующий супершаг задним числом испортит уже
+    записанный чекпоинт, и восстановление приведёт не туда.
     """
-    record = {"thread_id": thread_id, "step": step, "state": dict(state)}
+    record = {"thread_id": thread_id, "step": step,
+              "state": copy.deepcopy(state)}
     log.append(record)
     return record
 
@@ -87,9 +90,10 @@ def run_thread(steps, thread_id, log, start_state, crash_at=None):
     """
     checkpoint = last_checkpoint(log, thread_id)
     if checkpoint is None:
-        state, next_step = dict(start_state), 0
+        state, next_step = copy.deepcopy(start_state), 0
     else:
-        state, next_step = dict(checkpoint["state"]), checkpoint["step"] + 1
+        state = copy.deepcopy(checkpoint["state"])
+        next_step = checkpoint["step"] + 1
 
     for i in range(next_step, len(steps)):
         if crash_at is not None and i == crash_at:
@@ -172,27 +176,47 @@ def claim_task(tasks, worker, now, ttl):
     return None
 
 
-def dedup_effect(seen, key, effects, payload):
-    """Выполнить побочный эффект не более одного раза на ключ.
+class TransactionalEffectSink:
+    """Учебный sink, атомарно связывающий idempotency key и эффект.
+
+    В продакшене это одна транзакция с UNIQUE(key) либо внешний API,
+    который сам принимает idempotency key. Один словарь здесь изображает
+    эту границу: отдельно сохраняемых seen и effects нет.
+    """
+
+    def __init__(self):
+        self._committed = {}
+
+    def effects(self):
+        return [copy.deepcopy(payload) for payload in self._committed.values()]
+
+    def apply(self, key, payload, crash_after_commit=False):
+        if key in self._committed:
+            return False
+        self._committed[key] = copy.deepcopy(payload)
+        if crash_after_commit:
+            raise WorkerCrash("воркер умер после атомарного commit эффекта")
+        return True
+
+
+def dedup_effect(sink, key, payload, crash_after_commit=False):
+    """Выполнить эффект через атомарный идемпотентный sink.
 
     Вернуть True, если эффект выполнен сейчас, и False, если это повтор.
 
-    seen, effects = set(), []
-    dedup_effect(seen, "pay-1", effects, {"amount": 10})  ->  True
-    dedup_effect(seen, "pay-1", effects, {"amount": 10})  ->  False
-    len(effects)  ->  1
+    sink = TransactionalEffectSink()
+    dedup_effect(sink, "pay-1", {"amount": 10})  ->  True
+    dedup_effect(sink, "pay-1", {"amount": 10})  ->  False
+    len(sink.effects())  ->  1
 
-    At-least-once доставка плюс идемпотентный потребитель даёт
-    exactly-once effective — большего распределённая система не обещает.
+    At-least-once доставка плюс атомарный/idempotent sink даёт
+    exactly-once effective. Два независимых хранилища seen и effects не
+    дают этой гарантии: падение между эффектом и записью seen оставляет окно.
 
-    Ловушка: ключ должен быть у КАЖДОГО вызова, а не только у платежей.
-    После восстановления из чекпоинта повторяется весь супершаг целиком.
+    crash_after_commit моделирует смерть уже после успешного commit. Повтор
+    обязан увидеть ключ и не добавить второй эффект.
     """
-    if key in seen:
-        return False
-    seen.add(key)
-    effects.append(payload)
-    return True
+    return sink.apply(key, payload, crash_after_commit)
 
 
 def process_queue(tasks, steps, log, crash_plan=None, ttl=5, max_rounds=1000):

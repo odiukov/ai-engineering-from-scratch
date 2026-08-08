@@ -21,8 +21,9 @@ def build_haystack(filler, needle, depth_ratio, total_tokens):
     filler-а, а не добавляется сверху — иначе замер «сколько влезло в
     контекст» врал бы на длину иголки.
 
-    ValueError на depth_ratio вне [0, 1], на неположительный total_tokens и
-    на filler без единого токена.
+    ValueError на depth_ratio вне [0, 1], на неположительный total_tokens,
+    на filler без единого токена и если needle длиннее всего бюджета. Мы
+    отвергаем такой запрос, а не обрезаем факт, который модель должна найти.
     """
     if not 0.0 <= depth_ratio <= 1.0:
         raise ValueError(f"depth_ratio must be in [0, 1], got {depth_ratio}")
@@ -33,7 +34,9 @@ def build_haystack(filler, needle, depth_ratio, total_tokens):
         raise ValueError("filler produced no tokens")
 
     needle_tokens = needle.split()
-    body_len = max(total_tokens - len(needle_tokens), 0)
+    if len(needle_tokens) > total_tokens:
+        raise ValueError("needle does not fit within total_tokens")
+    body_len = total_tokens - len(needle_tokens)
     # удваиваем, а не дописываем по слову: 20 итераций вместо миллиона
     while len(filler_tokens) < body_len:
         filler_tokens = filler_tokens + filler_tokens

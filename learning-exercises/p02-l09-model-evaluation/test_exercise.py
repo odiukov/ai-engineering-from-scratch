@@ -188,9 +188,9 @@ def test_kfold_split_never_puts_an_index_in_train_and_val_at_once():
 
 
 def test_kfold_split_spreads_the_remainder_across_folds():
-    """Ловушка: 10 на 3 не делится. Лишние объекты не должны падать в один фолд."""
-    sizes = sorted(len(val) for _, val in kfold_split(10, k=3, seed=0))
-    assert sizes[-1] - sizes[0] <= 1
+    """Ловушка: остаток раздаётся первым фолдам, а не целиком последнему."""
+    sizes = [len(val) for _, val in kfold_split(10, k=3, seed=0)]
+    assert sizes == [4, 3, 3]
 
 
 def test_kfold_split_is_reproducible_for_the_same_seed():

@@ -1,5 +1,6 @@
 """Тесты к уроку «Speculative decoding: draft, verify, repeat». Правь exercise.py."""
 
+import math
 import random
 
 import pytest
@@ -264,9 +265,15 @@ def test_kl_is_never_negative():
         assert kl_divergence(Q, blend(Q, t)) >= 0.0
 
 
-def test_kl_skips_zero_probabilities_instead_of_crashing():
-    """math.log(0) — это ValueError; слагаемое с q_i = 0 равно нулю по соглашению."""
+def test_kl_skips_zero_mass_in_the_first_distribution():
+    """0 * log(0/q) равно нулю по соглашению, включая случай 0/0."""
     assert kl_divergence([0.0, 1.0], [0.5, 0.5]) == pytest.approx(0.6931471805599453)
+    assert kl_divergence([0.0, 1.0], [0.0, 1.0]) == APPROX(0.0)
+
+
+def test_kl_is_infinite_when_the_second_distribution_misses_support():
+    """Положительную массу нельзя сравнить с нулём, просто выкинув слагаемое."""
+    assert kl_divergence([0.25, 0.75], [0.0, 1.0]) == math.inf
 
 
 def test_kl_grows_as_the_draft_drifts_away():

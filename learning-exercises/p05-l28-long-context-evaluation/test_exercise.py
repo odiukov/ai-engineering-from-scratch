@@ -71,6 +71,11 @@ def test_build_haystack_rejects_impossible_arguments():
         build_haystack("   ", "N", 0.5, 10)
 
 
+def test_build_haystack_rejects_a_needle_larger_than_the_exact_budget():
+    with pytest.raises(ValueError, match="needle does not fit"):
+        build_haystack("a b", "too many needle tokens", 0.5, 3)
+
+
 # ------------------------------------------------------------ insert_needles
 def test_insert_needles_places_each_needle_at_its_depth():
     assert insert_needles("a b c d", ["X", "Y"], [0.0, 0.5]) == "X a b Y c d"

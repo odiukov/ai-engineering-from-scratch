@@ -76,13 +76,13 @@ def dynamic_sample(motion, budget, fps_cap):
     усреднённый посекундно). budget — сколько кадров всего хотим взять.
     fps_cap — потолок кадров на одну секунду.
 
-    dynamic_sample([0.0, 1.0], 2, 4)  ->  [0.5, 1.25, 1.75]
+    dynamic_sample([0.0, 1.0], 2, 4)  ->  [0.5, 1.5]
 
-    Разбор: всё движение во второй секунде, ей достаётся round(2 * 1.0 / 1.0)
-    = 2 кадра. Первой полагалось бы ноль, но каждая секунда получает минимум
-    один кадр: иначе целая секунда видео выпадает из контекста совсем.
-    Внутри секунды отметки снова по центрам корзин, потолок fps_cap режет
-    самые бурные секунды.
+    Разбор: минимум один кадр на секунду применяется, когда budget хватает
+    на все секунды. Здесь две секунды и два кадра, поэтому каждая получает по
+    одному. Остаток распределяется пропорционально движению с детерминированным
+    разруливанием округлений. Итог никогда не превышает budget, а fps_cap ограничивает
+    каждую секунду.
 
     Ловушка: суммарное движение может быть нулевым (статичная камера).
     Делить на ноль нельзя — в этом случае возвращаем обычный uniform.
@@ -91,16 +91,49 @@ def dynamic_sample(motion, budget, fps_cap):
         raise ValueError("нужна хотя бы одна секунда")
     if any(m < 0 for m in motion):
         raise ValueError("движение не может быть отрицательным")
-    if budget <= 0 or fps_cap <= 0:
-        raise ValueError("budget и fps_cap должны быть положительными")
+    if (
+        not isinstance(budget, int)
+        or isinstance(budget, bool)
+        or not isinstance(fps_cap, int)
+        or isinstance(fps_cap, bool)
+        or budget <= 0
+        or fps_cap <= 0
+    ):
+        raise ValueError("budget и fps_cap должны быть положительными целыми")
 
-    total = sum(motion)
-    if total == 0:
-        return uniform_sample(float(len(motion)), budget)
+    seconds = len(motion)
+    target = min(budget, seconds * fps_cap)
+    if sum(motion) == 0:
+        return uniform_sample(float(seconds), target)
+
+    minimum = 1 if target >= seconds else 0
+    counts = [minimum] * seconds
+    remaining = target - minimum * seconds
+
+    # Метод наибольших остатков с повторным распределением после того,
+    # как бурная секунда упёрлась в fps_cap.
+    while remaining:
+        active = [i for i, count in enumerate(counts) if count < fps_cap]
+        weights = [motion[i] for i in active]
+        if sum(weights) == 0:
+            weights = [1.0] * len(active)
+        weight_total = sum(weights)
+        shares = {i: remaining * weight / weight_total for i, weight in zip(active, weights)}
+
+        allocated = 0
+        for i in active:
+            take = min(fps_cap - counts[i], int(shares[i]))
+            counts[i] += take
+            allocated += take
+        remaining -= allocated
+        if remaining and allocated == 0:
+            ranked = sorted(active, key=lambda i: (-shares[i], i))
+            for i in ranked[:remaining]:
+                counts[i] += 1
+            remaining -= min(remaining, len(ranked))
 
     times = []
-    for second, m in enumerate(motion):
-        count = min(fps_cap, max(1, round(budget * m / total)))
+    for second, count in enumerate(counts):
         for j in range(count):
             times.append(second + (j + 0.5) / count)
     return times

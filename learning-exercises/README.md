@@ -5,7 +5,7 @@
 
 ## Быстрый путь: одна команда в чате
 
-```
+```text
 /check-code                                   # текущий урок из LEARNING.md
 /check-code p01-l01-linear-algebra-intuition  # конкретный
 /check-code p01-l01                           # хватит и префикса
@@ -38,7 +38,7 @@ cd learning-exercises/p01-l01-linear-algebra-intuition && python3 -m pytest
 Директория урока называется `p<фаза>-l<урок>-<slug>`: `p01-l01-...` — первый
 урок первой фазы, ровно тот же номер, что в `phases/`.
 
-```
+```text
 learning-exercises/
   watch.sh              запускалка
   p01-l01-linear-algebra-intuition/
@@ -54,7 +54,7 @@ learning-exercises/
 
 ## Как читать провалившийся тест
 
-```
+```console
 FAILED test_exercise.py::test_dot_basic
     assert dot([1, 2, 3], [4, 5, 6]) == APPROX(32)
 E   assert 0 == 32 ± 1.0e-09
@@ -80,7 +80,7 @@ python3 learning-exercises/compare.py p01-l01-linear-algebra-intuition
 Показывает по каждой функции: строк, циклов, вложенность и **реальное время
 работы** — твоё против эталонного, плюс прогон линтером `ruff`.
 
-```
+```console
 функция                строк     циклов    вложен.            мкс
                  ты / эталон  ты/эталон  ты/эталон    ты / эталон
 magnitude              4 / 1      1 / 1      1 / 0   19.68 / 8.92  ×2.2

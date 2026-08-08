@@ -7,7 +7,7 @@
   * скорость         — реальный прогон обеих версий на одинаковых входах
 
 Запуск:
-    python3 learning-exercises/compare.py lesson-01
+    python3 learning-exercises/compare.py p01-l01-linear-algebra-intuition
 
 Рядом гоняется ruff (если есть uvx) — он ловит неиспользуемые переменные,
 мёртвый код и стилевые огрехи.
@@ -151,7 +151,7 @@ def main():
     if lesson is None:
         candidates = sorted(root.glob("p*-l*"))
         if not candidates:
-            sys.exit("нет ни одного lesson-* каталога")
+            sys.exit("нет ни одного pNN-lNN-* каталога")
         lesson_dir = candidates[-1]
     else:
         lesson_dir = root / lesson

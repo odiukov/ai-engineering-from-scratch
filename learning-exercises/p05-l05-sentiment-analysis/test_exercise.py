@@ -85,6 +85,12 @@ def test_train_nb_smaller_alpha_sharpens_the_distribution():
     assert sharp["pos"]["a"] > soft["pos"]["a"]
 
 
+@pytest.mark.parametrize("alpha", [0.0, -1.0])
+def test_train_nb_rejects_non_positive_smoothing(alpha):
+    with pytest.raises(ValueError, match="alpha must be positive"):
+        train_nb({"pos": [["good"]]}, ["good", "bad"], alpha=alpha)
+
+
 # -------------------------------------------------------------- predict_nb
 _PRIORS = {"pos": 0.5, "neg": 0.5}
 _PROBS = {

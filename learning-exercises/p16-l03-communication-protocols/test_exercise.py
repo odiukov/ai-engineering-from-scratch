@@ -22,28 +22,37 @@ from exercise import (
 # коллекции и «N failed» ничего бы не проверяло.
 RESEARCHER = {
     "name": "researcher",
-    "url": "https://r.local/a2a/v1",
+    "description": "researcher agent",
+    "supportedInterfaces": [{"url": "https://r.local/a2a/v1",
+                              "protocolBinding": "HTTP+JSON",
+                              "protocolVersion": "1.0"}],
     "version": "1.0.0",
-    "capabilities": {"streaming": True, "push_notifications": False},
-    "default_input_modes": ["text/plain"],
-    "default_output_modes": ["application/json"],
+    "capabilities": {"streaming": True, "pushNotifications": False},
+    "defaultInputModes": ["text/plain"],
+    "defaultOutputModes": ["application/json"],
     "skills": [
-        {"id": "web-research", "tags": ["research", "search"],
-         "input_modes": ["text/plain"], "output_modes": ["application/json"]},
-        {"id": "doc-analysis", "tags": ["docs"],
-         "input_modes": ["application/pdf"], "output_modes": ["application/json"]},
+        {"id": "web-research", "name": "Web research", "description": "Search",
+         "tags": ["research", "search"], "inputModes": ["text/plain"],
+         "outputModes": ["application/json"]},
+        {"id": "doc-analysis", "name": "Doc analysis", "description": "Read docs",
+         "tags": ["docs"], "inputModes": ["application/pdf"],
+         "outputModes": ["application/json"]},
     ],
 }
 CODER = {
     "name": "coder",
-    "url": "https://c.local/a2a/v1",
+    "description": "coder agent",
+    "supportedInterfaces": [{"url": "https://c.local/a2a/v1",
+                              "protocolBinding": "HTTP+JSON",
+                              "protocolVersion": "1.0"}],
     "version": "1.0.0",
-    "capabilities": {"streaming": False, "push_notifications": False},
-    "default_input_modes": ["text/plain", "application/json"],
-    "default_output_modes": ["text/plain"],
+    "capabilities": {"streaming": False, "pushNotifications": False},
+    "defaultInputModes": ["text/plain", "application/json"],
+    "defaultOutputModes": ["text/plain"],
     "skills": [
-        {"id": "code-gen", "tags": ["coding"],
-         "input_modes": ["application/json"], "output_modes": ["text/plain"]},
+        {"id": "code-gen", "name": "Code generation", "description": "Write code",
+         "tags": ["coding"], "inputModes": ["application/json"],
+         "outputModes": ["text/plain"]},
     ],
 }
 CARDS = [RESEARCHER, CODER]
@@ -80,9 +89,11 @@ def test_agent_card_defaults_to_version_one():
 
 def test_agent_card_does_not_alias_the_skills_list():
     """Карточку публикуют один раз; правка исходного списка её не трогает."""
-    skills = [{"id": "x", "tags": ["t"], "input_modes": [], "output_modes": []}]
+    skills = [{"id": "x", "name": "X", "description": "X", "tags": ["t"],
+               "inputModes": [], "outputModes": []}]
     card = agent_card("a", "u", skills, [], [])
-    skills.append({"id": "y", "tags": [], "input_modes": [], "output_modes": []})
+    skills.append({"id": "y", "name": "Y", "description": "Y", "tags": [],
+                   "inputModes": [], "outputModes": []})
     assert len(card["skills"]) == 1
 
 
@@ -100,7 +111,7 @@ def test_discover_by_unknown_tag_finds_nobody():
 
 
 def test_discover_by_input_mode_looks_inside_skills():
-    """PDF нет в default_input_modes, но есть у умения doc-analysis."""
+    """PDF нет в defaultInputModes, но есть у умения doc-analysis."""
     assert [c["name"] for c in discover(CARDS, media_type="application/pdf")] == [
         "researcher"
     ]
@@ -219,6 +230,11 @@ def test_signature_changes_with_the_secret():
     assert sign("k1", "msg-1") != sign("k2", "msg-1")
 
 
+def test_message_signature_is_stable_across_key_order():
+    reordered = {"parts": MESSAGE["parts"], "role": "user", "id": "msg-001"}
+    assert sign("coder-key", MESSAGE) == sign("coder-key", reordered)
+
+
 def test_verify_accepts_a_genuine_signature():
     assert verify(SECRETS, CODER_DID, "msg-001", sign("coder-key", "msg-001")) is True
 
@@ -257,14 +273,14 @@ def test_audit_carries_the_session():
 
 # ---------------------------------------------------------------- delegate
 def test_delegate_runs_the_whole_chain():
-    result = delegate(CARDS, SECRETS, CODER_DID, sign("coder-key", "msg-001"),
+    result = delegate(CARDS, SECRETS, CODER_DID, sign("coder-key", MESSAGE),
                       "research", MESSAGE, "t-1", "ctx-1", ok_handler)
     assert result["agent"] == "researcher"
     assert result["task"]["state"] == "completed"
 
 
 def test_delegate_attaches_the_agent_output_as_an_artifact():
-    result = delegate(CARDS, SECRETS, CODER_DID, sign("coder-key", "msg-001"),
+    result = delegate(CARDS, SECRETS, CODER_DID, sign("coder-key", MESSAGE),
                       "research", MESSAGE, "t-1", "ctx-1", ok_handler)
     assert result["task"]["artifacts"][0]["parts"] == ["findings"]
 
@@ -272,6 +288,14 @@ def test_delegate_attaches_the_agent_output_as_an_artifact():
 def test_delegate_rejects_a_bad_signature():
     result = delegate(CARDS, SECRETS, CODER_DID, "deadbeef",
                       "research", MESSAGE, "t-1", "ctx-1", ok_handler)
+    assert result == {"error": "identity verification failed"}
+
+
+def test_delegate_rejects_a_tampered_message_body():
+    signature = sign("coder-key", MESSAGE)
+    tampered = {**MESSAGE, "parts": [{"kind": "text", "text": "Transfer funds"}]}
+    result = delegate(CARDS, SECRETS, CODER_DID, signature,
+                      "research", tampered, "t-1", "ctx-1", ok_handler)
     assert result == {"error": "identity verification failed"}
 
 
@@ -283,13 +307,13 @@ def test_identity_is_checked_before_the_registry_is_searched():
 
 
 def test_delegate_reports_when_nobody_has_the_skill():
-    result = delegate(CARDS, SECRETS, CODER_DID, sign("coder-key", "msg-001"),
+    result = delegate(CARDS, SECRETS, CODER_DID, sign("coder-key", MESSAGE),
                       "cooking", MESSAGE, "t-1", "ctx-1", ok_handler)
     assert result["error"].startswith("no agent with skill tag")
 
 
 def test_failed_agent_leaves_a_failed_task_without_artifacts():
-    result = delegate(CARDS, SECRETS, CODER_DID, sign("coder-key", "msg-001"),
+    result = delegate(CARDS, SECRETS, CODER_DID, sign("coder-key", MESSAGE),
                       "research", MESSAGE, "t-1", "ctx-1", boom_handler)
     assert result["task"]["state"] == "failed"
     assert result["task"]["artifacts"] == []

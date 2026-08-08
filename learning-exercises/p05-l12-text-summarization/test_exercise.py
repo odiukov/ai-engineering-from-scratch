@@ -1,5 +1,7 @@
 """Тесты к уроку «Суммаризация текста». Правь exercise.py."""
 
+import math
+
 import pytest
 
 from exercise import (
@@ -66,6 +68,12 @@ def test_similarity_normalisation_penalises_long_sentences():
     short = similarity("a b", "a c")
     long = similarity("a b p q r", "a c x y z")
     assert short > long > 0.0
+
+
+def test_similarity_denominator_counts_repeated_tokens_in_sentence_length():
+    """Повторы увеличивают token count, даже если distinct vocabulary тот же."""
+    score = similarity("echo echo x", "echo echo y")
+    assert score == APPROX(2 / (math.log(4) + math.log(4)))
 
 
 def test_similarity_of_empty_sentences_is_zero():

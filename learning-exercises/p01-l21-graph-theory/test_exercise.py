@@ -190,7 +190,7 @@ def test_message_passing_averages_neighbour_features():
 
 
 def test_message_passing_ignores_own_features():
-    """Своя фича в среднее не входит: это A_norm @ H без self-loops."""
+    """Это только D^-1 A H; полный GCN ещё нормирует, учит W и применяет активацию."""
     graph = {0: [1], 1: [0]}
     features = {0: [1.0, 0.0], 1: [0.0, 1.0]}
     assert message_passing(graph, features)[0] == APPROX([0.0, 1.0])

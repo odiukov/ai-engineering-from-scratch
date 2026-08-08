@@ -170,6 +170,14 @@ def test_request_cap_trims_tokens_before_they_are_charged():
     assert (led["tokens"], led["usd"]) == (10_000, APPROX(0.03))
 
 
+def test_dollar_cap_refuses_the_next_turn_before_it_is_charged():
+    """Два хода по $0.006 не должны протащить hard cap $0.01 до $0.012."""
+    led = run_session([2000, 2000], {"max_budget_usd": 0.01})
+    assert led["stopped_by"] == "max_budget_usd"
+    assert (led["turns"], led["tokens"], led["usd"]) == (1, 2000, APPROX(0.006))
+    assert len(led["history"]) == 1
+
+
 def test_velocity_limit_catches_the_polling_loop_long_before_the_iteration_cap():
     led = run_session(LOOP_TRAJECTORY, TIGHT_LIMITS)
     assert led["stopped_by"] == "velocity_usd_per_min"

@@ -74,11 +74,16 @@ def test_uniform_sample_gaps_are_all_equal():
 
 # ------------------------------------------------------------ dynamic_sample
 def test_dynamic_sample_worked_example():
-    assert dynamic_sample([0.0, 1.0], 2, 4) == APPROX([0.5, 1.25, 1.75])
+    assert dynamic_sample([0.0, 1.0], 2, 4) == APPROX([0.5, 1.5])
+
+
+def test_dynamic_sample_never_exceeds_the_total_budget():
+    assert len(dynamic_sample([0.0, 1.0, 1.0], 2, 4)) == 2
+    assert len(dynamic_sample([1.0, 1.0, 1.0], 4, 4)) == 4
 
 
 def test_dynamic_sample_puts_more_frames_where_the_motion_is():
-    counts = per_second(dynamic_sample(MOTION, 12, 4))
+    counts = per_second(dynamic_sample(MOTION, 14, 4))
     assert counts[3] > counts[0]
     assert counts[8] > counts[6]
 
@@ -90,13 +95,16 @@ def test_dynamic_sample_never_leaves_a_second_unseen():
 
 
 def test_dynamic_sample_respects_the_fps_cap():
-    counts = per_second(dynamic_sample(MOTION, 200, 4))
+    times = dynamic_sample(MOTION, 200, 4)
+    counts = per_second(times)
     assert max(counts.values()) <= 4
+    assert len(times) == len(MOTION) * 4
 
 
 def test_a_static_camera_degrades_to_uniform_sampling():
     """Нулевое движение — делить не на что, и dynamic обязан не упасть."""
     assert dynamic_sample([0.0, 0.0, 0.0], 6, 4) == APPROX(uniform_sample(3.0, 6))
+    assert dynamic_sample([0.0, 0.0, 0.0], 4, 4) == APPROX(uniform_sample(3.0, 4))
 
 
 # ------------------------------------------------------------- pooled_tokens
@@ -174,7 +182,7 @@ def test_time_mode_keeps_the_actual_seconds():
 
 def test_frame_indices_erase_uneven_sampling_but_timestamps_keep_it():
     """Ровно то, что даёт TMRoPE: два разных сэмплирования обязаны различаться."""
-    even = uniform_sample(2.0, 4)
+    even = uniform_sample(2.0, 3)
     uneven = dynamic_sample([0.0, 3.0], 3, 4)
     assert len(even) == len(uneven)
     assert position_ids(even, "index") == position_ids(uneven, "index")

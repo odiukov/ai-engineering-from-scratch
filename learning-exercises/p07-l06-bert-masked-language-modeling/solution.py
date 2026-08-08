@@ -51,14 +51,22 @@ def build_bert_input(tokens_a, cls_id, sep_id, tokens_b=None):
     return ids, segments
 
 
-def create_mlm_batch(tokens, vocab_size, mask_id, rng, mask_prob=0.15):
+def create_mlm_batch(
+    tokens,
+    vocab_size,
+    mask_id,
+    rng,
+    mask_prob=0.15,
+    special_token_ids=(),
+    decisions=None,
+):
     """Разметка MLM по правилам BERT. Вернуть (input_ids, labels).
 
-    Для каждой позиции независимо: с вероятностью mask_prob позиция
-    выбирается для предсказания. У выбранной позиции labels[i] = исходный
-    токен, дальше ещё один бросок:
+    Обычные токены независимо выбираются для предсказания с вероятностью
+    mask_prob. Токены из special_token_ids (и сам mask_id) не выбираются.
+    У выбранной позиции labels[i] = исходный токен, дальше ещё один бросок:
       < 0.8            -> input_ids[i] = mask_id
-      от 0.8 до 0.9    -> input_ids[i] = случайный токен из range(vocab_size)
+      от 0.8 до 0.9    -> input_ids[i] = случайный НЕспециальный токен
       >= 0.9           -> input_ids[i] остаётся исходным
 
     У невыбранных позиций labels[i] = -100 (соглашение ignore_index в
@@ -66,6 +74,10 @@ def create_mlm_batch(tokens, vocab_size, mask_id, rng, mask_prob=0.15):
 
     rng — обязательный параметр (например random.Random(0)): без него
     прогон невоспроизводим. Глобальный random не использовать.
+
+    Если передан список decisions, для каждой выбранной позиции добавь туда
+    "mask", "random" или "unchanged". Ветку нельзя восстанавливать сравнением
+    input_ids с labels: случайный токен может совпасть с исходным.
 
     create_mlm_batch([5, 5, 5], 1000, 1000, random.Random(0), mask_prob=0.0)
         ->  ([5, 5, 5], [-100, -100, -100])
@@ -75,18 +87,32 @@ def create_mlm_batch(tokens, vocab_size, mask_id, rng, mask_prob=0.15):
     позиций, между предобучением и файнтюном возникнет сдвиг распределения.
     Эти 20% держат её честной.
     """
+    special_ids = set(special_token_ids)
+    special_ids.add(mask_id)
+    random_token_ids = [token_id for token_id in range(vocab_size)
+                        if token_id not in special_ids]
     input_ids = list(tokens)
     labels = [-100] * len(tokens)
     for i, token in enumerate(tokens):
+        if token in special_ids:
+            continue
         if rng.random() >= mask_prob:
             continue
         labels[i] = token
         roll = rng.random()
         if roll < 0.8:
             input_ids[i] = mask_id
+            branch = "mask"
         elif roll < 0.9:
-            input_ids[i] = rng.randrange(vocab_size)
-        # иначе позиция остаётся как есть: предсказывать надо, подсказка на месте
+            if not random_token_ids:
+                raise ValueError("vocabulary has no non-special replacement tokens")
+            input_ids[i] = random_token_ids[rng.randrange(len(random_token_ids))]
+            branch = "random"
+        else:
+            # позиция остаётся как есть: предсказывать надо, подсказка на месте
+            branch = "unchanged"
+        if decisions is not None:
+            decisions.append(branch)
     return input_ids, labels
 
 
@@ -199,8 +225,9 @@ def classify_from_cls(hidden, W, b):
 
     Пустой hidden — ValueError: [CLS] обязан существовать.
 
-    Так устроен каждый файнтюн BERT: энкодер заморожен, тренируется вот
-    эта одна матрица.
+    Это минимальная downstream-голова. При fine-tuning часто обучают её
+    вместе со всем энкодером; заморозка энкодера — отдельный выбор для
+    экономии памяти или очень маленького датасета, а не правило BERT.
     """
     if not hidden:
         raise ValueError("hidden states must contain at least the [CLS] position")

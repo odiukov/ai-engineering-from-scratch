@@ -209,6 +209,20 @@ def test_agent_loop_rejects_arguments_that_are_not_a_dict():
     )
 
 
+def test_agent_loop_returns_a_runtime_error_to_the_llm_as_an_observation():
+    def fail():
+        raise RuntimeError("service unavailable")
+
+    def llm(history, tools):
+        if len(history) == 1:
+            return {"tool_call": {"name": "lookup", "arguments": {}}}
+        return {"content": history[-1]["content"]}
+
+    assert agent_loop("hi", {"lookup": fail}, llm) == (
+        "error: tool 'lookup' failed: RuntimeError: service unavailable"
+    )
+
+
 def test_agent_loop_stops_at_the_step_budget():
     """Ловушка: без бюджета зациклившийся агент крутится вечно."""
     calls = []

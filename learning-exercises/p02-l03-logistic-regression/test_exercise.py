@@ -119,6 +119,17 @@ def test_bce_is_symmetric_between_the_two_classes():
     assert binary_cross_entropy([1], [0.3]) == APPROX(binary_cross_entropy([0], [0.7]))
 
 
+def test_rank_deficient_features_allow_nonunique_parameterisations():
+    """Выпуклость не обещает единственные веса при зависимых признаках."""
+    X = [[-1.0, -1.0], [0.0, 0.0], [2.0, 2.0]]
+    first = predict_proba(X, [1.0, 0.0], 0.0)
+    second = predict_proba(X, [0.0, 1.0], 0.0)
+    assert first == APPROX(second)
+    assert binary_cross_entropy([0, 0, 1], first) == APPROX(
+        binary_cross_entropy([0, 0, 1], second)
+    )
+
+
 # ------------------------------------------------------- logistic_gradients
 def test_logistic_gradients_on_a_hand_checked_example():
     """При нулевых весах все вероятности равны 0.5, счёт делается устно."""

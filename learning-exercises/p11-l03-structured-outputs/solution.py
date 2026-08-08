@@ -140,10 +140,14 @@ def validate(data, schema, path="$"):
             errors.append(f"{path}: {data} is less than minimum {schema['minimum']}")
         if "maximum" in schema and data > schema["maximum"]:
             errors.append(f"{path}: {data} is greater than maximum {schema['maximum']}")
+        if "enum" in schema and data not in schema["enum"]:
+            errors.append(f"{path}: {data!r} not in enum {schema['enum']}")
 
     elif kind == "boolean":
         if not isinstance(data, bool):
-            errors.append(f"{path}: expected boolean, got {type(data).__name__}")
+            return [f"{path}: expected boolean, got {type(data).__name__}"]
+        if "enum" in schema and data not in schema["enum"]:
+            errors.append(f"{path}: {data!r} not in enum {schema['enum']}")
 
     return errors
 

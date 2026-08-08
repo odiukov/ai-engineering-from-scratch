@@ -37,6 +37,11 @@ def test_normalize_rejects_an_all_zero_vector():
         normalize([0.0, 0.0])
 
 
+def test_normalize_rejects_a_negative_weight_even_when_the_sum_is_positive():
+    with pytest.raises(ValueError):
+        normalize([-1.0, 3.0])
+
+
 # ------------------------------------------------------------- sample_index
 def test_sample_index_at_zero_takes_the_first_reachable_token():
     assert sample_index([0.5, 0.5], 0.0) == 0

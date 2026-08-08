@@ -40,8 +40,8 @@ def rle_encode(mask):
     rle_encode([[0, 0, 1]])          ->  "0x2;1x1"
     rle_encode([[1, 1], [1, 1]])     ->  "1x4"
 
-    Пустая маска — ValueError: у неё нет ни одного run, и "" на выходе
-    неотличимо от испорченных данных. Значения кроме 0 и 1 — тоже ValueError.
+    Пустая маска сериализуется в пустую строку, как в коде урока. Значения
+    кроме 0 и 1 дают ValueError.
 
     Зачем: SAM 3 возвращает маски в полном разрешении, и на сотне инстансов
     ответ сервиса раздувается до мегабайт. RLE сжимает его в килобайты, и
@@ -49,7 +49,7 @@ def rle_encode(mask):
     """
     flat = [value for row in mask for value in row]
     if not flat:
-        raise ValueError("mask must not be empty")
+        return ""
     if any(value not in (0, 1) for value in flat):
         raise ValueError("mask must contain only 0 and 1")
 

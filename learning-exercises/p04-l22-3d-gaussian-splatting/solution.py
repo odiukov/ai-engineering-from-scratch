@@ -216,8 +216,9 @@ def gaussian_float_count(sh_degree):
     Цвет — самая дорогая часть: при L=3 это 48 из 59 float. Поэтому первое,
     что делают при экспорте в .splat или glTF, — квантуют или срезают SH.
 
-    Сцена в 5M сплатов при L=3: 5e6 * 59 * 4 байта ~ 1.2 ГБ в float32,
-    ~240 МБ после квантования в int8. Отрицательная степень -> ValueError.
+    Сцена в 5M сплатов при L=3: 5e6 * 59 * 4 байта = 1.18 ГБ в float32,
+    а int8 занимает 295 МБ (десятичных), то есть примерно 281 МиБ.
+    Отрицательная степень -> ValueError.
     """
     if sh_degree < 0:
         raise ValueError(f"sh_degree must be non-negative, got {sh_degree}")

@@ -1,5 +1,7 @@
 """Тесты к уроку «Статистика для машинного обучения». Правь exercise.py."""
 
+import math
+
 import pytest
 
 from exercise import (
@@ -192,6 +194,15 @@ def test_more_data_inflates_the_statistic_for_the_same_difference():
     assert abs(big) > 3 * abs(small)
 
 
+def test_welch_t_of_distinct_constant_groups_is_signed_infinity():
+    assert welch_t([1.0] * 3, [2.0] * 3) == float("-inf")
+    assert welch_t([2.0] * 3, [1.0] * 3) == float("inf")
+
+
+def test_welch_t_of_identical_constant_groups_is_undefined():
+    assert math.isnan(welch_t([1.0] * 3, [1.0] * 3))
+
+
 # ---------------------------------------------------------------- cohens_d
 def test_cohens_d_of_identical_groups_is_zero():
     assert cohens_d([1, 2, 3], [1, 2, 3]) == APPROX(0.0)
@@ -219,6 +230,15 @@ def test_a_wider_spread_shrinks_the_effect_size():
 def test_swapping_the_groups_flips_the_effect_size():
     a, b = [1, 2, 3, 4, 5], [2, 3, 4, 5, 6]
     assert cohens_d(a, b) == APPROX(-cohens_d(b, a))
+
+
+def test_cohens_d_of_distinct_constant_groups_is_signed_infinity():
+    assert cohens_d([1.0] * 3, [2.0] * 3) == float("-inf")
+    assert cohens_d([2.0] * 3, [1.0] * 3) == float("inf")
+
+
+def test_cohens_d_of_identical_constant_groups_is_undefined():
+    assert math.isnan(cohens_d([1.0] * 3, [1.0] * 3))
 
 
 # ------------------------------------------------------------- bootstrap_ci

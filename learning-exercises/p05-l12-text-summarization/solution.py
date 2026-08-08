@@ -39,14 +39,16 @@ def similarity(first, second):
     просто потому, что у них больше слов: то же одно совпадение в длинной
     паре весит меньше.
 
-    Считаем по МНОЖЕСТВУ различных слов (Counter), регистр не важен.
+    Пересечение считаем как multiset через Counter, регистр не важен. Но в
+    знаменателе стоят полные длины предложений в токенах, включая повторы,
+    как в формуле TextRank, а не размеры словарей различных слов.
     """
     left = Counter(first.lower().split())
     right = Counter(second.lower().split())
     # (left & right) — покомпонентный минимум, то есть честное пересечение
     # с учётом повторов
     intersection = sum((left & right).values())
-    denominator = math.log(len(left) + 1) + math.log(len(right) + 1)
+    denominator = math.log(sum(left.values()) + 1) + math.log(sum(right.values()) + 1)
     if denominator == 0:
         return 0.0
     return intersection / denominator

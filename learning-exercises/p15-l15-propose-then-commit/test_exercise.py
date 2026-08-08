@@ -33,11 +33,16 @@ def proposal(action="email.send", payload=None, thread_id="t-001"):
 
 
 def recorder():
-    """(execute, sent): execute копит побочные эффекты в список sent."""
+    """(execute, sent): целевой сервис дедуплицирует побочный эффект по key."""
     sent = []
+    results = {}
 
-    def execute(action, payload):
-        sent.append((action, tuple(sorted(payload.items()))))
+    def execute(key, action, payload):
+        if key not in results:
+            effect = (action, tuple(sorted(payload.items())))
+            sent.append(effect)
+            results[key] = effect
+        return results[key]
 
     return execute, sent
 
@@ -206,8 +211,21 @@ def test_commit_executes_after_approval():
     assert store[key]["status"] == "committed"
 
 
-def test_retry_after_commit_does_not_double_execute():
-    """Ключ идемпотентности: три попытки — один побочный эффект."""
+def test_commit_passes_the_proposal_key_to_the_executor():
+    store = {}
+    received = []
+
+    def execute(key, action, payload):
+        received.append((key, action, payload))
+
+    key = propose(store, proposal(), now=0.0)
+    approve(store, key, FULL_CHECKLIST, now=1.0)
+    commit(store, key, execute, now=2.0)
+    assert received == [(key, store[key]["action"], store[key]["payload"])]
+
+
+def test_retry_after_commit_does_not_call_the_executor_again():
+    """Записанный commit отсекает обычные повторы локально."""
     store = {}
     execute, sent = recorder()
     key = propose(store, proposal(), now=0.0)
@@ -215,6 +233,32 @@ def test_retry_after_commit_does_not_double_execute():
     commit(store, key, execute, now=2.0)
     assert commit(store, key, execute, now=3.0) == "already-committed"
     assert commit(store, key, execute, now=4.0) == "already-committed"
+    assert len(sent) == 1
+
+
+def test_crash_after_effect_before_status_is_safe_with_idempotent_executor():
+    """Crash gap: повтор вызывает executor, но тот узнаёт key и не шлёт дубль."""
+    store = {}
+    sent = []
+    results = {}
+    crash_once = [True]
+
+    def execute(key, action, payload):
+        if key not in results:
+            effect = (action, tuple(sorted(payload.items())))
+            sent.append(effect)
+            results[key] = effect
+        if crash_once[0]:
+            crash_once[0] = False
+            raise RuntimeError("worker crashed after the durable side effect")
+        return results[key]
+
+    key = propose(store, proposal(), now=0.0)
+    approve(store, key, FULL_CHECKLIST, now=1.0)
+    with pytest.raises(RuntimeError):
+        commit(store, key, execute, now=2.0)
+    assert store[key]["status"] == "approved"
+    assert commit(store, key, execute, now=3.0) == "committed"
     assert len(sent) == 1
 
 

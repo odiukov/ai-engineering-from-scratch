@@ -143,6 +143,7 @@ def welch_t(a, b):
 
     welch_t([1, 2, 3, 4, 5], [2, 3, 4, 5, 6])  ->  -1.0
     welch_t([1, 2, 3], [1, 2, 3])              ->  0.0
+    welch_t([1, 1, 1], [2, 2, 2])              ->  -inf
 
     Формула: (mean(a) - mean(b)) / sqrt(var(a)/n_a + var(b)/n_b), дисперсии
     выборочные. Вариант Уэлча не требует равных дисперсий — бери его по
@@ -155,11 +156,16 @@ def welch_t(a, b):
     размером выборок. Поэтому на миллионе примеров «значимым» становится
     что угодно, и одной t-статистики для решения мало — нужен ещё
     размер эффекта.
+
+    Если обе выборки постоянны, стандартная ошибка нулевая. При разных
+    средних отношение имеет соответствующий знак и бесконечный модуль;
+    при одинаковых средних получается неопределённость 0/0, то есть nan.
     """
     denominator = math.sqrt(variance(a) / len(a) + variance(b) / len(b))
+    difference = mean(a) - mean(b)
     if denominator == 0.0:
-        return 0.0
-    return (mean(a) - mean(b)) / denominator
+        return math.copysign(math.inf, difference) if difference != 0.0 else math.nan
+    return difference / denominator
 
 
 def cohens_d(a, b):
@@ -167,6 +173,7 @@ def cohens_d(a, b):
 
     cohens_d([1, 2, 3, 4, 5], [2, 3, 4, 5, 6])  ->  -0.63245553...
     cohens_d([1, 2, 3], [1, 2, 3])              ->  0.0
+    cohens_d([1, 1, 1], [2, 2, 2])              ->  -inf
 
     Объединённое стандартное отклонение:
         sqrt(((n_a - 1) * var(a) + (n_b - 1) * var(b)) / (n_a + n_b - 2))
@@ -176,14 +183,19 @@ def cohens_d(a, b):
     В отличие от t-статистики размер эффекта почти НЕ зависит от объёма
     данных. В этом весь смысл: t отвечает «различие реально?», d отвечает
     «различие вообще стоит внимания?». Отчитываться нужно обоими.
+
+    При нулевом разбросе разных постоянных групп стандартизованное различие
+    бесконечно. Если постоянные группы совпадают, это 0/0 и ответ — nan,
+    а не притворный нулевой эффект.
     """
     na, nb = len(a), len(b)
     pooled = math.sqrt(
         ((na - 1) * variance(a) + (nb - 1) * variance(b)) / (na + nb - 2)
     )
+    difference = mean(a) - mean(b)
     if pooled == 0.0:
-        return 0.0
-    return (mean(a) - mean(b)) / pooled
+        return math.copysign(math.inf, difference) if difference != 0.0 else math.nan
+    return difference / pooled
 
 
 def bootstrap_ci(values, statistic=mean, iterations=1000, alpha=0.05, seed=0):

@@ -27,6 +27,6 @@ BENCH = {
     "compress_blocks": (_K, 32),
     "top_k_blocks": (_block_scores, 4),
     "selected_branch": (_q, _K, _V, 32, 4),
-    "nsa_attention": (_q, _K, _V, 32, 4, 128, (0.4, 0.4, 0.2)),
+    "nsa_attention": (_q, _K, _V, 32, 4, 64, 128, (0.4, 0.4, 0.2)),
     "keys_per_query": (64000, 64, 16, 64, 512),
 }

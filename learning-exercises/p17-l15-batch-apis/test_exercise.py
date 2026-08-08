@@ -89,10 +89,24 @@ def test_batch_is_exactly_half_of_synchronous():
         sync_cost(50_000, 4000, 2000, 200) * BATCH_DISCOUNT)
 
 
-def test_stacking_batch_and_cache_beats_either_alone():
-    stacked = batch_cost(50_000, 4000, 2000, 200, True)
+def test_anthropic_stacks_batch_and_cache_discounts():
+    stacked = batch_cost(50_000, 4000, 2000, 200, True, provider="anthropic")
     assert stacked < batch_cost(50_000, 4000, 2000, 200, False)
     assert stacked < cached_cost(50_000, 4000, 2000, 200)
+
+
+def test_vertex_cached_prefix_price_takes_precedence_over_batch_discount():
+    n, prefix, unique, output = 50_000, 4000, 2000, 200
+    vertex = batch_cost(n, prefix, unique, output, True, provider="vertex-gemini")
+    cached_prefix = cached_cost(n, prefix, 0, 0)
+    discounted_tail = sync_cost(n, 0, unique, output) * BATCH_DISCOUNT
+    assert vertex == APPROX(cached_prefix + discounted_tail)
+    assert vertex > batch_cost(n, prefix, unique, output, True, provider="anthropic")
+
+
+def test_unknown_provider_policy_is_rejected():
+    with pytest.raises(BatchError):
+        batch_cost(1, 100, 100, 10, True, provider="mystery-cloud")
 
 
 def test_long_shared_prefix_gets_close_to_the_advertised_ten_percent():
@@ -245,6 +259,13 @@ def test_batch_lane_leaves_nothing_on_the_table():
     d = lane_decision(50_000, 4000, 200, 100, 86_400)
     assert d["lane"] == "batch"
     assert d["forgone_usd"] == APPROX(0.0)
+
+
+def test_vertex_lane_decision_uses_cache_precedence_policy():
+    d = lane_decision(50_000, 4000, 2000, 200, 86_400, provider="vertex-gemini")
+    assert d["cost"] == APPROX(
+        batch_cost(50_000, 4000, 2000, 200, True, provider="vertex-gemini")
+    )
 
 
 def test_interactive_lane_pays_double_the_achievable_minimum():

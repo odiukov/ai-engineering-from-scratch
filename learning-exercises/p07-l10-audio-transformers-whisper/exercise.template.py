@@ -16,6 +16,8 @@ Whisper: аудио как последовательность кадров
 
 import math
 
+FRAME_SIZE = 400  # 25 мс при 16 кГц — ширина кадра Whisper по умолчанию
+
 
 def sine_wave(freq, duration_s, sample_rate=16000):
     """Синусоида заданной частоты: список отсчётов длиной duration_s секунд.
@@ -33,7 +35,7 @@ def sine_wave(freq, duration_s, sample_rate=16000):
     raise NotImplementedError
 
 
-def n_frames(n_samples, frame_size=400, hop=160):
+def n_frames(n_samples, frame_size=FRAME_SIZE, hop=160):
     """Сколько окон нарежется из сигнала. Кадры не выходят за конец сигнала.
 
     n_frames(16000)  ->  98     (1 секунда при 16 кГц — «около 100 кадров»)
@@ -51,7 +53,7 @@ def n_frames(n_samples, frame_size=400, hop=160):
     raise NotImplementedError
 
 
-def frame_signal(x, frame_size=400, hop=160):
+def frame_signal(x, frame_size=FRAME_SIZE, hop=160):
     """Нарезать сигнал на перекрывающиеся окна.
 
     frame_signal([1, 2, 3, 4, 5], frame_size=3, hop=1)
@@ -89,12 +91,15 @@ def pad_or_clip(frames, target_frames):
 
     pad_or_clip([[1.0], [2.0]], 4)  ->  [[1.0], [2.0], [0.0], [0.0]]
     pad_or_clip([[1.0], [2.0]], 1)  ->  [[1.0]]
+    len(pad_or_clip([], 1)[0])      ->  400
 
     Whisper всегда работает окном ровно 30 секунд = 3000 кадров, независимо
     от длины записи. Короче — паддинг тишиной, длиннее — режется, и всё, что
     не влезло, требует отдельного чанкинга снаружи модели.
 
-    Добивочный кадр — нули той же ширины, что у существующих кадров.
+    Добивочный кадр — нули той же ширины, что у существующих кадров. Когда
+    аудио пустое и ширину подсмотреть неоткуда, берём FRAME_SIZE = 400:
+    пустой аудиоклип всё равно должен стать корректной матрицей Whisper.
     Входной список не портим: возвращаем новый.
     """
     raise NotImplementedError

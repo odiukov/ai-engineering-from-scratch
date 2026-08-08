@@ -19,7 +19,20 @@ _tasks = [
      "leased_at": None, "done": False}
     for i in range(60)
 ]
-_seen = {"k-%d" % i for i in range(5000)}
+class _BenchSink:
+    def __init__(self):
+        self.committed = {}
+
+    def apply(self, key, payload, crash_after_commit=False):
+        if key in self.committed:
+            return False
+        self.committed[key] = payload
+        return True
+
+
+_sink = _BenchSink()
+for _i in range(5000):
+    _sink.apply("k-%d" % _i, {"amount": 1})
 
 BENCH = {
     "append_checkpoint": (list(_log), "t-1", 41, {"n": 0}),
@@ -28,6 +41,6 @@ BENCH = {
     "resume_until_done": (_steps, "fresh", [], {"n": 0}, [5, 17, 33]),
     "queue_transition": ("idle", "take"),
     "claim_task": (_tasks, "w1", 0, 5),
-    "dedup_effect": (_seen, "k-4999", [], {"amount": 1}),
+    "dedup_effect": (_sink, "k-4999", {"amount": 1}),
     "process_queue": (list(_tasks), _steps, []),
 }

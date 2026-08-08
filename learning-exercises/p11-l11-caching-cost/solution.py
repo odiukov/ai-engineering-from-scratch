@@ -159,18 +159,19 @@ def cache_store(cache, model, messages, temperature, response, now=0.0):
     вместо нового сэмпла, и вся недетерминированность, за которую заплачено,
     пропадала бы.
 
-    При переполнении (записей стало max_size) вытесняется самая старая по
-    created. Ничьи разруливаются по ключу, чтобы вытеснение не зависело от
-    порядка обхода словаря.
+    При вставке нового ключа в заполненный кэш вытесняется самая старая по
+    created. Перезапись существующего ключа не увеличивает кэш и ничего другого
+    вытеснять не должна. Ничьи разруливаются по ключу, чтобы вытеснение не зависело
+    от порядка обхода словаря.
     """
     if temperature > 0:
         return cache
 
-    if len(cache["entries"]) >= cache["max_size"]:
+    key = cache_key(model, messages, temperature)
+    if key not in cache["entries"] and len(cache["entries"]) >= cache["max_size"]:
         oldest = min(cache["entries"], key=lambda k: (cache["entries"][k]["created"], k))
         del cache["entries"][oldest]
 
-    key = cache_key(model, messages, temperature)
     cache["entries"][key] = {"response": response, "created": now, "hits": 0}
     return cache
 

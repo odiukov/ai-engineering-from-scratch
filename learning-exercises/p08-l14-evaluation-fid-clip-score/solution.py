@@ -68,32 +68,68 @@ def matrix_inverse(M):
     return [row[n:] for row in aug]
 
 
-def matrix_sqrt(M, iters=40, tol=1e-13):
-    """Квадратный корень из симметричной положительно определённой матрицы.
+def matrix_sqrt(M, iters=100, tol=1e-13):
+    """Квадратный корень из симметричной положительно полуопределённой матрицы.
 
-    Итерация Денмана-Биверса: Y <- (Y + Z^-1) / 2, Z <- (Z + Y^-1) / 2,
-    старт Y = M, Z = I. Y сходится к sqrt(M), Z — к обратному корню.
+    Метод Якоби находит собственные значения без обращения M. Затем
+    sqrt(M) = V diag(sqrt(lambda)) V^T. Нулевые lambda разрешены: реальные
+    ковариации часто вырождены, особенно когда сэмплов меньше размерности.
 
     matrix_sqrt([[4, 0], [0, 9]])  ->  [[2.0, 0.0], [0.0, 3.0]]
     matrix_sqrt([[1, 0], [0, 1]])  ->  [[1.0, 0.0], [0.0, 1.0]]
 
     Проверка результата всегда одна: sqrt(M) * sqrt(M) == M.
-    Ловушка: без ранней остановки итерация на плохо обусловленной матрице
-    начинает расходиться после сходимости — выходи, когда шаг мал.
+    Ловушка: итерации через inverse падают на PSD-матрице с нулевым
+    собственным значением. Здесь отрицательное значение меньше численного
+    допуска — действительно не PSD и даёт ValueError; крошечный минус
+    округляется к нулю.
     """
     n = len(M)
-    Y = [list(row) for row in M]
-    Z = [[1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]
+    if any(len(row) != n for row in M):
+        raise ValueError("matrix_sqrt: matrix must be square")
+    if n == 0:
+        return []
+
+    # FID строит математически симметричную матрицу; усреднение убирает
+    # микроскопическую асимметрию от порядка операций с float.
+    A = [[(M[i][j] + M[j][i]) / 2.0 for j in range(n)] for i in range(n)]
+    V = [[1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]
+    scale = max(1.0, max(abs(x) for row in A for x in row))
+
     for _ in range(iters):
-        Y_inv = matrix_inverse(Y)
-        Z_inv = matrix_inverse(Z)
-        Y_next = [[(Y[i][j] + Z_inv[i][j]) / 2 for j in range(n)] for i in range(n)]
-        Z_next = [[(Z[i][j] + Y_inv[i][j]) / 2 for j in range(n)] for i in range(n)]
-        shift = max(abs(Y_next[i][j] - Y[i][j]) for i in range(n) for j in range(n))
-        Y, Z = Y_next, Z_next
-        if shift < tol:
+        if n == 1:
             break
-    return Y
+        p, q = max(
+            ((i, j) for i in range(n) for j in range(i + 1, n)),
+            key=lambda ij: abs(A[ij[0]][ij[1]]),
+        )
+        if abs(A[p][q]) <= tol * scale:
+            break
+
+        angle = 0.5 * math.atan2(2.0 * A[p][q], A[q][q] - A[p][p])
+        c, s = math.cos(angle), math.sin(angle)
+        app, aqq, apq = A[p][p], A[q][q], A[p][q]
+        for k in range(n):
+            if k == p or k == q:
+                continue
+            akp, akq = A[k][p], A[k][q]
+            A[k][p] = A[p][k] = c * akp - s * akq
+            A[k][q] = A[q][k] = s * akp + c * akq
+        A[p][p] = c * c * app - 2.0 * s * c * apq + s * s * aqq
+        A[q][q] = s * s * app + 2.0 * s * c * apq + c * c * aqq
+        A[p][q] = A[q][p] = 0.0
+        for k in range(n):
+            vkp, vkq = V[k][p], V[k][q]
+            V[k][p] = c * vkp - s * vkq
+            V[k][q] = s * vkp + c * vkq
+
+    eigenvalues = [A[i][i] for i in range(n)]
+    if min(eigenvalues) < -tol * scale:
+        raise ValueError("matrix_sqrt: matrix must be positive semidefinite")
+    roots = [math.sqrt(max(value, 0.0)) for value in eigenvalues]
+    out = [[sum(V[i][k] * roots[k] * V[j][k] for k in range(n))
+            for j in range(n)] for i in range(n)]
+    return [[(out[i][j] + out[j][i]) / 2.0 for j in range(n)] for i in range(n)]
 
 
 def mean_vector(vectors):
@@ -137,7 +173,8 @@ def covariance(vectors):
 def fid(real_features, gen_features):
     """Frechet Inception Distance между двумя облаками признаков.
 
-    FID = ||mu_r - mu_g||^2 + Tr(S_r) + Tr(S_g) - 2 * Tr(sqrt(S_r * S_g)).
+    FID = ||mu_r - mu_g||^2 + Tr(S_r) + Tr(S_g)
+          - 2 Tr(sqrt(sqrt(S_r) S_g sqrt(S_r))).
 
     fid(X, X)                        ->  0.0   совпадающие множества
     fid(X, [v + 1 for v in X])       ->  d     сдвиг на 1 по всем d осям
@@ -146,6 +183,9 @@ def fid(real_features, gen_features):
     независимость от ПОРЯДКА сэмплов (это расстояние между распределениями,
     а не между списками).
 
+    Симметричная sandwich-форма выше равна привычному trace(sqrt(S_r S_g)),
+    но остаётся PSD и работает для вырожденных ковариаций без inverse.
+
     Ловушка малого N: на сотне сэмплов FID заметно больше нуля даже для
     двух выборок из одного распределения. Ниже 10 000 сэмплов число
     сравнивать не с чем — ровно так статьи и накручивают метрику.
@@ -153,9 +193,14 @@ def fid(real_features, gen_features):
     mu_r, mu_g = mean_vector(real_features), mean_vector(gen_features)
     cov_r, cov_g = covariance(real_features), covariance(gen_features)
     mean_sq = sum((a - b) ** 2 for a, b in zip(mu_r, mu_g))
-    sqrt_prod = matrix_sqrt(matmul(cov_r, cov_g))
+    sqrt_r = matrix_sqrt(cov_r)
+    middle = matmul(matmul(sqrt_r, cov_g), sqrt_r)
+    sqrt_prod = matrix_sqrt(middle)
     trace = lambda M: sum(M[i][i] for i in range(len(M)))
-    return mean_sq + trace(cov_r) + trace(cov_g) - 2 * trace(sqrt_prod)
+    score = mean_sq + trace(cov_r) + trace(cov_g) - 2 * trace(sqrt_prod)
+    # Теоретически FID >= 0; округление собственных значений иногда оставляет
+    # -1e-15 на совпадающих облаках.
+    return max(score, 0.0)
 
 
 def clip_score(image_feat, text_feat):

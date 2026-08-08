@@ -31,7 +31,7 @@ echo "выход: Ctrl-C"
 echo
 
 if command -v uvx >/dev/null 2>&1; then
-  exec uvx pytest-watcher . --now -- -q --no-header --tb=short
+  exec uvx pytest-watcher . --now -- --tb=short
 fi
 
 # fallback: опрос mtime раз в секунду
@@ -42,7 +42,7 @@ while true; do
   if [[ "$NOW" != "$LAST" ]]; then
     LAST="$NOW"
     clear
-    python3 -m pytest . -q --no-header --tb=short
+    python3 -m pytest . --tb=short
     echo
     echo "--- жду изменений в exercise.py ---"
   fi

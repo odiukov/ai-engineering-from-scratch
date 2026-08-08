@@ -18,6 +18,6 @@ BENCH = {
     "update_once": (_weights, -0.5, _data[0][0], 1, 0.1),
     "train_perceptron": (_data, 0.1, 20),
     "accuracy": (_weights, 0.0, _data),
-    "is_linearly_separable": (_data, 20),
+    "perceptron_converged": (_data, 20),
     "xor_network": (1, 0),
 }

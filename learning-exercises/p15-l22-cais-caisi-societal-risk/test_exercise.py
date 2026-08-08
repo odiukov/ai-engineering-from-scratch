@@ -5,7 +5,10 @@ import pytest
 
 from exercise import (
     MITIGATIONS,
-    SB53_REPORT_HOURS,
+    SB53_FRONTIER_COMPUTE_OPS,
+    SB53_GENERAL_REPORT_HOURS,
+    SB53_IMMINENT_REPORT_HOURS,
+    SB53_LARGE_REVENUE_USD,
     SOCIETAL_STACK,
     aggregate_risk,
     identify_organization,
@@ -27,6 +30,8 @@ CLEAN = {
     "multi_layer_defense": True,
     "information_security": True,
     "agent_autonomy_hours": 1.0,
+    "training_compute_ops": 0.0,
+    "annual_gross_revenue_usd": 0.0,
 }
 # Фронтирный автономный агент: публичный, с метками, без мер, на 48 часов.
 FRONTIER = {
@@ -207,23 +212,45 @@ def test_a_url_without_a_scheme_is_an_error():
 
 
 # ------------------------------------------------------------ sb53_obligations
-def test_whistleblower_protection_is_unconditional():
-    """Сотрудник лаборатории ниже порога не лишается защиты."""
-    assert sb53_obligations(CLEAN) == ["whistleblower_protection"]
+def test_autonomy_and_harm_labels_do_not_invent_sb53_scope():
+    deployment = dict(
+        CLEAN,
+        agent_autonomy_hours=10_000.0,
+        harmful_capability_labels=("cbrn", "cyber"),
+    )
+    assert sb53_obligations(deployment) == []
 
 
-def test_crossing_the_autonomy_threshold_adds_the_threshold_obligations():
-    assert sb53_obligations(dict(CLEAN, agent_autonomy_hours=12.0)) == [
-        "capability_threshold_disclosure",
+def test_frontier_scope_is_strictly_greater_than_ten_to_the_twenty_six_ops():
+    at_boundary = dict(CLEAN, training_compute_ops=SB53_FRONTIER_COMPUTE_OPS)
+    above = dict(CLEAN, training_compute_ops=SB53_FRONTIER_COMPUTE_OPS + 1)
+    assert sb53_obligations(at_boundary) == []
+    assert sb53_obligations(above) == [
         "incident_reporting",
+        "model_transparency_report",
         "whistleblower_protection",
     ]
 
 
-def test_a_harm_label_alone_crosses_the_threshold():
-    got = sb53_obligations(dict(CLEAN, harmful_capability_labels=("cbrn",)))
-    assert "capability_threshold_disclosure" in got
-    assert "incident_reporting" in got
+def test_revenue_alone_does_not_make_a_nonfrontier_developer_large_frontier():
+    deployment = dict(CLEAN, annual_gross_revenue_usd=10 * SB53_LARGE_REVENUE_USD)
+    assert sb53_obligations(deployment) == []
+
+
+def test_large_frontier_scope_requires_revenue_strictly_above_five_hundred_million():
+    frontier = dict(CLEAN, training_compute_ops=SB53_FRONTIER_COMPUTE_OPS + 1)
+    boundary = dict(frontier, annual_gross_revenue_usd=SB53_LARGE_REVENUE_USD)
+    large = dict(frontier, annual_gross_revenue_usd=SB53_LARGE_REVENUE_USD + 1)
+    assert "frontier_ai_framework" not in sb53_obligations(boundary)
+    assert sb53_obligations(large) == [
+        "anonymous_internal_reporting",
+        "enhanced_transparency_report",
+        "frontier_ai_framework",
+        "incident_reporting",
+        "internal_risk_assessment_reporting",
+        "model_transparency_report",
+        "whistleblower_protection",
+    ]
 
 
 def test_an_unknown_feature_is_still_an_error_here():
@@ -231,36 +258,50 @@ def test_an_unknown_feature_is_still_an_error_here():
         sb53_obligations({"autonomy_hours": 12.0})
 
 
+def test_negative_compute_or_revenue_is_an_error():
+    with pytest.raises(ValueError):
+        sb53_obligations(dict(CLEAN, training_compute_ops=-1))
+    with pytest.raises(ValueError):
+        sb53_obligations(dict(CLEAN, annual_gross_revenue_usd=-1))
+
+
 # -------------------------------------------------------- incident_report_status
 def test_a_fresh_incident_has_the_full_window_left():
     got = incident_report_status(100.0, 100.0)
-    assert got["deadline_at"] == APPROX(100.0 + SB53_REPORT_HOURS)
-    assert got["hours_remaining"] == APPROX(SB53_REPORT_HOURS)
+    assert got["deadline_at"] == APPROX(100.0 + SB53_GENERAL_REPORT_HOURS)
+    assert got["hours_remaining"] == APPROX(SB53_GENERAL_REPORT_HOURS)
     assert got["overdue"] is False
 
 
 def test_the_closing_moment_of_the_window_is_still_compliant():
-    """Срок «в течение 24 часов» включает двадцать четвёртый час."""
-    got = incident_report_status(100.0, 124.0)
+    """Общий срок — 15 дней, и последний момент окна ещё compliant."""
+    got = incident_report_status(100.0, 100.0 + SB53_GENERAL_REPORT_HOURS)
     assert got["hours_remaining"] == APPROX(0.0)
     assert got["overdue"] is False
 
 
 def test_past_the_deadline_the_report_is_overdue():
-    got = incident_report_status(100.0, 130.0)
+    got = incident_report_status(100.0, 100.0 + SB53_GENERAL_REPORT_HOURS + 6.0)
     assert got["hours_remaining"] == APPROX(-6.0)
     assert got["overdue"] is True
+
+
+def test_imminent_death_or_serious_injury_uses_the_24_hour_deadline():
+    got = incident_report_status(100.0, 110.0, True)
+    assert got["deadline_hours"] == APPROX(SB53_IMMINENT_REPORT_HOURS)
+    assert got["deadline_at"] == APPROX(124.0)
+    assert got["hours_remaining"] == APPROX(14.0)
 
 
 def test_the_verdict_moves_with_now_and_nothing_else():
     """Отчёт о просрочке, зависящий от момента запуска, нельзя проверить."""
     assert incident_report_status(100.0, 110.0) == incident_report_status(100.0, 110.0)
     assert incident_report_status(100.0, 110.0)["overdue"] is False
-    assert incident_report_status(100.0, 200.0)["overdue"] is True
+    assert incident_report_status(100.0, 500.0)["overdue"] is True
 
 
 def test_a_now_before_the_incident_or_a_bad_window_is_an_error():
     with pytest.raises(ValueError):
         incident_report_status(100.0, 99.0)
     with pytest.raises(ValueError):
-        incident_report_status(100.0, 110.0, deadline_hours=0.0)
+        incident_report_status(100.0, 110.0, "false")

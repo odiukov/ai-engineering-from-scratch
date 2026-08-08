@@ -4,6 +4,8 @@ Whisper: архитектура и дообучение — эталон.
 Открывай ПОСЛЕ своих зелёных тестов.
 """
 
+import math
+
 
 def pad_or_trim(signal, target_len=480000):
     """Привести клип ровно к окну Whisper: короткий добить нулями, длинный обрезать.
@@ -53,26 +55,34 @@ def frame_budget(duration_s, sr=16000, hop=160, conv_stride=2):
     return n_mel, n_mel // conv_stride
 
 
-def normalize_log_mel(log_mel, mean, std):
-    """Нормировать лог-мел-спектрограмму: (x - mean) / std для каждого значения.
+def normalize_log_mel(mel_power):
+    """Применить точное Whisper-преобразование к mel power одного клипа.
 
-    mean и std — скаляры из ОБУЧАЮЩЕГО корпуса Whisper, а не посчитанные по
-    твоему клипу. Нулевой std заменяется на 1.0, чтобы не делить на ноль.
+    Сначала каждое значение зажимается снизу на 1e-10 и берётся log10. Затем
+    динамический диапазон зажимается ПО ЭТОМУ КЛИПУ на уровне peak - 8.0, а
+    фиксированное преобразование (x + 4.0) / 4.0 переводит признаки примерно
+    в [-1, 1]. Статистики корпуса, mean и std здесь вообще не участвуют.
 
-    normalize_log_mel([[1.0, 3.0]], 2.0, 1.0)  ->  [[-1.0, 1.0]]
-    normalize_log_mel([[5.0]], 5.0, 2.0)       ->  [[0.0]]
+    normalize_log_mel([[1.0, 1e-8, 1e-10]])  ->  [[1.0, -1.0, -1.0]]
+    normalize_log_mel([[1e-4]])               ->  [[0.0]]
 
-    Ловушка из урока: подставить статистику librosa вместо статистики Whisper —
-    и выход близок к случайному. Сдвиг mean на константу сдвигает ВСЮ картину
-    на ту же константу, делённую на std, и признаки уезжают из области,
-    на которой сеть обучалась.
+    Ловушка: обычная стандартизация по mean/std — другой preprocessing. Код
+    отработает без ошибки, но Whisper увидит признаки не из обучающего
+    распределения и качество распознавания рухнет.
 
-    Зачем в AI: whisper.audio.log_mel_spectrogram делает это внутри. Своя
-    нормализация «по клипу» ломает модель тихо — ошибок нет, просто WER втрое.
+    Зачем в AI: это буквально clamp-and-affine из
+    whisper.audio.log_mel_spectrogram; менять его при fine-tuning нельзя.
     """
-    if std == 0:
-        std = 1.0
-    return [[(v - mean) / std for v in row] for row in log_mel]
+    if not mel_power or not any(mel_power):
+        return [list(row) for row in mel_power]
+
+    log_mel = [
+        [math.log10(max(float(value), 1e-10)) for value in row]
+        for row in mel_power
+    ]
+    peak = max(value for row in log_mel for value in row)
+    floor = peak - 8.0
+    return [[(max(value, floor) + 4.0) / 4.0 for value in row] for row in log_mel]
 
 
 def build_prompt(language, task="transcribe", timestamps=False):

@@ -231,14 +231,30 @@ def handle(server, request):
     if request.get("jsonrpc") != JSONRPC_VERSION:
         response = make_error(request_id, INVALID_REQUEST, "Invalid JSON-RPC version")
     elif method == "initialize":
-        response = make_response(
-            request_id,
-            {
-                "protocolVersion": PROTOCOL_VERSION,
-                "serverInfo": {"name": server["name"], "version": server["version"]},
-                "capabilities": {"tools": {}},
-            },
-        )
+        params = request.get("params")
+        required = ("protocolVersion", "capabilities", "clientInfo")
+        missing = [name for name in required if not isinstance(params, dict) or name not in params]
+        if missing:
+            response = make_error(
+                request_id,
+                INVALID_PARAMS,
+                f"Missing initialize params: {', '.join(missing)}",
+            )
+        elif not isinstance(params["protocolVersion"], str):
+            response = make_error(request_id, INVALID_PARAMS, "protocolVersion must be a string")
+        elif not isinstance(params["capabilities"], dict):
+            response = make_error(request_id, INVALID_PARAMS, "capabilities must be an object")
+        elif not isinstance(params["clientInfo"], dict):
+            response = make_error(request_id, INVALID_PARAMS, "clientInfo must be an object")
+        else:
+            response = make_response(
+                request_id,
+                {
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "serverInfo": {"name": server["name"], "version": server["version"]},
+                    "capabilities": {"tools": {}},
+                },
+            )
     elif method == "tools/list":
         # отдаём только схемы: handler — питоновская функция, её не сериализовать
         response = make_response(

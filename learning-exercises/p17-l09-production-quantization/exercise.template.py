@@ -24,7 +24,7 @@ FORMATS = {
     "FP8": {"weight_bits": 8, "kv_bits": 8, "engine": "vLLM/TRT-LLM"},
     "NVFP4 + FP8 KV": {"weight_bits": 4, "kv_bits": 8, "engine": "TRT-LLM"},
 }
-FORMATS_WITH_LORA = ("BF16", "FP8", "GPTQ-Int4")
+FORMATS_WITH_LORA = ("BF16", "FP8", "GPTQ-Int4", "AWQ-Int4")
 LLAMA70B_LAYERS = 80
 LLAMA70B_KV_HEADS = 8
 LLAMA70B_HEAD_DIM = 128
@@ -150,7 +150,7 @@ def pick_format(target, needs_lora=False, reasoning_heavy=False, forced=None):
     target: "cpu" | "edge" | "hopper" | "blackwell".
 
     pick_format("edge")                        ->  "GGUF Q4_K_M"
-    pick_format("hopper", needs_lora=True)     ->  "GPTQ-Int4"
+    pick_format("hopper", needs_lora=True)     ->  "AWQ-Int4"
     pick_format("blackwell")                   ->  "NVFP4 + FP8 KV"
     pick_format("blackwell", reasoning_heavy=True)  ->  "FP8"
 

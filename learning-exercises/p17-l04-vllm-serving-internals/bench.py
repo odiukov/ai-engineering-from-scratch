@@ -18,5 +18,7 @@ BENCH = {
     "chunk_plan": (65536, 512),
     "percentile": (_samples, 99),
     "schedule_static": (_workload, 16),
-    "schedule_continuous": (_workload, 4000, 512),
+    # 7104 blocks fit the whole synthetic workload; 8000 leaves headroom so
+    # the benchmark measures scheduling rather than the admission guard.
+    "schedule_continuous": (_workload, 8000, 512),
 }

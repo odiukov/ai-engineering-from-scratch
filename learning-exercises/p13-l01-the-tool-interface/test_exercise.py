@@ -20,6 +20,7 @@ WEATHER_SCHEMA = {
         "units": {"type": "string", "enum": ["celsius", "fahrenheit"]},
     },
     "required": ["city"],
+    "additionalProperties": False,
 }
 
 ADD_SCHEMA = {
@@ -120,9 +121,16 @@ def test_wrong_type_is_reported_with_the_actual_type():
 
 
 def test_hallucinated_property_is_rejected():
-    """Модель выдумала поле — хост обязан это заметить, а не проглотить."""
+    """Явно закрытая схема не пропускает выдуманное поле."""
     problems = validate_arguments(WEATHER_SCHEMA, {"city": "Tokyo", "hemisphere": "N"})
     assert problems == ["unknown property: hemisphere"]
+
+
+def test_additional_properties_are_allowed_when_keyword_is_absent():
+    """JSON Schema по умолчанию открыта, это не синоним strict mode."""
+    schema = dict(WEATHER_SCHEMA)
+    schema.pop("additionalProperties")
+    assert validate_arguments(schema, {"city": "Tokyo", "hemisphere": "N"}) == []
 
 
 def test_value_outside_enum_is_rejected():

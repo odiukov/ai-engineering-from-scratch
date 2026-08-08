@@ -16,8 +16,8 @@ CAIS, CAISI и риск общественного масштаба — этал
     aggregate_risk        <-  агрегат, который НЕ усредняет провал
     stack_assessment      <-  defense in depth на общественном слое
     identify_organization <-  CAIS против CAISI: акронимы совпадают, хосты нет
-    sb53_obligations      <-  провизии SB-53, включая безусловные
-    incident_report_status<-  срок отчёта об инциденте по SB-53
+    sb53_obligations      <-  enacted scope SB-53 по compute и revenue
+    incident_report_status<-  два срока отчёта об инциденте по SB-53
 
 Опасные возможности обозначаются МЕТКАМИ ("cbrn", "cyber", "bio",
 "disinformation", "autonomy") и только ими. Ни одного примера вредного
@@ -63,6 +63,8 @@ DEPLOYMENT_FEATURES = {
     "multi_layer_defense": True,
     "information_security": True,
     "agent_autonomy_hours": 0.0,
+    "training_compute_ops": 0.0,
+    "annual_gross_revenue_usd": 0.0,
 }
 
 # Порог автономии, с которого категория rogue AIs включается (уроки 1, 21).
@@ -119,14 +121,24 @@ SOCIETAL_STACK = (
 # Единственный надёжный признак — хост, а не буквы в тексте.
 ORG_HOSTS = {"safe.ai": "CAIS", "nist.gov": "CAISI"}
 
-# SB-53: порог автономии, с которого включаются обязательства по
-# возможностям, и окно отчёта об инциденте.
-SB53_AUTONOMY_HOURS = 8.0
-SB53_REPORT_HOURS = 24.0
-SB53_UNCONDITIONAL = ("whistleblower_protection",)
-SB53_THRESHOLD_OBLIGATIONS = (
-    "capability_threshold_disclosure",
+# California SB-53, Chapter 138 (2025), Bus. & Prof. Code §§ 22757.11–.13:
+# frontier model — строго больше 10^26 операций обучения; large frontier
+# developer — такой разработчик со строго более $500M gross revenue за
+# прошлый календарный год. Это законные пороги, не autonomy/harm labels.
+SB53_FRONTIER_COMPUTE_OPS = 10**26
+SB53_LARGE_REVENUE_USD = 500_000_000.0
+SB53_GENERAL_REPORT_HOURS = 15 * 24.0
+SB53_IMMINENT_REPORT_HOURS = 24.0
+SB53_FRONTIER_OBLIGATIONS = (
     "incident_reporting",
+    "model_transparency_report",
+    "whistleblower_protection",
+)
+SB53_LARGE_OBLIGATIONS = (
+    "anonymous_internal_reporting",
+    "enhanced_transparency_report",
+    "frontier_ai_framework",
+    "internal_risk_assessment_reporting",
 )
 
 
@@ -318,69 +330,78 @@ def identify_organization(url):
 
 
 def sb53_obligations(deployment):
-    """Обязательства по California SB-53 для развёртывания. Отсортировано.
+    """Обязательства California SB-53 по enacted compute/revenue scope.
 
-    sb53_obligations({})  ->  ["whistleblower_protection"]
-    sb53_obligations({"agent_autonomy_hours": 12.0})
-        ->  ["capability_threshold_disclosure", "incident_reporting",
-             "whistleblower_protection"]
-    sb53_obligations({"harmful_capability_labels": ["cbrn"]})
-        ->  те же три
+    sb53_obligations({})  ->  []
+    sb53_obligations({"training_compute_ops": 10**26})  ->  []
+    sb53_obligations({"training_compute_ops": 10**26 + 1})
+        ->  frontier obligations
 
-    Защита информантов безусловна: она не зависит ни от возможностей
-    модели, ни от порогов. Это отдельный пункт билля, и путать его с
-    пороговыми обязательствами нельзя — иначе получится, что сотрудник
-    лаборатории ниже порога защиты не имеет.
+    Frontier model по §22757.11(i) обучен на количестве операций СТРОГО
+    больше 10^26 (включая последующие fine-tuning/RL/material modifications).
+    Поэтому ровно 10^26 ещё не входит в scope. Для frontier developer
+    действуют transparency report, incident reporting и whistleblower rules.
 
-    Порог включается либо автономией от SB53_AUTONOMY_HOURS часов, либо
-    наличием любой метки опасных возможностей. Проверка признаков — та же,
-    что у tag_risks, поэтому опечатка в признаке остаётся ValueError.
+    Large frontier developer по §22757.11(j) — frontier developer с gross
+    revenue вместе с affiliates СТРОГО больше $500M за прошлый календарный
+    год. Для него добавляются framework, расширенные disclosures, summaries
+    внутренних risk assessments и анонимный внутренний канал.
+
+    Autonomy hours и harm labels полезны для CAIS tag_risks, но SB-53 scope
+    не включают. Отрицательные compute/revenue и неизвестные поля — ошибка.
     """
     tag_risks(deployment)  # переиспользуем валидацию признаков и меток
     d = dict(DEPLOYMENT_FEATURES)
     d.update(deployment)
-    out = list(SB53_UNCONDITIONAL)
-    crossed = (
-        d["agent_autonomy_hours"] >= SB53_AUTONOMY_HOURS
-        or bool(tuple(d["harmful_capability_labels"]))
-    )
-    if crossed:
-        out.extend(SB53_THRESHOLD_OBLIGATIONS)
+    compute = d["training_compute_ops"]
+    revenue = d["annual_gross_revenue_usd"]
+    if compute < 0 or revenue < 0:
+        raise ValueError("training compute and annual revenue must be nonnegative")
+    if compute <= SB53_FRONTIER_COMPUTE_OPS:
+        return []
+    out = list(SB53_FRONTIER_OBLIGATIONS)
+    if revenue > SB53_LARGE_REVENUE_USD:
+        out.extend(SB53_LARGE_OBLIGATIONS)
     return sorted(out)
 
 
-def incident_report_status(incident_at, now, deadline_hours=None):
-    """Срок отчёта об инциденте: {"deadline_at", "hours_remaining", "overdue"}.
+def incident_report_status(discovered_at, now,
+                           imminent_death_or_serious_injury=False):
+    """Срок SB-53 от discovery: общий 15 дней, imminent injury — 24 часа.
 
     Время — в часах по любой монотонной шкале, лишь бы одной и той же.
 
-    incident_report_status(100.0, 110.0)  ->  deadline_at 124.0,
-                                              hours_remaining 14.0,
+    incident_report_status(100.0, 110.0)  ->  deadline_at 460.0,
+                                              hours_remaining 350.0,
                                               overdue False
-    incident_report_status(100.0, 124.0)  ->  hours_remaining 0.0,
-                                              overdue False
-    incident_report_status(100.0, 130.0)  ->  hours_remaining -6.0,
-                                              overdue True
+    incident_report_status(100.0, 110.0, True)
+                                           -> deadline_at 124.0,
+                                              hours_remaining 14.0
 
-    now приходит ПАРАМЕТРОМ, а не берётся из часов. Отчёт о просрочке,
-    который меняется от момента запуска, нельзя ни проверить, ни приложить
-    к делу; а инциденты разбирают именно постфактум.
+    §22757.13(c): frontier developer сообщает critical safety incident в
+    Office of Emergency Services в течение 15 дней ПОСЛЕ ОБНАРУЖЕНИЯ. Если
+    incident poses imminent risk of death or serious physical injury, раскрыть
+    его подходящему органу надо в течение 24 часов. Это не общий 24h deadline.
 
-    Ровно на границе просрочки нет: срок «в течение 24 часов» включает
-    двадцать четвёртый час. Сдвиг этой границы на секунду — самый дешёвый
-    способ превратить соблюдение в нарушение и обратно.
+    now приходит параметром, а не берётся из часов. Ровно на границе
+    просрочки нет: "within" включает последний момент окна.
 
-    now раньше инцидента — ValueError: отчёт не может быть готов раньше
-    того, о чём он. Неположительное окно — тоже ValueError.
+    now раньше discovery — ValueError. Флаг требует именно bool, чтобы строка
+    "false" случайно не включила срочный режим как truthy значение.
     """
-    window = SB53_REPORT_HOURS if deadline_hours is None else deadline_hours
-    if window <= 0:
-        raise ValueError(f"deadline_hours must be positive, got {window!r}")
-    if now < incident_at:
-        raise ValueError(f"now={now!r} precedes incident_at={incident_at!r}")
-    deadline = incident_at + window
+    if not isinstance(imminent_death_or_serious_injury, bool):
+        raise ValueError("imminent_death_or_serious_injury must be bool")
+    if now < discovered_at:
+        raise ValueError(f"now={now!r} precedes discovered_at={discovered_at!r}")
+    window = (
+        SB53_IMMINENT_REPORT_HOURS
+        if imminent_death_or_serious_injury
+        else SB53_GENERAL_REPORT_HOURS
+    )
+    deadline = discovered_at + window
     return {
         "deadline_at": deadline,
+        "deadline_hours": window,
         "hours_remaining": deadline - now,
         "overdue": now > deadline,
     }

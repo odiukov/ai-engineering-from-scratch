@@ -16,6 +16,7 @@
 
 import hashlib
 import hmac
+import json
 
 TASK_STATES = (
     "submitted", "working", "input-required", "auth-required",
@@ -40,16 +41,17 @@ class TaskStateError(ProtocolError):
 
 
 def agent_card(name, url, skills, default_input_modes, default_output_modes,
-               streaming=False, version="1.0.0"):
+               streaming=False, version="1.0.0", description=None):
     """Agent Card в духе A2A: что агент умеет и как с ним говорить.
 
-    skills — список dict с ключами "id", "tags", "input_modes",
-    "output_modes".
+    skills — список dict с ключами "id", "name", "description", "tags",
+    "inputModes", "outputModes".
 
     card = agent_card("researcher", "https://r.local/a2a/v1",
-                      [{"id": "web-research", "tags": ["research"],
-                        "input_modes": ["text/plain"],
-                        "output_modes": ["application/json"]}],
+                      [{"id": "web-research", "name": "Web research",
+                        "description": "Search and summarize", "tags": ["research"],
+                        "inputModes": ["text/plain"],
+                        "outputModes": ["application/json"]}],
                       ["text/plain"], ["application/json"])
     card["capabilities"]["streaming"]  ->  False
     card["version"]                    ->  "1.0.0"
@@ -71,8 +73,8 @@ def discover(cards, tag=None, media_type=None):
     discover(cards, tag="research")          ->  только исследователи
     discover(cards, media_type="text/plain") ->  кто принимает такой вход
 
-    MIME засчитывается и из default_input_modes карточки, и из
-    input_modes любого её умения: умение может принимать больше, чем
+    MIME засчитывается и из defaultInputModes карточки, и из
+    inputModes любого её умения: умение может принимать больше, чем
     агент по умолчанию.
     """
     raise NotImplementedError
@@ -111,15 +113,22 @@ def apply_event(task, event):
     raise NotImplementedError
 
 
+def _canonical_payload(payload):
+    """Стабильные байты строки или полного JSON-сообщения для подписи."""
+    raise NotImplementedError
+
+
 def sign(secret, payload):
-    """Подпись полезной нагрузки общим секретом: HMAC-SHA256 в hex.
+    """Подпись строки или полного JSON-сообщения: HMAC-SHA256 в hex.
 
     sign("k", "msg-1") == sign("k", "msg-1")   ->  True
     sign("k", "msg-1") == sign("k", "msg-2")   ->  False
 
     Боевой ANP подписывает асимметрично (ключ did:wba из DID-документа),
     здесь для наглядности симметричный HMAC — проверяемое свойство то же:
-    подпись привязана и к секрету, и к тексту.
+    подпись привязана и к секрету, и ко всем полям сообщения. JSON
+    канонизируется, поэтому порядок ключей не меняет подпись, а правка даже
+    вложенного text/data делает её недействительной.
     """
     raise NotImplementedError
 

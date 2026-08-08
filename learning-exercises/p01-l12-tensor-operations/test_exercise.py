@@ -89,6 +89,12 @@ def test_reshape_rejects_a_non_divisible_inference():
         reshape((2, 6), (-1, 5))
 
 
+def test_reshape_rejects_negative_dimensions_other_than_minus_one():
+    """Равное произведение не делает форму (-2, -6) допустимой."""
+    with pytest.raises(ValueError):
+        reshape((2, 6), (-2, -6))
+
+
 # ----------------------------------------------------------------- permute
 def test_permute_transposes_a_matrix():
     assert permute([0, 1, 2, 3, 4, 5], (2, 3), (1, 0)) == ([0, 3, 1, 4, 2, 5], (3, 2))

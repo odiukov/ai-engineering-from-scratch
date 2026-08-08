@@ -7,8 +7,8 @@ Batch API: очередь, скидка и SLA завершения — этал
 
     sync_cost, cached_cost  <-  обычный вызов /v1/messages с cache_control
     batch_cost              <-  OpenAI /v1/batches, Anthropic Message Batches,
-                                Vertex Batch Prediction: везде -50% на вход и
-                                выход, обещание «в течение 24 часов»
+                                Vertex Batch Prediction: скидка на batch и
+                                отдельная политика совмещения с cache
     submit                  <-  загрузка JSONL и создание batch job
     drain_window            <-  планировщик провайдера: задания считаются в
                                 окно недозагрузки GPU, а не сразу
@@ -36,6 +36,13 @@ WRITE_PREMIUM = 1.25
 
 # Скидка batch: множитель к счёту, одинаковый у всех провайдеров.
 BATCH_DISCOUNT = 0.50
+
+# Политика задаётся явно: Anthropic складывает batch и cache, а у Vertex
+# Gemini цена cached prefix имеет приоритет и повторно на 50% не режется.
+BATCH_CACHE_POLICY = {
+    "anthropic": "stack",
+    "vertex-gemini": "cache_precedence",
+}
 
 # Границы полос по бюджету задержки, в секундах.
 INTERACTIVE_MAX_S = 60
@@ -95,20 +102,30 @@ def cached_cost(n, prefix_tokens, unique_tokens, output_tokens):
     return write + reads + n * tail
 
 
-def batch_cost(n, prefix_tokens, unique_tokens, output_tokens, cached):
-    """Счёт по batch: половина от синхронного, кэш можно сложить сверху.
+def batch_cost(n, prefix_tokens, unique_tokens, output_tokens, cached,
+               provider="anthropic"):
+    """Счёт по batch с явной политикой провайдера для prompt cache.
 
     batch_cost(50_000, 4000, 2000, 200, False)  ->  525.0
     batch_cost(50_000, 4000, 2000, 200, True)   ->  примерно 255.0
 
-    Знаменитое «10% от синхронного» получается НЕ всегда: скидка режет
-    пополам всё, а кэш — только общий префикс. На длинном общем префиксе с
-    коротким выходом выходит около 10%; на тяжёлой уникальной части и
-    длинном ответе — около 40%. Оба режима проверены тестами.
+    У Anthropic скидки складываются. У Vertex Gemini cache price takes
+    precedence: cached prefix оплачивается по cache-тарифу без дополнительной
+    batch-скидки, а уникальный вход и выход всё ещё получают -50%.
+
+    Неизвестный provider — BatchError: молча выбрать финансовую политику
+    нельзя.
     """
-    base = cached_cost(n, prefix_tokens, unique_tokens, output_tokens) if cached \
-        else sync_cost(n, prefix_tokens, unique_tokens, output_tokens)
-    return base * BATCH_DISCOUNT
+    if provider not in BATCH_CACHE_POLICY:
+        raise BatchError(f"unknown provider policy: {provider!r}")
+    if not cached:
+        return sync_cost(n, prefix_tokens, unique_tokens, output_tokens) * BATCH_DISCOUNT
+    cached_total = cached_cost(n, prefix_tokens, unique_tokens, output_tokens)
+    if BATCH_CACHE_POLICY[provider] == "stack":
+        return cached_total * BATCH_DISCOUNT
+    cached_prefix = cached_cost(n, prefix_tokens, 0, 0)
+    uncached_tail = sync_cost(n, 0, unique_tokens, output_tokens)
+    return cached_prefix + uncached_tail * BATCH_DISCOUNT
 
 
 def submit(queue, job_id, n_requests, submitted_h):
@@ -242,18 +259,20 @@ def triage(latency_budget_s):
     return "batch"
 
 
-def lane_decision(n, prefix_tokens, unique_tokens, output_tokens, latency_budget_s):
+def lane_decision(n, prefix_tokens, unique_tokens, output_tokens, latency_budget_s,
+                  provider="anthropic"):
     """Выбрать полосу и посчитать, сколько это стоит и сколько потеряно.
 
     Возвращает dict:
       lane            — из triage,
       cost            — счёт в выбранной полосе,
       baseline_cost   — синхронно и без кэша,
-      best_cost       — batch со сложенным кэшем, недостижимый минимум,
+      best_cost       — batch + кэш по политике provider, недостижимый минимум,
       saving_usd/pct  — экономия против baseline,
       forgone_usd     — сколько оставлено на столе из-за требования к задержке.
 
-    Кэш доступен во всех полосах, скидка batch — только в 'batch'.
+    Кэш доступен во всех полосах, скидка batch — только в 'batch'. У Vertex
+    Gemini cache-тариф на общий префикс имеет приоритет над batch-скидкой.
 
     lane_decision(50_000, 4000, 200, 100, 5)["lane"]       ->  'interactive'
     lane_decision(50_000, 4000, 200, 100, 86_400)["lane"]  ->  'batch'
@@ -264,7 +283,7 @@ def lane_decision(n, prefix_tokens, unique_tokens, output_tokens, latency_budget
     """
     lane = triage(latency_budget_s)
     baseline = sync_cost(n, prefix_tokens, unique_tokens, output_tokens)
-    best = batch_cost(n, prefix_tokens, unique_tokens, output_tokens, True)
+    best = batch_cost(n, prefix_tokens, unique_tokens, output_tokens, True, provider)
     if lane == "batch":
         cost = best
     else:

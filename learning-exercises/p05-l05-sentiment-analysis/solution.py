@@ -66,7 +66,13 @@ def train_nb(docs_by_class, vocab, alpha=1.0):
 
     Ловушка: токены вне vocab не считаются вообще — ни в числителе, ни в
     знаменателе. Иначе вероятности по словарю перестанут давать в сумме 1.
+
+    alpha обязан быть положительным. При alpha=0 невиданные слова снова
+    получают ноль, а отрицательное значение вообще создаёт «вероятности»
+    вне допустимого диапазона, поэтому оба случая дают ValueError.
     """
+    if alpha <= 0:
+        raise ValueError(f"alpha must be positive, got {alpha}")
     vocab = list(dict.fromkeys(vocab))  # порядок сохраняем, дубликаты убираем
     total_docs = sum(len(docs) for docs in docs_by_class.values())
 

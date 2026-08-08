@@ -31,8 +31,9 @@ def build_haystack(filler, needle, depth_ratio, total_tokens):
     filler-а, а не добавляется сверху — иначе замер «сколько влезло в
     контекст» врал бы на длину иголки.
 
-    ValueError на depth_ratio вне [0, 1], на неположительный total_tokens и
-    на filler без единого токена.
+    ValueError на depth_ratio вне [0, 1], на неположительный total_tokens,
+    на filler без единого токена и если needle длиннее всего бюджета. Мы
+    отвергаем такой запрос, а не обрезаем факт, который модель должна найти.
     """
     raise NotImplementedError
 

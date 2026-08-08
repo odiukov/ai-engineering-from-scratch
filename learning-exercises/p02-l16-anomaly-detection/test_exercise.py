@@ -113,9 +113,10 @@ def test_bigger_factor_widens_the_bounds():
 
 
 def test_iqr_bounds_survive_a_zero_spread():
-    """Ловушка: одинаковые значения дают IQR = 0 и границы схлопываются в точку."""
+    """Вырожденные усы Tukey честно схлопываются в центральное значение."""
     lower, upper = iqr_bounds([5.0] * 10)
-    assert lower < 5.0 < upper
+    assert lower == APPROX(5.0)
+    assert upper == APPROX(5.0)
 
 
 # ---------------------------------------------------------------- iqr_flags
@@ -129,6 +130,14 @@ def test_iqr_catches_what_zscore_misses():
     rows = [[0.0]] * 20 + [[100.0]] * 3
     assert zscore_flags(rows, 3.0) == [False] * 23
     assert iqr_flags(rows)[-3:] == [True, True, True]
+
+
+def test_zero_iqr_flags_do_not_depend_on_measurement_scale():
+    """Подстановка IQR=1 скрыла бы малые отклонения, но не те же большие."""
+    small = [[0.0]] * 20 + [[0.5]] * 3
+    large = [[0.0]] * 20 + [[500.0]] * 3
+    assert iqr_flags(small) == iqr_flags(large)
+    assert iqr_flags(small)[-3:] == [True, True, True]
 
 
 def test_iqr_flags_are_per_column():

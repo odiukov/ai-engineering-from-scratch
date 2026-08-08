@@ -79,13 +79,15 @@ def top_k_blocks(weights, k):
     raise NotImplementedError
 
 
-def selected_branch(q, K, V, l, k):
-    """Выбранная ветка: top-k блоков по сжатым оценкам, токены — исходные.
+def selected_branch(q, K, V, selection_block_size, k):
+    """Выбранная ветка: top-k блоков selection_block_size, токены — исходные.
 
     Порядок: сжали K -> посчитали веса по сжатым ключам -> взяли top-k
     блоков -> собрали ИСХОДНЫЕ токены этих блоков -> обычное внимание.
 
-    Свойство для проверки: при l = 1 и k >= числа токенов ответ совпадает
+    Размер блока выбора не связан с размером блока отдельной сжатой
+    ветки. Свойство для проверки: при selection_block_size = 1 и
+    k >= числа токенов ответ совпадает
     с плотным вниманием по всей последовательности. Так и должно быть —
     разреженность с полным окном обязана вырождаться в плотную.
 
@@ -95,7 +97,9 @@ def selected_branch(q, K, V, l, k):
     raise NotImplementedError
 
 
-def nsa_attention(q, K, V, l, k, w, gates):
+def nsa_attention(
+    q, K, V, compression_block_size, k, selection_block_size, w, gates
+):
     """Три ветки NSA, сложенные с гейтами (g_cmp, g_sel, g_win).
 
     Модуль модели: NSA-блок целиком.
@@ -107,13 +111,14 @@ def nsa_attention(q, K, V, l, k, w, gates):
 
     Три полезные проверки:
       gates = (0, 0, 1), w >= len(K)  ->  обычное плотное внимание;
-      gates = (0, 1, 0), l = 1, k >= len(K)  ->  тоже плотное внимание;
+      gates = (0, 1, 0), selection_block_size = 1, k >= len(K)
+          ->  тоже плотное внимание;
       gates = (0, 0, 0)  ->  нулевой вектор.
     """
     raise NotImplementedError
 
 
-def keys_per_query(n, l, k, b, w):
+def keys_per_query(n, compression_block_size, k, selection_block_size, w):
     """Бюджет вычислений: сколько ключей видит один запрос в каждой ветке.
 
     Возвращает словарь с ключами compressed, selected, window, total,
@@ -122,7 +127,8 @@ def keys_per_query(n, l, k, b, w):
     keys_per_query(64000, 64, 16, 64, 512)["total"]  ->  2536
     keys_per_query(64000, 64, 16, 64, 512)["full"]   ->  64000
 
-    compressed = ceil(n / l), selected = min(k * b, n), window = min(w, n).
+    compressed = ceil(n / compression_block_size),
+    selected = min(k * selection_block_size, n), window = min(w, n).
     Ограничение по n обязательно: нельзя прочитать больше ключей, чем есть.
 
     Ради чего всё: на 64k выигрыш 25x, на 128k уже 36x. Экономия растёт

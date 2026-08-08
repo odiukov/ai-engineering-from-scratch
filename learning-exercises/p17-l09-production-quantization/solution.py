@@ -18,8 +18,9 @@ FORMATS = {
     "NVFP4 + FP8 KV": {"weight_bits": 4, "kv_bits": 8, "engine": "TRT-LLM"},
 }
 
-# На начало 2026 адаптеры LoRA умеют жить только поверх этих форматов.
-FORMATS_WITH_LORA = ("BF16", "FP8", "GPTQ-Int4")
+# LoRA поддерживают vLLM-форматы BF16/FP8/GPTQ/AWQ. GGUF в этой модели
+# относится к llama.cpp-пути, а NVFP4 — к TRT-LLM без LoRA-adapter serving.
+FORMATS_WITH_LORA = ("BF16", "FP8", "GPTQ-Int4", "AWQ-Int4")
 
 # Геометрия Llama-3-70B: 80 слоёв, GQA с 8 KV-головами по 128.
 LLAMA70B_LAYERS = 80
@@ -181,7 +182,7 @@ def pick_format(target, needs_lora=False, reasoning_heavy=False, forced=None):
     target: "cpu" | "edge" | "hopper" | "blackwell".
 
     pick_format("edge")                        ->  "GGUF Q4_K_M"
-    pick_format("hopper", needs_lora=True)     ->  "GPTQ-Int4"
+    pick_format("hopper", needs_lora=True)     ->  "AWQ-Int4"
     pick_format("blackwell")                   ->  "NVFP4 + FP8 KV"
     pick_format("blackwell", reasoning_heavy=True)  ->  "FP8"
 
@@ -205,10 +206,9 @@ def pick_format(target, needs_lora=False, reasoning_heavy=False, forced=None):
     if target == "hopper":
         if reasoning_heavy:
             return "FP8"
-        # GPTQ проигрывает AWQ по Pass@1, но только он тащит LoRA
-        return "GPTQ-Int4" if needs_lora else "AWQ-Int4"
+        return "AWQ-Int4"
     if target == "blackwell":
         if needs_lora:
-            return "GPTQ-Int4"
+            return "AWQ-Int4"
         return "FP8" if reasoning_heavy else "NVFP4 + FP8 KV"
     raise ValueError(f"unknown target: {target}")

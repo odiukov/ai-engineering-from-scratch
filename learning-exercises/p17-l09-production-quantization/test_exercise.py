@@ -190,8 +190,12 @@ def test_edge_target_gets_gguf():
     assert pick_format("edge") == "GGUF Q4_K_M"
 
 
-def test_multi_lora_on_hopper_gets_gptq_not_awq():
-    assert pick_format("hopper", needs_lora=True) == "GPTQ-Int4"
+def test_multi_lora_on_hopper_can_use_awq():
+    assert pick_format("hopper", needs_lora=True) == "AWQ-Int4"
+
+
+def test_forced_awq_with_lora_is_supported():
+    assert pick_format("hopper", needs_lora=True, forced="AWQ-Int4") == "AWQ-Int4"
 
 
 def test_reasoning_workload_gets_fp8_even_on_blackwell():
@@ -205,6 +209,11 @@ def test_blackwell_default_is_the_four_bit_microscaling_format():
 def test_lora_on_top_of_nvfp4_is_rejected_by_name():
     with pytest.raises(FormatUnsupportedError):
         pick_format("blackwell", needs_lora=True, forced="NVFP4 + FP8 KV")
+
+
+def test_gguf_path_does_not_claim_multi_lora_serving():
+    with pytest.raises(FormatUnsupportedError):
+        pick_format("edge", needs_lora=True, forced="GGUF Q4_K_M")
 
 
 def test_unknown_format_name_is_a_value_error():

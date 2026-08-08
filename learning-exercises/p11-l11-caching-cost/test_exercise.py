@@ -147,6 +147,17 @@ def test_full_cache_evicts_the_oldest_entry():
     assert cache_lookup(cache, "gpt-4o", OTHER_MSGS, now=2.0) == "new"
 
 
+def test_overwriting_an_entry_at_capacity_does_not_evict_another_entry():
+    cache = new_cache(max_size=2)
+    cache_store(cache, "gpt-4o", MSGS, 0.0, "first", now=0.0)
+    cache_store(cache, "gpt-4o", OTHER_MSGS, 0.0, "keep", now=1.0)
+    cache_store(cache, "gpt-4o", MSGS, 0.0, "updated", now=2.0)
+
+    assert len(cache["entries"]) == 2
+    assert cache_lookup(cache, "gpt-4o", MSGS, now=3.0) == "updated"
+    assert cache_lookup(cache, "gpt-4o", OTHER_MSGS, now=3.0) == "keep"
+
+
 def test_hit_counter_of_an_entry_grows():
     cache = new_cache()
     cache_store(cache, "gpt-4o", MSGS, 0.0, "30 days.")

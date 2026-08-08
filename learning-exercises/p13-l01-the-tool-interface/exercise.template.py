@@ -71,7 +71,7 @@ def validate_arguments(input_schema, arguments):
     validate_arguments(WEATHER, {"city": 5})           ->  ["city: expected string, got int"]
 
     Поддерживается подмножество JSON Schema 2020-12: type, required, enum и
-    запрет неизвестных свойств. Проверка идёт ДО запуска: аргументы приходят
+    additionalProperties. Проверка идёт ДО запуска: аргументы приходят
     от модели, и на слабых моделях выдуманное поле или не тот тип — рядовое
     событие, а не экзотика.
 

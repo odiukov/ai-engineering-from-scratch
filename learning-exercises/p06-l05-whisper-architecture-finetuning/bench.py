@@ -5,7 +5,7 @@ import random
 _rng = random.Random(0)          # обязательно: замер должен быть воспроизводим
 
 _signal = [_rng.uniform(-1, 1) for _ in range(200000)]
-_log_mel = [[_rng.uniform(-8, 2) for _ in range(80)] for _ in range(3000)]
+_mel_power = [[10 ** _rng.uniform(-10, 2) for _ in range(80)] for _ in range(3000)]
 _prompt = ["<|startoftranscript|>", "<|en|>", "<|transcribe|>", "<|notimestamps|>"]
 
 _words = [f"w{i}" for i in range(4000)]
@@ -16,7 +16,7 @@ _shapes = [(1280, 1280)] * 64
 BENCH = {
     "pad_or_trim": (_signal, 480000),
     "frame_budget": (600.0,),
-    "normalize_log_mel": (_log_mel, -4.0, 4.0),
+    "normalize_log_mel": (_mel_power,),
     "build_prompt": ("en", "transcribe", False),
     "parse_prompt": (_prompt,),
     "chunk_schedule": (36000.0,),

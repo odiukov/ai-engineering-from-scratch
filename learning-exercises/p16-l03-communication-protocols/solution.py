@@ -6,6 +6,7 @@
 
 import hashlib
 import hmac
+import json
 
 # Жизненный цикл задачи A2A. UNSPECIFIED-сентинел из спецификации сюда не
 # берём — работать с ним всё равно нельзя.
@@ -33,16 +34,17 @@ class TaskStateError(ProtocolError):
 
 
 def agent_card(name, url, skills, default_input_modes, default_output_modes,
-               streaming=False, version="1.0.0"):
+               streaming=False, version="1.0.0", description=None):
     """Agent Card в духе A2A: что агент умеет и как с ним говорить.
 
-    skills — список dict с ключами "id", "tags", "input_modes",
-    "output_modes".
+    skills — список dict с ключами "id", "name", "description", "tags",
+    "inputModes", "outputModes".
 
     card = agent_card("researcher", "https://r.local/a2a/v1",
-                      [{"id": "web-research", "tags": ["research"],
-                        "input_modes": ["text/plain"],
-                        "output_modes": ["application/json"]}],
+                      [{"id": "web-research", "name": "Web research",
+                        "description": "Search and summarize", "tags": ["research"],
+                        "inputModes": ["text/plain"],
+                        "outputModes": ["application/json"]}],
                       ["text/plain"], ["application/json"])
     card["capabilities"]["streaming"]  ->  False
     card["version"]                    ->  "1.0.0"
@@ -53,12 +55,23 @@ def agent_card(name, url, skills, default_input_modes, default_output_modes,
     """
     return {
         "name": name,
-        "url": url,
+        "description": description or f"{name} agent",
+        "supportedInterfaces": [{
+            "url": url,
+            "protocolBinding": "HTTP+JSON",
+            "protocolVersion": "1.0",
+        }],
         "version": version,
-        "capabilities": {"streaming": streaming, "push_notifications": False},
-        "default_input_modes": list(default_input_modes),
-        "default_output_modes": list(default_output_modes),
-        "skills": list(skills),
+        "capabilities": {"streaming": streaming, "pushNotifications": False},
+        "defaultInputModes": list(default_input_modes),
+        "defaultOutputModes": list(default_output_modes),
+        "skills": [
+            dict(skill,
+                 tags=list(skill.get("tags", [])),
+                 inputModes=list(skill.get("inputModes", [])),
+                 outputModes=list(skill.get("outputModes", [])))
+            for skill in skills
+        ],
     }
 
 
@@ -72,8 +85,8 @@ def discover(cards, tag=None, media_type=None):
     discover(cards, tag="research")          ->  только исследователи
     discover(cards, media_type="text/plain") ->  кто принимает такой вход
 
-    MIME засчитывается и из default_input_modes карточки, и из
-    input_modes любого её умения: умение может принимать больше, чем
+    MIME засчитывается и из defaultInputModes карточки, и из
+    inputModes любого её умения: умение может принимать больше, чем
     агент по умолчанию.
     """
     found = []
@@ -82,9 +95,9 @@ def discover(cards, tag=None, media_type=None):
             if not any(tag in skill.get("tags", []) for skill in card["skills"]):
                 continue
         if media_type is not None:
-            accepted = set(card["default_input_modes"])
+            accepted = set(card["defaultInputModes"])
             for skill in card["skills"]:
-                accepted.update(skill.get("input_modes", []))
+                accepted.update(skill.get("inputModes", []))
             if media_type not in accepted:
                 continue
         found.append(card)
@@ -152,17 +165,28 @@ def apply_event(task, event):
     raise ProtocolError(f"unknown event kind: {event['kind']}")
 
 
+def _canonical_payload(payload):
+    """Стабильные байты строки или полного JSON-сообщения для подписи."""
+    if isinstance(payload, str):
+        return payload
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False)
+
+
 def sign(secret, payload):
-    """Подпись полезной нагрузки общим секретом: HMAC-SHA256 в hex.
+    """Подпись строки или полного JSON-сообщения: HMAC-SHA256 в hex.
 
     sign("k", "msg-1") == sign("k", "msg-1")   ->  True
     sign("k", "msg-1") == sign("k", "msg-2")   ->  False
 
     Боевой ANP подписывает асимметрично (ключ did:wba из DID-документа),
     здесь для наглядности симметричный HMAC — проверяемое свойство то же:
-    подпись привязана и к секрету, и к тексту.
+    подпись привязана и к секрету, и ко всем полям сообщения. JSON
+    канонизируется, поэтому порядок ключей не меняет подпись, а правка даже
+    вложенного text/data делает её недействительной.
     """
-    return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"),
+    encoded = _canonical_payload(payload).encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), encoded,
                     hashlib.sha256).hexdigest()
 
 
@@ -232,7 +256,7 @@ def delegate(cards, secrets, from_did, signature, skill_tag, message,
     Успешный запуск доводит задачу до "completed" и кладёт вывод агента
     артефактом. Упавший — до "failed", артефактов нет.
     """
-    if not verify(secrets, from_did, message["id"], signature):
+    if not verify(secrets, from_did, message, signature):
         return {"error": "identity verification failed"}
 
     candidates = discover(cards, tag=skill_tag)

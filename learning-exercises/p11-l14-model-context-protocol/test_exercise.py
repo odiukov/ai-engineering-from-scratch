@@ -62,6 +62,14 @@ def make_server():
     }
 
 
+def initialize_params():
+    return {
+        "protocolVersion": PROTOCOL_VERSION,
+        "capabilities": {},
+        "clientInfo": {"name": "exercise-client", "version": "1.0.0"},
+    }
+
+
 # ------------------------------------------------------------ make_request
 def test_request_carries_the_protocol_version_and_method():
     assert make_request("tools/list", request_id=1) == {
@@ -206,9 +214,24 @@ def test_a_crashing_tool_does_not_crash_the_server():
 
 # ------------------------------------------------------------------- handle
 def test_initialize_reports_the_protocol_version_and_server_name():
-    result = handle(make_server(), make_request("initialize", request_id=1))["result"]
+    request = make_request("initialize", initialize_params(), request_id=1)
+    result = handle(make_server(), request)["result"]
     assert result["protocolVersion"] == PROTOCOL_VERSION
     assert result["serverInfo"]["name"] == "demo-server"
+
+
+def test_initialize_requires_protocol_capabilities_and_client_info():
+    for missing in ("protocolVersion", "capabilities", "clientInfo"):
+        params = initialize_params()
+        del params[missing]
+        response = handle(make_server(), make_request("initialize", params, request_id=1))
+        assert response["error"]["code"] == INVALID_PARAMS
+        assert missing in response["error"]["message"]
+
+
+def test_initialize_without_params_is_invalid():
+    response = handle(make_server(), make_request("initialize", request_id=1))
+    assert response["error"]["code"] == INVALID_PARAMS
 
 
 def test_tools_list_returns_every_schema_and_no_handlers():
@@ -265,7 +288,7 @@ def test_handle_routes_tools_call_through_to_the_handler():
 def test_batch_skips_notifications_but_keeps_the_rest():
     server = make_server()
     batch = [
-        make_request("initialize", request_id=1),
+        make_request("initialize", initialize_params(), request_id=1),
         make_request("notifications/initialized"),
         make_request("tools/list", request_id=2),
     ]

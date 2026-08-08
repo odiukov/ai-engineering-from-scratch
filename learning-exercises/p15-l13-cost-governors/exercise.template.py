@@ -129,9 +129,14 @@ def run_session(turn_tokens, limits=None, dollars_per_ktok=DOLLARS_PER_KTOK,
     run_session([1000, 1000], {"max_turns": 1})["stopped_by"]  ->  'max_turns'
     run_session([80000], {"max_tokens_per_request": 10000})["tokens"]  ->  10000
 
-    Один ход: обрезать запрос по max_tokens_per_request, сдвинуть часы на
-    seconds_per_turn, списать, проверить лимиты. Пробитый лимит кладём в
-    stopped_by и выходим — kill switch на превышении бюджета.
+    Один ход: обрезать запрос по max_tokens_per_request, зарезервировать его
+    стоимость под жёсткими денежными лимитами, сдвинуть часы, списать и
+    проверить остальные лимиты. Если следующий ход превысил бы dollar cap,
+    отказываем ДО вызова и списания: kill switch после оплаты уже опоздал.
+
+    Ровно до лимита тратить можно. Такой последний ход записывается, после
+    чего first_breached_cap останавливает сессию на границе. Ход, который
+    вывел бы сумму выше лимита, в turns, tokens и history не попадает.
 
     limits=None означает DEFAULT_LIMITS.
     """

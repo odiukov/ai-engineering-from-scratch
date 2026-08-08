@@ -52,12 +52,12 @@ def test_kv_already_in_hbm_costs_nothing_to_restore():
 
 
 def test_restoring_from_cpu_dram():
-    """0.5 мс на обращение плюс 500 МБ по 50 ГБ/с."""
-    assert restore_ms(4000, "cpu") == APPROX(10.5)
+    """0.5 мс на обращение плюс 655.36 МБ по 50 ГБ/с."""
+    assert restore_ms(4000, "cpu") == APPROX(13.6072)
 
 
 def test_restoring_from_disk():
-    assert restore_ms(4000, "disk") == ROUGH(40.0 + 500e6 / 1.5e9 * 1000)
+    assert restore_ms(4000, "disk") == ROUGH(40.0 + 655_360_000 / 1.5e9 * 1000)
 
 
 def test_the_disk_hop_dominates_short_contexts():
@@ -81,10 +81,10 @@ def test_a_short_context_is_cheaper_to_recompute_than_to_pull_off_disk():
     assert effective_hit_ms(500, "disk") == APPROX(recompute_ms(500))
 
 
-def test_the_disk_crossover_sits_just_below_a_thousand_tokens():
-    """40 / (0.125 - 0.0833) = 960: с 961-го токена диск наконец обгоняет."""
-    assert effective_hit_ms(959, "disk") == APPROX(recompute_ms(959))
-    assert effective_hit_ms(961, "disk") < recompute_ms(961)
+def test_the_disk_crossover_reflects_the_full_kv_geometry():
+    """40 / (0.125 - 0.109227) = 2535.93: с 2536-го токена диск обгоняет."""
+    assert effective_hit_ms(2535, "disk") == APPROX(recompute_ms(2535))
+    assert effective_hit_ms(2536, "disk") < recompute_ms(2536)
 
 
 def test_cpu_dram_beats_recompute_at_any_useful_length():

@@ -5,6 +5,7 @@ import math
 import pytest
 
 from exercise import (
+    FRAME_SIZE,
     conv_stem_length,
     frame_energy,
     frame_signal,
@@ -124,6 +125,14 @@ def test_padding_is_silence():
 def test_padding_keeps_the_frame_width():
     padded = pad_or_clip([[1.0, 2.0, 3.0]], 5)
     assert all(len(f) == 3 for f in padded)
+
+
+def test_empty_audio_is_padded_with_full_width_whisper_frames():
+    """Без исходного кадра ширина всё равно известна из настройки Whisper."""
+    padded = pad_or_clip([], 2)
+    assert len(padded) == 2
+    assert all(len(frame) == FRAME_SIZE for frame in padded)
+    assert flat(padded) == APPROX([0.0] * (2 * FRAME_SIZE))
 
 
 def test_a_long_recording_is_clipped_to_the_prefix():

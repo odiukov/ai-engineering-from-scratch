@@ -110,17 +110,25 @@ def test_bias_correction_never_shrinks_the_moment():
 
 
 # ------------------------------------------------------------ adam_step
-def test_adam_first_step_is_exactly_the_learning_rate():
-    """Поправки на первом шаге сокращаются: шаг равен lr, а не градиенту."""
+def test_adam_first_step_is_nearly_lr_when_gradient_dominates_epsilon():
+    """Точный модуль шага: lr*|g|/(|g|+eps), почти lr при |g| >> eps."""
     params, _, _ = adam_step([1.0], [1.0], [0.0], [0.0], 1, lr=0.1)
-    assert params == pytest.approx([0.9], abs=1e-6)
+    assert params == pytest.approx([1.0 - 0.1 / (1.0 + 1e-8)], abs=1e-12)
 
 
-def test_adam_step_size_ignores_the_gradient_magnitude():
-    """Градиент 1.0 и градиент 1000.0 дают один и тот же первый шаг."""
+def test_adam_step_size_is_nearly_magnitude_invariant_above_epsilon():
+    """Когда оба |g| >> eps, разница первых шагов практически исчезает."""
     small, _, _ = adam_step([1.0], [1.0], [0.0], [0.0], 1, lr=0.1)
     huge, _, _ = adam_step([1.0], [1000.0], [0.0], [0.0], 1, lr=0.1)
     assert small == pytest.approx(huge, abs=1e-6)
+
+
+def test_adam_epsilon_reduces_the_first_step_for_a_tiny_gradient():
+    """При |g| = eps первый шаг равен половине learning rate, не всему lr."""
+    params, _, _ = adam_step(
+        [1.0], [1e-3], [0.0], [0.0], 1, lr=0.1, eps=1e-3
+    )
+    assert params == pytest.approx([0.95], abs=1e-12)
 
 
 def test_adam_returns_updated_moments():

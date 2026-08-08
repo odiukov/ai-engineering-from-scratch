@@ -137,7 +137,8 @@ def parse_tool_calls(raw):
 
     Один объект и список объектов принимаются одинаково: параллельные вызовы
     приходят списком, одиночный — объектом. Пропущенное поле arguments
-    считается пустым словарём.
+    считается пустым словарём. id и call_id нормализуются в call_id:
+    параллельные результаты связываются со своими вызовами именно по нему.
 
     Ловушка из настоящего API: OpenAI отдаёт tool_calls[].function.arguments
     СТРОКОЙ с JSON внутри, а не объектом. Такую строку надо распарсить ещё
@@ -174,7 +175,11 @@ def parse_tool_calls(raw):
         if not isinstance(arguments, dict):
             raise ValueError(f"Arguments for {name} must be an object")
 
-        calls.append({"name": name, "arguments": arguments})
+        call = {"name": name, "arguments": arguments}
+        call_id = item.get("call_id", item.get("id"))
+        if call_id is not None:
+            call["call_id"] = call_id
+        calls.append(call)
     return calls
 
 
@@ -200,10 +205,16 @@ def execute_tool_call(registry, call):
     исправлять аргументы. Поэтому падение превращается в структурный ответ.
     """
     name = call.get("name")
+    call_id = call.get("call_id", call.get("id"))
     arguments = call.get("arguments") or {}
 
+    def linked(result):
+        if call_id is not None:
+            result["call_id"] = call_id
+        return result
+
     if name not in registry:
-        return {
+        return linked({
             "tool": name,
             "ok": False,
             "result": {
@@ -211,12 +222,12 @@ def execute_tool_call(registry, call):
                 "code": "UNKNOWN_TOOL",
                 "message": f"Unknown tool: {name}",
             },
-        }
+        })
 
     schema = registry[name]["definition"]["function"]["parameters"]
     errors = validate_arguments(schema, arguments)
     if errors:
-        return {
+        return linked({
             "tool": name,
             "ok": False,
             "result": {
@@ -225,12 +236,12 @@ def execute_tool_call(registry, call):
                 "message": "; ".join(errors),
                 "errors": errors,
             },
-        }
+        })
 
     try:
         value = registry[name]["function"](**arguments)
     except Exception as exc:  # noqa: BLE001 — наружу исключение выпускать нельзя
-        return {
+        return linked({
             "tool": name,
             "ok": False,
             "result": {
@@ -238,8 +249,8 @@ def execute_tool_call(registry, call):
                 "code": "TOOL_ERROR",
                 "message": f"{type(exc).__name__}: {exc}",
             },
-        }
-    return {"tool": name, "ok": True, "result": value}
+        })
+    return linked({"tool": name, "ok": True, "result": value})
 
 
 def run_tool_calls(registry, calls, max_calls=10):
@@ -260,17 +271,19 @@ def run_tool_calls(registry, calls, max_calls=10):
     results = []
     for i, call in enumerate(calls):
         if i >= max_calls:
-            results.append(
-                {
-                    "tool": call.get("name"),
-                    "ok": False,
-                    "result": {
-                        "error": True,
-                        "code": "CALL_LIMIT",
-                        "message": f"Call budget exhausted: {max_calls}",
-                    },
-                }
-            )
+            result = {
+                "tool": call.get("name"),
+                "ok": False,
+                "result": {
+                    "error": True,
+                    "code": "CALL_LIMIT",
+                    "message": f"Call budget exhausted: {max_calls}",
+                },
+            }
+            call_id = call.get("call_id", call.get("id"))
+            if call_id is not None:
+                result["call_id"] = call_id
+            results.append(result)
             continue
         results.append(execute_tool_call(registry, call))
     return results
@@ -306,13 +319,21 @@ def agent_loop(registry, user_message, decide, max_iterations=5):
         if not calls:
             break
         iterations += 1
-        results = run_tool_calls(registry, calls)
-        conversation.append({"role": "assistant", "content": None, "tool_calls": calls})
+        linked_calls = []
+        for call_index, call in enumerate(calls):
+            linked_call = dict(call)
+            linked_call["call_id"] = call.get(
+                "call_id", call.get("id", f"call_{iterations}_{call_index}")
+            )
+            linked_calls.append(linked_call)
+        results = run_tool_calls(registry, linked_calls)
+        conversation.append({"role": "assistant", "content": None, "tool_calls": linked_calls})
         for result in results:
             conversation.append(
                 {
                     "role": "tool",
                     "tool_name": result["tool"],
+                    "tool_call_id": result["call_id"],
                     "content": json.dumps(result["result"], sort_keys=True, default=str),
                 }
             )

@@ -21,6 +21,7 @@ _config = {
     "num_attention_heads": 128,
     "head_dim": 128,
     "kv_lora_rank": 512,
+    "qk_rope_head_dim": 64,
     "num_experts": 256,
     "num_experts_per_tok": 8,
     "shared_experts": 1,
@@ -29,7 +30,7 @@ _config = {
 }
 
 BENCH = {
-    "mla_kv_cache_bytes": (61, 512, 131072),
+    "mla_kv_cache_bytes": (61, 512, 131072, 64, 2),
     "gqa_kv_cache_bytes": (61, 8, 128, 131072),
     "expert_params": (7168, 2048),
     "attention_params": (7168, 128, 128, 512),

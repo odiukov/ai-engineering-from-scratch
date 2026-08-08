@@ -96,6 +96,21 @@ def test_tree_map_is_the_whole_optimizer():
     assert updated["b"] == pytest.approx(0.0)
 
 
+def test_tree_map_rejects_different_sequence_lengths_instead_of_truncating():
+    with pytest.raises(ValueError, match="structure mismatch"):
+        tree_map(lambda a, b: a + b, [1.0, 2.0], [10.0])
+
+
+def test_tree_map_rejects_different_dictionary_keys():
+    with pytest.raises(ValueError, match="structure mismatch"):
+        tree_map(lambda a, b: a + b, {"w": 1.0}, {"b": 2.0})
+
+
+def test_tree_map_rejects_a_leaf_where_the_other_tree_has_a_container():
+    with pytest.raises(ValueError, match="structure mismatch"):
+        tree_map(lambda a, b: a + b, {"w": 1.0}, {"w": [2.0]})
+
+
 # ------------------------------------------------------------------- grad
 def test_grad_of_a_square():
     assert grad(lambda p: p[0] ** 2)([3.0]) == NUMERIC([6.0])

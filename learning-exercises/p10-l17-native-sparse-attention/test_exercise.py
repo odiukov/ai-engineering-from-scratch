@@ -150,32 +150,34 @@ def test_selecting_more_blocks_than_exist_is_harmless():
 # ------------------------------------------------------------ nsa_attention
 def test_window_branch_alone_with_full_window_is_dense_attention():
     K, V = toy_sequence()
-    got = nsa_attention(QUERY, K, V, 4, 1, len(K), (0.0, 0.0, 1.0))
+    got = nsa_attention(QUERY, K, V, 4, 1, 2, len(K), (0.0, 0.0, 1.0))
     assert got == pytest.approx(dense(QUERY, K, V))
 
 
 def test_selected_branch_alone_with_full_window_is_dense_attention():
     K, V = toy_sequence()
-    got = nsa_attention(QUERY, K, V, 1, len(K), 2, (0.0, 1.0, 0.0))
+    got = nsa_attention(QUERY, K, V, 4, len(K), 1, 2, (0.0, 1.0, 0.0))
     assert got == pytest.approx(dense(QUERY, K, V))
 
 
 def test_compressed_branch_alone_with_block_size_one_is_dense_attention():
     K, V = toy_sequence()
-    got = nsa_attention(QUERY, K, V, 1, 1, 2, (1.0, 0.0, 0.0))
+    got = nsa_attention(QUERY, K, V, 1, 1, 4, 2, (1.0, 0.0, 0.0))
     assert got == pytest.approx(dense(QUERY, K, V))
 
 
 def test_all_gates_at_zero_output_nothing():
     K, V = toy_sequence()
-    assert nsa_attention(QUERY, K, V, 2, 2, 3, (0.0, 0.0, 0.0)) == APPROX([0.0, 0.0, 0.0])
+    assert nsa_attention(QUERY, K, V, 2, 2, 4, 3, (0.0, 0.0, 0.0)) == APPROX(
+        [0.0, 0.0, 0.0]
+    )
 
 
 def test_gates_do_not_have_to_sum_to_one():
     """В статье это выход MLP: ветки взвешиваются независимо."""
     K, V = toy_sequence()
-    once = nsa_attention(QUERY, K, V, 2, 2, 3, (1.0, 1.0, 1.0))
-    twice = nsa_attention(QUERY, K, V, 2, 2, 3, (2.0, 2.0, 2.0))
+    once = nsa_attention(QUERY, K, V, 2, 2, 4, 3, (1.0, 1.0, 1.0))
+    twice = nsa_attention(QUERY, K, V, 2, 2, 4, 3, (2.0, 2.0, 2.0))
     assert twice == pytest.approx([2 * x for x in once])
 
 
@@ -184,8 +186,8 @@ def test_the_window_branch_only_sees_recent_tokens():
     K, V = toy_sequence(n=8)
     V_old = [row[:] for row in V]
     V_old[0] = [500.0, 500.0, 500.0]
-    a = nsa_attention(QUERY, K, V, 8, 1, 2, (0.0, 0.0, 1.0))
-    b = nsa_attention(QUERY, K, V_old, 8, 1, 2, (0.0, 0.0, 1.0))
+    a = nsa_attention(QUERY, K, V, 8, 1, 4, 2, (0.0, 0.0, 1.0))
+    b = nsa_attention(QUERY, K, V_old, 8, 1, 4, 2, (0.0, 0.0, 1.0))
     assert a == pytest.approx(b)
 
 
@@ -194,21 +196,28 @@ def test_the_compressed_branch_does_see_the_whole_sequence():
     K, V = toy_sequence(n=8)
     V_old = [row[:] for row in V]
     V_old[0] = [500.0, 500.0, 500.0]
-    a = nsa_attention(QUERY, K, V, 4, 1, 2, (1.0, 0.0, 0.0))
-    b = nsa_attention(QUERY, K, V_old, 4, 1, 2, (1.0, 0.0, 0.0))
+    a = nsa_attention(QUERY, K, V, 4, 1, 2, 2, (1.0, 0.0, 0.0))
+    b = nsa_attention(QUERY, K, V_old, 4, 1, 2, 2, (1.0, 0.0, 0.0))
     assert a != pytest.approx(b)
 
 
 def test_nsa_is_a_linear_combination_of_its_three_branches():
     K, V = toy_sequence()
-    cmp_only = nsa_attention(QUERY, K, V, 2, 2, 3, (1.0, 0.0, 0.0))
-    sel_only = nsa_attention(QUERY, K, V, 2, 2, 3, (0.0, 1.0, 0.0))
-    win_only = nsa_attention(QUERY, K, V, 2, 2, 3, (0.0, 0.0, 1.0))
-    mixed = nsa_attention(QUERY, K, V, 2, 2, 3, (0.2, 0.5, 0.3))
+    cmp_only = nsa_attention(QUERY, K, V, 2, 2, 4, 3, (1.0, 0.0, 0.0))
+    sel_only = nsa_attention(QUERY, K, V, 2, 2, 4, 3, (0.0, 1.0, 0.0))
+    win_only = nsa_attention(QUERY, K, V, 2, 2, 4, 3, (0.0, 0.0, 1.0))
+    mixed = nsa_attention(QUERY, K, V, 2, 2, 4, 3, (0.2, 0.5, 0.3))
     expected = [
         0.2 * a + 0.5 * b + 0.3 * c for a, b, c in zip(cmp_only, sel_only, win_only)
     ]
     assert mixed == pytest.approx(expected)
+
+
+def test_selection_block_size_is_independent_of_compression_block_size():
+    K, V = toy_sequence()
+    small_compression = nsa_attention(QUERY, K, V, 1, 1, 4, 2, (0.0, 1.0, 0.0))
+    large_compression = nsa_attention(QUERY, K, V, 8, 1, 4, 2, (0.0, 1.0, 0.0))
+    assert small_compression == pytest.approx(large_compression)
 
 
 # ----------------------------------------------------------- keys_per_query
@@ -242,6 +251,12 @@ def test_no_branch_can_read_more_keys_than_the_sequence_has():
 def test_compressed_count_rounds_up():
     """Хвостовой блок существует, даже если он неполный."""
     assert keys_per_query(65, 64, 1, 64, 1)["compressed"] == 2
+
+
+def test_cost_uses_selection_size_not_compression_size_for_selected_keys():
+    budget = keys_per_query(1000, 32, 3, 64, 1)
+    assert budget["compressed"] == 32
+    assert budget["selected"] == 192
 
 
 def test_short_context_gives_no_savings():

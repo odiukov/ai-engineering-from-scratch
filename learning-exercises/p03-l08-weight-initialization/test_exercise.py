@@ -201,6 +201,12 @@ def test_recommend_kaiming_for_relu():
     assert recommend_init("relu") == "kaiming"
 
 
+def test_recommend_kaiming_as_a_heuristic_for_smooth_relu_like_gates():
+    assert recommend_init("gelu") == "kaiming"
+    assert recommend_init("swish") == "kaiming"
+    assert recommend_init("silu") == "kaiming"
+
+
 def test_recommend_xavier_for_saturating_activations():
     assert recommend_init("sigmoid") == "xavier"
     assert recommend_init("tanh") == "xavier"

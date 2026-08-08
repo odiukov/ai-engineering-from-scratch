@@ -39,7 +39,11 @@ def test_queue_time_hurts_ttft_as_much_as_prefill():
 
 # ----------------------------------------------------------------- e2e_ms
 def test_e2e_matches_the_reference_llama_numbers():
-    assert e2e_ms(162.0, 7.33, 127) == APPROX(162.0 + 7.33 * 127)
+    assert e2e_ms(162.0, 7.33, 127) == APPROX(162.0 + 7.33 * 126)
+
+
+def test_ttft_already_contains_the_first_output_token():
+    assert e2e_ms(162.0, 7.33, 1) == APPROX(162.0)
 
 
 def test_short_answers_are_dominated_by_ttft():
@@ -50,7 +54,7 @@ def test_short_answers_are_dominated_by_ttft():
 
 def test_long_answers_are_dominated_by_tpot():
     total = e2e_ms(162.0, 7.33, 1000)
-    assert (7.33 * 1000) / total > 0.9
+    assert (7.33 * 999) / total > 0.9
 
 
 def test_response_network_time_adds_on_top():
@@ -151,6 +155,11 @@ def test_one_violated_constraint_is_enough_to_lose_the_request():
 def test_goodput_is_the_share_of_fully_conforming_requests():
     reqs = [req(100, 7, 100)] * 3 + [req(900, 7, 100)]
     assert goodput(reqs, CONSUMER_SLO) == APPROX(0.75)
+
+
+def test_goodput_uses_tpot_only_after_the_first_token():
+    slo = {"ttft_ms": 100.0, "tpot_ms": 50.0, "e2e_ms": 100.0}
+    assert goodput([req(100.0, 50.0, 1)], slo) == APPROX(1.0)
 
 
 def test_goodput_falls_while_throughput_stays_flat():

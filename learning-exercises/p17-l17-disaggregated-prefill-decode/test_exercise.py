@@ -23,8 +23,8 @@ ROUGH = lambda x: pytest.approx(x, rel=1e-9)
 
 
 # ------------------------------------------------------------------ kv_bytes
-def test_four_thousand_tokens_make_half_a_gigabyte():
-    assert kv_bytes(4000) == 500_000_000
+def test_four_thousand_tokens_use_the_full_llama70b_fp8_kv_geometry():
+    assert kv_bytes(4000) == 655_360_000
 
 
 def test_kv_size_is_linear_in_prompt_length():
@@ -42,12 +42,12 @@ def test_negative_prompt_length_is_rejected():
 
 # --------------------------------------------------------------- transfer_ms
 def test_rdma_transfer_of_a_four_k_prompt():
-    """500 МБ по 100 ГБ/с = 5 мс, плюс 20 мс рукопожатия."""
-    assert transfer_ms(4000, LINK_RDMA_GBPS) == APPROX(25.0)
+    """655.36 МБ по 100 ГБ/с = 6.5536 мс, плюс 20 мс рукопожатия."""
+    assert transfer_ms(4000, LINK_RDMA_GBPS) == APPROX(26.5536)
 
 
 def test_tcp_transfer_of_the_same_prompt_is_ten_times_the_bytes_time():
-    assert transfer_ms(4000, LINK_TCP_GBPS) == APPROX(70.0)
+    assert transfer_ms(4000, LINK_TCP_GBPS) == APPROX(85.536)
 
 
 def test_handshake_is_paid_even_when_there_is_nothing_to_ship():
@@ -106,7 +106,7 @@ def test_penalty_of_one_is_rejected():
 
 # ---------------------------------------------------------- disaggregated_ms
 def test_disaggregated_request_is_prefill_plus_transfer_plus_decode():
-    assert disaggregated_ms(4000, 300, LINK_TCP_GBPS) == APPROX(8070.0)
+    assert disaggregated_ms(4000, 300, LINK_TCP_GBPS) == APPROX(8085.536)
 
 
 def test_a_faster_link_makes_the_split_path_shorter():
@@ -139,7 +139,7 @@ def test_the_gain_does_not_depend_on_the_answer_length():
 
 def test_without_a_colocation_penalty_splitting_is_pure_loss():
     """Выигрывать нечего, а налог на передачу никуда не делся."""
-    assert disagg_gain_ms(4000, 300, LINK_TCP_GBPS, penalty=0.0) == APPROX(-70.0)
+    assert disagg_gain_ms(4000, 300, LINK_TCP_GBPS, penalty=0.0) == APPROX(-85.536)
 
 
 def test_rdma_wins_more_than_tcp_on_the_same_request():
@@ -149,7 +149,7 @@ def test_rdma_wins_more_than_tcp_on_the_same_request():
 
 # --------------------------------------------------- crossover_prompt_tokens
 def test_tcp_crossover_is_close_to_the_five_hundred_tokens_of_the_lesson():
-    assert crossover_prompt_tokens(LINK_TCP_GBPS) == 487
+    assert crossover_prompt_tokens(LINK_TCP_GBPS) == 538
 
 
 def test_a_faster_link_pays_off_on_shorter_prompts():
@@ -163,9 +163,9 @@ def test_the_crossover_is_the_first_prompt_length_that_wins():
 
 
 def test_a_link_slower_than_the_break_even_never_pays_off():
-    """Ниже ~2.33 ГБ/с налог на токен растёт быстрее выигрыша: длина не спасёт."""
-    assert crossover_prompt_tokens(2.0) is None
-    assert crossover_prompt_tokens(3.0) is not None
+    """Ниже ~3.06 ГБ/с налог на токен растёт быстрее выигрыша: длина не спасёт."""
+    assert crossover_prompt_tokens(3.0) is None
+    assert crossover_prompt_tokens(4.0) is not None
 
 
 def test_a_heavier_colocation_penalty_lowers_the_crossover():

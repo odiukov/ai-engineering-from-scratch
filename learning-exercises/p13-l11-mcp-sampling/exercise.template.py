@@ -17,7 +17,7 @@ MCP sampling: сервер просит модель клиента
 JSONRPC = "2.0"
 SAMPLING_METHOD = "sampling/createMessage"
 CONTEXT_MODES = ("none", "thisServer", "allServers")
-STOP_REASONS = ("endTurn", "stopSequence", "maxTokens")
+STANDARD_STOP_REASONS = ("endTurn", "stopSequence", "maxTokens", "toolUse")
 
 
 class SamplingBudgetExceeded(Exception):
@@ -26,21 +26,17 @@ class SamplingBudgetExceeded(Exception):
 
 
 def model_preferences(cost, speed, intelligence, hints=()):
-    """Приоритеты выбора модели, нормированные в сумму 1.0.
+    """Приоритеты выбора модели: три независимых числа 0..1.
 
-    model_preferences(3, 1, 1)
-        ->  {"costPriority": 0.6, "speedPriority": 0.2,
-             "intelligencePriority": 0.2}
+    model_preferences(0.8, 0.2, 0.6)
+        ->  {"costPriority": 0.8, "speedPriority": 0.2,
+             "intelligencePriority": 0.6}
     model_preferences(0, 0, 1, hints=["claude-3-5-sonnet"])
         ->  {..., "hints": [{"name": "claude-3-5-sonnet"}]}
 
-    Принимаем любые неотрицательные веса и нормируем сами: «3 к 1 к 1» —
-    честное намерение сервера, и заставлять его считать доли вручную незачем.
-
-    Ловушки:
-      * отрицательный вес — не «наоборот», а бессмыслица: ValueError;
-      * все три нуля нормировать не на что: тоже ValueError;
-      * hints — это список ОБЪЕКТОВ {"name": ...}, а не голых строк.
+    Поля не обязаны суммироваться в 1.0: 0.9/0.9/0.9 валидно и значит,
+    что все три характеристики важны. Каждое значение должно лежать в 0..1;
+    hints на проводе становятся объектами {"name": ...}.
     """
     raise NotImplementedError
 
@@ -85,10 +81,11 @@ def pick_model(catalog, preferences):
 
     Оценка — скалярное произведение приоритетов на характеристики модели.
 
-    hints — это ПОДСКАЗКА, а не приказ: они разрывают ничью между равными
-    кандидатами, но не поднимают явно худшую модель над лучшей. Настройки
-    пользователя всегда весомее пожеланий сервера — иначе сервер сможет
-    загонять чужой кошелёк в дорогую модель.
+    hints — это упорядоченные ПРЕДПОЧТЕНИЯ, а не приказ и не только
+    tie-breaker. Имя хинта сопоставляется как подстрока; первый хинт, для
+    которого есть кандидаты, задаёт предпочтительную группу. Внутри неё
+    побеждает оценка по трём приоритетам. Клиент всё равно делает финальный
+    выбор и может сопоставить хинт с эквивалентом другого провайдера.
     """
     raise NotImplementedError
 
@@ -108,8 +105,9 @@ def sampling_result(request_id, text, model, stop_reason="endTurn"):
     Поле model — та модель, которую клиент РЕАЛЬНО взял. Она вполне может
     не совпасть с hints сервера, и сервер обязан это пережить.
 
-    Ловушка: stopReason — одно из трёх значений спецификации. "stop" и
-    "length" из чужих API сюда не годятся.
+    stopReason — открытая строка: кроме стандартных endTurn,
+    stopSequence, maxTokens и toolUse клиент может вернуть
+    причину своего провайдера. Пустая строка всё ещё ошибка.
     """
     raise NotImplementedError
 

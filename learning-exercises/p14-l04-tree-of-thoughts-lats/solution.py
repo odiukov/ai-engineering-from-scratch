@@ -27,7 +27,9 @@ def make_node(state, trace=()):
     список по умолчанию склеит всё дерево в один узел.
     """
     return {
-        "state": tuple(state),
+        # Корень нормализуем так же, как дочерние состояния: иначе порядок
+        # входных чисел меняет порядок ничьих в beam search.
+        "state": tuple(sorted(state, reverse=True)),
         "trace": tuple(trace),
         "visits": 0,
         "value_sum": 0.0,
@@ -38,7 +40,7 @@ def make_node(state, trace=()):
 def expand(node):
     """Все дочерние мысли: взять пару чисел, применить операцию, свернуть.
 
-    len(expand(make_node((6.0, 4.0))))   ->  4    (одна пара, четыре операции)
+    len(expand(make_node((6.0, 4.0))))   ->  6
     expand(make_node((5.0,)))            ->  []   (сворачивать нечего)
 
     Деление на ноль пропускаем — это не "мысль", а исключение.
@@ -51,40 +53,52 @@ def expand(node):
         return children
     for i, j in itertools.combinations(range(len(state)), 2):
         a, b = state[i], state[j]
-        for op in OPS:
-            if op == "+":
-                v = a + b
-            elif op == "-":
-                v = a - b
-            elif op == "*":
-                v = a * b
-            elif b == 0:
-                continue
-            else:
-                v = a / b
+        candidates = [
+            (a, "+", b, a + b),
+            (a, "-", b, a - b),
+            (a, "*", b, a * b),
+            (b, "-", a, b - a),
+        ]
+        if b != 0:
+            candidates.append((a, "/", b, a / b))
+        if a != 0:
+            candidates.append((b, "/", a, b / a))
+        for left, op, right, v in candidates:
             rest = [s for k, s in enumerate(state) if k not in (i, j)]
             new_state = tuple(sorted(rest + [v], reverse=True))
-            children.append(make_node(new_state, node["trace"] + (f"{a}{op}{b}={v}",)))
+            step = f"{left}{op}{right}={v}"
+            children.append(make_node(new_state, node["trace"] + (step,)))
     return children
 
 
+def _closest(state, target):
+    """Расстояние от ближайшего числа состояния до target."""
+    return min(abs(v - target) for v in state)
+
+
 def value(node, target=TARGET):
-    """Self-evaluation узла: 1.0 за точное попадание, иначе минус промах.
+    """Self-evaluation: точный лист либо промах после одного шага вперёд.
 
     value(make_node((24.0,)))       ->  1.0
     value(make_node((20.0,)))       ->  -0.04
-    value(make_node((23.0, 5.0)))   ->  -0.01
+    value(make_node((23.0, 5.0)))   ->  -0.04
 
-    Оценка неполного состояния — по ближайшему к цели числу: пока чисел
-    несколько, шанс ещё есть. В статье эту оценку выдаёт промпт
-    ("sure / likely / impossible"), здесь она символьная — так тест
-    проверяет логику поиска, а не качество подсказки.
+    Оценка неполного состояния смотрит, чего можно достичь ЕЩЁ ОДНОЙ
+    операцией. Наивная близость текущих чисел ошибочно считает (24, 4)
+    идеальным состоянием, хотя после обязательного последнего действия
+    получатся 96, 28, 20, 6, 1/6 или -20, но не 24.
+
+    В статье оценку выдаёт промпт ("sure / likely / impossible"), здесь она
+    символьная — так тест проверяет логику поиска, а не качество подсказки.
     """
     state = node["state"]
     if len(state) == 1:
         gap = abs(state[0] - target)
         return 1.0 if gap < 1e-6 else -gap / 100.0
-    return -min(abs(v - target) for v in state) / 100.0
+    reachable = [child["state"] for child in expand(node)]
+    best_gap = min((_closest(s, target) for s in reachable),
+                   default=_closest(state, target))
+    return -best_gap / 100.0
 
 
 def beam_search(root, target=TARGET, width=5, depth=3):

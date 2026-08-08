@@ -1,102 +1,94 @@
 """
-Протокол A2A — эталон.
+Протокол A2A v1 — эталон.
 
 Открывай ПОСЛЕ своих зелёных тестов.
 """
 
+import copy
 import json
+from uuid import uuid4
 
-# Кусочки спецификации A2A, которые нужны кодеку. Транспорт (HTTP) тут
-# намеренно отсутствует: протокол — это формат сообщений и правила смены
-# состояний, а не сокет.
-WELL_KNOWN_PATH = "/.well-known/agent.json"
-CARD_REQUIRED = ("name", "version", "skills", "endpoints", "auth", "modalities", "protocol_version")
-MODALITIES = ("text", "structured", "image", "audio", "video")
-TERMINAL_STATES = ("completed", "failed", "canceled")
-# Жизненный цикл задачи: submitted -> working -> completed / failed / canceled.
+
+WELL_KNOWN_PATH = "/.well-known/agent-card.json"
+MESSAGE_SEND_PATH = "/message:send"
+CARD_REQUIRED = (
+    "name", "description", "supportedInterfaces", "version", "capabilities",
+    "defaultInputModes", "defaultOutputModes", "skills",
+)
+SKILL_REQUIRED = ("id", "name", "description", "tags")
+MEDIA_TYPES = ("text/plain", "application/json", "image/png", "audio/mpeg", "video/mp4")
+TERMINAL_STATES = (
+    "TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED",
+    "TASK_STATE_REJECTED",
+)
 TRANSITIONS = {
-    "submitted": ("working", "canceled", "failed"),
-    "working": ("completed", "failed", "canceled"),
-    "completed": (),
-    "failed": (),
-    "canceled": (),
+    "TASK_STATE_SUBMITTED": (
+        "TASK_STATE_WORKING", "TASK_STATE_CANCELED", "TASK_STATE_FAILED",
+        "TASK_STATE_REJECTED",
+    ),
+    "TASK_STATE_WORKING": (
+        "TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED",
+        "TASK_STATE_INPUT_REQUIRED", "TASK_STATE_AUTH_REQUIRED",
+    ),
+    "TASK_STATE_INPUT_REQUIRED": ("TASK_STATE_WORKING", "TASK_STATE_CANCELED"),
+    "TASK_STATE_AUTH_REQUIRED": ("TASK_STATE_WORKING", "TASK_STATE_CANCELED"),
+    "TASK_STATE_COMPLETED": (),
+    "TASK_STATE_FAILED": (),
+    "TASK_STATE_CANCELED": (),
+    "TASK_STATE_REJECTED": (),
 }
 
 
 class A2AProtocolError(Exception):
-    """Нарушение протокола: кривая карточка, чужая модальность, запрещённый переход.
-
-    Свой класс, а не RuntimeError: NotImplementedError наследуется от
-    RuntimeError, и тест `pytest.raises(RuntimeError)` прошёл бы зелёным на
-    пустой заготовке, ничего не проверив.
-    """
+    """Нарушение учебного подмножества A2A v1."""
 
 
-def make_agent_card(name, version, skills, base_url, auth="none", modalities=("text",)):
-    """Agent Card — визитка агента, которую он выкладывает по WELL_KNOWN_PATH.
+def make_agent_card(name, description, version, skills, base_url,
+                    input_modes=("text/plain",), output_modes=("text/plain",),
+                    streaming=False):
+    """Собрать Agent Card v1 для HTTP+JSON interface.
 
-    make_agent_card("code-review-agent", "0.1.0", ["review-python"],
-                    "http://localhost:8765")
-        ->  {'name': 'code-review-agent', 'version': '0.1.0',
-             'skills': ('review-python',),
-             'endpoints': {'card': 'http://localhost:8765/.well-known/agent.json',
-                           'tasks': 'http://localhost:8765/tasks'},
-             'auth': {'type': 'none'}, 'modalities': ('text',),
-             'protocol_version': 'a2a-0.3'}
-
-    Агент без навыков бесполезен для discovery: клиенту не за чем приходить.
-    Такую карточку надо отвергать (A2AProtocolError), а не выкладывать.
-
-    Ловушка: лишний слэш в base_url («.../» + «/tasks») даёт битый URL.
-    Обрежь хвост перед склейкой.
+    skills — список объектов как минимум с id, name, description и tags.
+    Версия протокола живёт внутри supportedInterfaces, а не в корне card.
+    Поля JSON записаны camelCase, как в ProtoJSON-контракте A2A v1.
     """
     if not skills:
         raise A2AProtocolError("agent card must declare at least one skill")
-    unknown = [m for m in modalities if m not in MODALITIES]
+    for skill in skills:
+        missing = [key for key in SKILL_REQUIRED if key not in skill]
+        if missing:
+            raise A2AProtocolError(f"agent skill is missing required keys: {missing}")
+    unknown = [mode for mode in (*input_modes, *output_modes) if mode not in MEDIA_TYPES]
     if unknown:
-        raise A2AProtocolError(f"unknown modalities: {unknown}")
+        raise A2AProtocolError(f"unknown media types: {unknown}")
     root = base_url.rstrip("/")
     return {
         "name": name,
+        "description": description,
+        "supportedInterfaces": [{
+            "url": root,
+            "protocolBinding": "HTTP+JSON",
+            "protocolVersion": "1.0",
+        }],
         "version": version,
-        "skills": tuple(skills),
-        "endpoints": {"card": root + WELL_KNOWN_PATH, "tasks": root + "/tasks"},
-        "auth": {"type": auth},
-        "modalities": tuple(modalities),
-        "protocol_version": "a2a-0.3",
+        "capabilities": {"streaming": bool(streaming), "pushNotifications": False},
+        "defaultInputModes": list(input_modes),
+        "defaultOutputModes": list(output_modes),
+        "skills": copy.deepcopy(list(skills)),
     }
 
 
 def encode_card(card):
-    """Карточка в JSON-строку. Ключи отсортированы, поэтому байты стабильны.
-
-    encode_card(card)  ->  '{"auth": {"type": "none"}, "endpoints": ...}'
-
-    Перед кодированием проверь, что все CARD_REQUIRED на месте: выложить
-    карточку без "auth" — значит заставить клиента гадать, как к тебе
-    стучаться. Это A2AProtocolError, а не «ну и ладно».
-
-    Сортировка ключей нужна не для красоты: одинаковая карточка обязана
-    давать одинаковую строку, иначе ETag и кэш discovery не работают.
-    """
+    """Проверить обязательные поля и вернуть стабильный JSON Agent Card."""
     missing = [key for key in CARD_REQUIRED if key not in card]
     if missing:
         raise A2AProtocolError(f"agent card is missing required keys: {missing}")
-    return json.dumps(card, sort_keys=True, ensure_ascii=False)
+    return json.dumps(card, sort_keys=True, ensure_ascii=False,
+                      separators=(",", ":"), allow_nan=False)
 
 
 def decode_card(text):
-    """Разбор карточки, пришедшей по сети. Кортежи приезжают списками.
-
-    decode_card(encode_card(card))["name"]  ->  'code-review-agent'
-
-    Две разные беды с одинаковым исходом: битый JSON и валидный JSON без
-    обязательных полей. Обе — A2AProtocolError, чтобы вызывающему не
-    приходилось ловить ещё и json.JSONDecodeError отдельно.
-
-    Ловушка: JSON не знает кортежей. Поле skills вернётся списком, и
-    сравнивать карточку «до» и «после» надо с учётом этого.
-    """
+    """Разобрать полученный по сети Agent Card и проверить верхний уровень."""
     try:
         card = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -109,101 +101,102 @@ def decode_card(text):
     return card
 
 
-def supports_skill(card, skill):
-    """Умеет ли агент этот навык. Это весь discovery со стороны клиента.
+def supports_skill(card, skill_id):
+    """Объявляет ли Agent Card навык с данным id."""
+    return any(skill["id"] == skill_id for skill in card["skills"])
 
-    supports_skill(card, "review-python")  ->  True
-    supports_skill(card, "summarize")      ->  False
 
-    Работает и с карточкой после decode_card, где skills стал списком:
-    проверка на вхождение не зависит от типа контейнера.
+def make_message(message_id, skill_id, payload):
+    """Создать клиентское Message для POST /message:send.
+
+    Клиент создаёт messageId, но НЕ taskId. В учебном data-part лежат id
+    желаемого навыка и его вход; сервер интерпретирует их и решает, создавать
+    ли Task.
     """
-    return skill in card["skills"]
-
-
-def make_task(task_id, skill, payload):
-    """Новая задача в состоянии submitted.
-
-    make_task("t-1", "review-python", {"code": "x = 1"})
-        ->  {'id': 't-1', 'skill': 'review-python', 'payload': {'code': 'x = 1'},
-             'state': 'submitted', 'artifact': None}
-
-    Пустой id ломает идемпотентность из чек-листа урока: повторную отправку
-    после ретрая нечем узнать. Требуй непустой — A2AProtocolError.
-    """
-    if not task_id:
-        raise A2AProtocolError("task id must not be empty")
+    if not message_id:
+        raise A2AProtocolError("messageId must not be empty")
     return {
-        "id": task_id,
-        "skill": skill,
-        "payload": payload,
-        "state": "submitted",
-        "artifact": None,
+        "messageId": message_id,
+        "role": "ROLE_USER",
+        "parts": [{
+            "data": {"skill": skill_id, "payload": copy.deepcopy(payload)},
+            "mediaType": "application/json",
+        }],
     }
 
 
-def make_artifact(kind, data):
-    """Типизированный результат задачи.
+def make_task(message, id_factory=lambda: str(uuid4())):
+    """Создать Task на сервере в ответ на новое Message.
 
-    make_artifact("text", "looks fine")   ->  {'type': 'text', 'data': 'looks fine'}
-    make_artifact("structured", {"issues": []})
-        ->  {'type': 'structured', 'data': {'issues': []}}
-
-    Модальность вне MODALITIES — A2AProtocolError: смысл типизированных
-    артефактов ровно в том, что принимающая сторона знает заранее, что ей
-    приедет. Свободная строка в поле type это поле обесценивает.
+    Task id всегда выдаёт id_factory сервера. taskId в клиентском Message
+    означает продолжение существующей задачи, поэтому им нельзя создавать
+    новую.
     """
-    if kind not in MODALITIES:
-        raise A2AProtocolError(f"unknown artifact modality {kind!r}")
-    return {"type": kind, "data": data}
+    if message.get("taskId"):
+        raise A2AProtocolError("client taskId may only reference an existing task")
+    task_id = str(id_factory())
+    if not task_id:
+        raise A2AProtocolError("server generated an empty task id")
+    context_id = message.get("contextId") or f"ctx-{task_id}"
+    return {
+        "id": task_id,
+        "contextId": context_id,
+        "status": {"state": "TASK_STATE_SUBMITTED"},
+        "artifacts": [],
+        "history": [copy.deepcopy(message)],
+    }
+
+
+def make_artifact(artifact_id, media_type, data):
+    """Собрать Artifact v1 с member-based Part и mediaType."""
+    if not artifact_id:
+        raise A2AProtocolError("artifactId must not be empty")
+    if media_type not in MEDIA_TYPES:
+        raise A2AProtocolError(f"unknown artifact media type {media_type!r}")
+    part = {"mediaType": media_type}
+    if media_type == "text/plain":
+        part["text"] = str(data)
+    else:
+        part["data"] = copy.deepcopy(data)
+    return {"artifactId": artifact_id, "parts": [part]}
 
 
 def advance_task(task, new_state, artifact=None):
-    """Переход задачи в новое состояние. Возвращает НОВУЮ задачу.
-
-    advance_task(make_task("t", "s", {}), "working")["state"]  ->  'working'
-
-    Разрешённые переходы лежат в TRANSITIONS. Из терминального состояния
-    выхода нет: completed -> working это A2AProtocolError, а не «ну ладно,
-    переоткроем». Клиент, который уже забрал артефакт, не должен однажды
-    увидеть задачу снова работающей.
-
-    Ловушка: не правь входную задачу на месте. Опрос статуса возвращает
-    снимки, и мутация задним числом сделает историю опроса ложью.
-    """
-    state = task["state"]
+    """Вернуть новый снимок Task после разрешённого перехода."""
+    state = task["status"]["state"]
     if state not in TRANSITIONS:
         raise A2AProtocolError(f"unknown task state {state!r}")
     if new_state not in TRANSITIONS[state]:
         raise A2AProtocolError(f"illegal transition {state!r} -> {new_state!r}")
-    updated = dict(task)
-    updated["state"] = new_state
+    updated = copy.deepcopy(task)
+    updated["status"] = {"state": new_state}
     if artifact is not None:
-        updated["artifact"] = artifact
+        updated["artifacts"].append(copy.deepcopy(artifact))
     return updated
 
 
-def run_task(card, task, worker):
-    """Весь жизненный цикл задачи. Возвращает СНИМКИ задачи по состояниям.
+def _message_input(message):
+    try:
+        content = message["parts"][0]["data"]
+        return content["skill"], content["payload"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise A2AProtocolError("message must contain a skill/payload data part") from exc
 
-    worker — вызываемый объект worker(payload) -> artifact.
 
-    [t["state"] for t in run_task(card, task, worker)]
-        ->  ['submitted', 'working', 'completed']
-
-    Навык, которого нет в карточке, обрывает цикл сразу:
-        ->  ['submitted', 'failed']
-    и в артефакте лежит текстовое объяснение — клиент читает причину, а не
-    гадает по коду ответа.
-
-    Это и есть opaque lifecycle из урока: клиент видит только смену
-    состояний и артефакт, а чем внутри считал worker — не его дело.
-    """
-    trace = [dict(task)]
-    if not supports_skill(card, task["skill"]):
-        reason = make_artifact("text", f"unknown skill {task['skill']!r}")
-        trace.append(advance_task(trace[-1], "failed", reason))
+def run_task(card, message, worker, id_factory=lambda: str(uuid4())):
+    """Обработать POST /message:send и вернуть снимки созданного Task."""
+    task = make_task(message, id_factory)
+    trace = [task]
+    skill_id, payload = _message_input(message)
+    if not supports_skill(card, skill_id):
+        reason = make_artifact(
+            f"artifact-{task['id']}-error", "text/plain",
+            f"unknown skill {skill_id!r}",
+        )
+        trace.append(advance_task(trace[-1], "TASK_STATE_FAILED", reason))
         return trace
-    trace.append(advance_task(trace[-1], "working"))
-    trace.append(advance_task(trace[-1], "completed", worker(task["payload"])))
+    trace.append(advance_task(trace[-1], "TASK_STATE_WORKING"))
+    trace.append(advance_task(
+        trace[-1], "TASK_STATE_COMPLETED", worker(copy.deepcopy(payload))
+    ))
     return trace

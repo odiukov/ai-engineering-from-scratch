@@ -4,6 +4,7 @@ import pytest
 
 from exercise import (
     InvalidTransition,
+    TransactionalEffectSink,
     WorkerCrash,
     append_checkpoint,
     claim_task,
@@ -46,6 +47,14 @@ def test_append_checkpoint_copies_the_state():
     append_checkpoint(log, "t-1", 0, state)
     state["n"] = 999
     assert log[0]["state"] == {"n": 1}
+
+
+def test_append_checkpoint_deep_copies_nested_state():
+    """dict(state) недостаточно: вложенные объекты тоже не должны alias'иться."""
+    log, state = [], {"plan": {"steps": ["search"]}}
+    append_checkpoint(log, "t-1", 0, state)
+    state["plan"]["steps"].append("tampered")
+    assert log[0]["state"] == {"plan": {"steps": ["search"]}}
 
 
 def test_append_checkpoint_keeps_the_log_append_only():
@@ -123,6 +132,18 @@ def test_run_thread_on_a_finished_thread_is_a_no_op():
     before = len(log)
     assert run_thread(STEPS, "t-1", log, {"n": 0}) == {"n": 1111}
     assert len(log) == before
+
+
+def test_resume_does_not_mutate_a_nested_checkpoint():
+    def mutate(state):
+        state["nested"]["items"].append("next")
+        return state
+
+    log = []
+    append_checkpoint(log, "t", 0, {"nested": {"items": ["first"]}})
+    run_thread([lambda state: state, mutate], "t", log,
+               {"nested": {"items": []}})
+    assert log[0]["state"] == {"nested": {"items": ["first"]}}
 
 
 # -------------------------------------------------------- resume_until_done
@@ -208,24 +229,33 @@ def test_claim_task_returns_none_when_everything_is_done():
 
 # ------------------------------------------------------------- dedup_effect
 def test_dedup_effect_runs_the_first_time():
-    seen, effects = set(), []
-    assert dedup_effect(seen, "pay-1", effects, {"amount": 10}) is True
-    assert effects == [{"amount": 10}]
+    sink = TransactionalEffectSink()
+    assert dedup_effect(sink, "pay-1", {"amount": 10}) is True
+    assert sink.effects() == [{"amount": 10}]
 
 
 def test_dedup_effect_swallows_the_replay():
     """Повтор супершага после падения не должен списать деньги дважды."""
-    seen, effects = set(), []
-    dedup_effect(seen, "pay-1", effects, {"amount": 10})
-    assert dedup_effect(seen, "pay-1", effects, {"amount": 10}) is False
-    assert len(effects) == 1
+    sink = TransactionalEffectSink()
+    dedup_effect(sink, "pay-1", {"amount": 10})
+    assert dedup_effect(sink, "pay-1", {"amount": 10}) is False
+    assert len(sink.effects()) == 1
 
 
 def test_dedup_effect_distinguishes_different_keys():
-    seen, effects = set(), []
-    dedup_effect(seen, "pay-1", effects, {"amount": 10})
-    dedup_effect(seen, "pay-2", effects, {"amount": 10})
-    assert len(effects) == 2
+    sink = TransactionalEffectSink()
+    dedup_effect(sink, "pay-1", {"amount": 10})
+    dedup_effect(sink, "pay-2", {"amount": 10})
+    assert len(sink.effects()) == 2
+
+
+def test_crash_after_atomic_commit_does_not_duplicate_the_effect():
+    """Явно закрываем окно «эффект случился, dedupe ещё не записан»."""
+    sink = TransactionalEffectSink()
+    with pytest.raises(WorkerCrash):
+        dedup_effect(sink, "pay-1", {"amount": 10}, crash_after_commit=True)
+    assert dedup_effect(sink, "pay-1", {"amount": 10}) is False
+    assert sink.effects() == [{"amount": 10}]
 
 
 # ------------------------------------------------------------ process_queue

@@ -43,18 +43,19 @@ def ttft_ms(queue_ms, network_ms, prefill_ms):
 
 
 def e2e_ms(ttft, tpot_ms, output_tokens, network_response_ms=0.0):
-    """E2E: TTFT + TPOT * output_tokens + сеть на ответ.
+    """E2E: TTFT + TPOT * max(output_tokens - 1, 0) + сеть на ответ.
 
-    e2e_ms(162.0, 7.33, 127)  ->  1092.9...  (референсные 1093 мс из урока)
-    e2e_ms(800.0, 7.0, 10)    ->  870.0      (короткий ответ: правит TTFT)
+    e2e_ms(162.0, 7.33, 127)  ->  1085.58    (126 интервалов после первого токена)
+    e2e_ms(800.0, 7.0, 10)    ->  863.0      (короткий ответ: правит TTFT)
 
     Считай, какое слагаемое главное: на длинных ответах (>500 токенов) E2E
     определяется TPOT, на коротких с длинным промптом — TTFT. Поэтому E2E
-    всегда публикуют вместе с длиной ответа.
+    всегда публикуют вместе с длиной ответа. Первый токен уже включён в
+    TTFT, поэтому TPOT платим только за оставшиеся интервалы.
     """
     if output_tokens < 0:
         raise ValueError("output_tokens must not be negative")
-    return ttft + tpot_ms * output_tokens + network_response_ms
+    return ttft + tpot_ms * max(output_tokens - 1, 0) + network_response_ms
 
 
 def itl_ms(ttft, decode_ms, output_tokens, tool):

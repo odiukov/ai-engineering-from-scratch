@@ -135,8 +135,8 @@ def test_attention_memory_cells_scales_with_heads_and_layers():
     assert attention_memory_cells(8, n_heads=8, n_layers=2) == 1024
 
 
-def test_doubling_the_context_quadruples_the_memory():
-    """Квадратичный рост — главный счёт, который выставляет трансформер."""
+def test_doubling_context_quadruples_a_materialized_attention_matrix():
+    """Обычная реализация хранит матрицу; FlashAttention считает те же пары блоками."""
     assert attention_memory_cells(2048) == 4 * attention_memory_cells(1024)
 
 

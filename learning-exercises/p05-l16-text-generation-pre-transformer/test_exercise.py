@@ -133,32 +133,32 @@ def test_kneser_ney_is_a_distribution_for_a_known_context():
     """Сколько скидка забрала, столько lambda и вернула — сумма ровно 1."""
     model = kneser_ney_bigram(SMALL)
     words = list(continuation_probability(SMALL))
-    assert sum(model("a", w) for w in words) == APPROX(1.0)
+    assert sum(model(("a",), w) for w in words) == APPROX(1.0)
 
 
 def test_kneser_ney_gives_an_unseen_bigram_a_positive_probability():
     ngrams, contexts = train_ngram(SMALL, n=2)
     model = kneser_ney_bigram(SMALL)
     assert raw_probability(ngrams, contexts, ["a"], "c") == APPROX(0.5)
-    assert model("b", "c") > 0.0
+    assert model(("b",), "c") > 0.0
 
 
 def test_kneser_ney_discounts_the_seen_bigram_below_the_mle():
     ngrams, contexts = train_ngram(SMALL, n=2)
     model = kneser_ney_bigram(SMALL)
-    assert model("a", "b") < raw_probability(ngrams, contexts, ["a"], "b")
+    assert model(("a",), "b") < raw_probability(ngrams, contexts, ["a"], "b")
 
 
 def test_kneser_ney_backs_off_to_continuation_for_an_unknown_context():
     model = kneser_ney_bigram(SMALL)
     p_cont = continuation_probability(SMALL)
-    assert model("zzz", "b") == APPROX(p_cont["b"])
+    assert model(("zzz",), "b") == APPROX(p_cont["b"])
 
 
 def test_kneser_ney_prefers_the_many_context_word_in_a_novel_context():
     """Ради этого всё и затевалось: "cat" продолжает новый контекст, не "francisco"."""
     model = kneser_ney_bigram(FRANCISCO)
-    assert model("zzz", "cat") > model("zzz", "francisco")
+    assert model(("zzz",), "cat") > model(("zzz",), "francisco")
 
 
 # ---------------------------------------------------------- bits_per_token
@@ -179,6 +179,12 @@ def test_bits_per_token_is_lower_for_the_better_model():
     held_out = [["a", "b"]]
     smart = kneser_ney_bigram(SMALL)
     assert bits_per_token(smart, held_out) < bits_per_token(lambda p, w: 0.02, held_out)
+
+
+def test_bits_per_token_passes_two_token_contexts_to_a_trigram_model():
+    ngrams, contexts = train_ngram([["a", "b"]], n=3)
+    model = lambda context, word: raw_probability(ngrams, contexts, context, word)
+    assert bits_per_token(model, [["a", "b"]], n=3) == APPROX(0.0)
 
 
 # --------------------------------------------------------------- perplexity
@@ -202,7 +208,7 @@ def test_perplexity_equals_two_to_the_bits_per_token():
 def test_perplexity_explodes_without_smoothing_and_stays_finite_with_it():
     """Тот самый zero-count problem: несглаженная модель на held-out бесполезна."""
     ngrams, contexts = train_ngram(SMALL, n=2)
-    mle = lambda prev, w: raw_probability(ngrams, contexts, [prev], w)
+    mle = lambda context, w: raw_probability(ngrams, contexts, context, w)
     smart = kneser_ney_bigram(SMALL)
     held_out = [["b", "c"]]
     assert perplexity(mle, held_out) > 1e3
@@ -249,3 +255,16 @@ def test_generate_differs_for_a_different_seed():
     a = generate(uniform, vocab, ["<s>"], random.Random(1), 20)
     b = generate(uniform, vocab, ["<s>"], random.Random(2), 20)
     assert a != b
+
+
+def test_generate_uses_the_trained_trigram_context_width():
+    ngrams, contexts = train_ngram([["a", "b"]], n=3)
+    model = lambda context, word: raw_probability(ngrams, contexts, context, word)
+    assert generate(
+        model,
+        ["a", "b", "</s>"],
+        ["<s>"],
+        random.Random(0),
+        max_len=3,
+        n=3,
+    ) == ["<s>", "a", "b", "</s>"]

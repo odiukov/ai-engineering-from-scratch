@@ -149,9 +149,9 @@ def kfold_split(n, k=5, seed=42):
     Каждый индекс попадает в валидацию ровно один раз — в этом весь смысл
     кросс-валидации против одного случайного сплита.
 
-    Ловушка с остатком: 10 объектов на 3 фолда не делятся. Границы считаем как
-    i * n // k, тогда лишние объекты размазываются по фолдам, а не сваливаются
-    все в последний.
+    Ловушка с остатком: 10 объектов на 3 фолда не делятся. Через divmod
+    получаем базовый размер и остаток, затем добавляем по одному объекту в
+    первые фолды: размеры будут [4, 3, 3], а не [3, 3, 4].
 
     seed обязателен: сравнивать две модели можно только на одинаковых фолдах.
     """
@@ -159,9 +159,11 @@ def kfold_split(n, k=5, seed=42):
     indices = list(range(n))
     rng.shuffle(indices)
 
+    base_size, remainder = divmod(n, k)
     folds = []
     for i in range(k):
-        start, end = i * n // k, (i + 1) * n // k
+        start = i * base_size + min(i, remainder)
+        end = start + base_size + (1 if i < remainder else 0)
         val = indices[start:end]
         folds.append((indices[:start] + indices[end:], val))
     return folds

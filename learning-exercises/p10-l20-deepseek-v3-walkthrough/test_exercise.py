@@ -31,8 +31,8 @@ def skewed_rows(seed=0, tokens=200, experts=8, tilt=1.5):
 
 
 # ------------------------------------------------------------- KV-кеш: MLA
-def test_mla_cache_stores_one_latent_per_token_and_layer():
-    assert mla_kv_cache_bytes(61, 512, CONTEXT_128K) == 8187281408
+def test_mla_cache_stores_the_latent_and_rope_key_per_token_and_layer():
+    assert mla_kv_cache_bytes(61, 512, CONTEXT_128K, 64) == 9210691584
 
 
 def test_mla_cache_grows_linearly_with_context():
@@ -41,9 +41,13 @@ def test_mla_cache_grows_linearly_with_context():
     assert long == 4 * short
 
 
-def test_mla_cache_has_no_hidden_factor_of_two():
-    """K и V разворачиваются из одного латента — двойки в формуле нет."""
-    assert mla_kv_cache_bytes(1, 512, 1, 1) == 512
+def test_mla_cache_stores_the_rope_key_component_too():
+    """KV-латент один, но к нему добавляется несжатый RoPE-хвост ключа."""
+    assert mla_kv_cache_bytes(1, 512, 1, 64, bytes_per_element=1) == 576
+
+
+def test_mla_cache_has_no_hidden_factor_of_two_for_keys_and_values():
+    assert mla_kv_cache_bytes(1, 512, 1, 64, bytes_per_element=2) == 2 * (512 + 64)
 
 
 # ------------------------------------------------------------- KV-кеш: GQA
@@ -55,11 +59,11 @@ def test_gqa_cache_doubles_when_kv_heads_double():
     assert gqa_kv_cache_bytes(61, 16, 128, 1000) == 2 * gqa_kv_cache_bytes(61, 8, 128, 1000)
 
 
-def test_mla_is_four_times_smaller_than_the_gqa_baseline():
-    """Заявка урока: 7.6 GiB против 30.5 GiB на 128k контекста."""
-    mla = mla_kv_cache_bytes(61, 512, CONTEXT_128K)
+def test_mla_is_about_three_and_a_half_times_smaller_than_gqa():
+    """8.6 GiB против 30.5 GiB: RoPE-хвост уменьшает заявленный выигрыш."""
+    mla = mla_kv_cache_bytes(61, 512, CONTEXT_128K, 64)
     gqa = gqa_kv_cache_bytes(61, 8, 128, CONTEXT_128K)
-    assert gqa / mla == pytest.approx(4.0)
+    assert gqa / mla == pytest.approx(32 / 9)
 
 
 # ---------------------------------------------------------- expert_params

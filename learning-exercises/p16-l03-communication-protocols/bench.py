@@ -10,17 +10,22 @@ _MODES = ["text/plain", "application/json", "application/pdf"]
 _cards = [
     {
         "name": f"agent-{i}",
-        "url": f"https://a{i}.local/a2a/v1",
+        "description": f"agent-{i} agent",
+        "supportedInterfaces": [{"url": f"https://a{i}.local/a2a/v1",
+                                  "protocolBinding": "HTTP+JSON",
+                                  "protocolVersion": "1.0"}],
         "version": "1.0.0",
-        "capabilities": {"streaming": False, "push_notifications": False},
-        "default_input_modes": [random.choice(_MODES)],
-        "default_output_modes": ["text/plain"],
+        "capabilities": {"streaming": False, "pushNotifications": False},
+        "defaultInputModes": [random.choice(_MODES)],
+        "defaultOutputModes": ["text/plain"],
         "skills": [
             {
                 "id": f"skill-{i}-{j}",
+                "name": f"Skill {i}-{j}",
+                "description": "Benchmark skill",
                 "tags": random.sample(_TAGS, 2),
-                "input_modes": [random.choice(_MODES)],
-                "output_modes": ["text/plain"],
+                "inputModes": [random.choice(_MODES)],
+                "outputModes": ["text/plain"],
             }
             for j in range(4)
         ],
@@ -45,7 +50,7 @@ BENCH = {
     "discover": (_cards, "research", "text/plain"),
     "new_task": ("t-1", "ctx-1"),
     "apply_event": (_task, _event),
-    "sign": ("coder-key", "msg-001" * 200),
-    "verify": (_secrets, "did:wba:a1999", "msg-001", "deadbeef"),
+    "sign": ("coder-key", _message),
+    "verify": (_secrets, "did:wba:a1999", _message, "deadbeef"),
     "audit_run": ("r-1", "researcher", _message, lambda m: ("ok", [])),
 }

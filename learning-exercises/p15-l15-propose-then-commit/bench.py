@@ -44,6 +44,6 @@ BENCH = {
     "is_expired": (_PENDING, 100.0),
     "propose": ({"already": 1}, _PROPOSAL, 0.0),
     "approve": (_APPROVE_STORE, "k", _ANSWERS, 1.0),
-    "commit": (_COMMIT_STORE, "k", lambda action, payload: None, 2.0),
+    "commit": (_COMMIT_STORE, "k", lambda key, action, payload: None, 2.0),
     "verify": (_VERIFY_STORE, "k", lambda action, payload: True),
 }

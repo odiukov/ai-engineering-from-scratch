@@ -66,30 +66,32 @@ def test_smaller_hop_gives_more_frames():
 
 
 # --------------------------------------------------------- normalize_log_mel
-def test_normalization_centres_and_scales():
-    assert flat(normalize_log_mel([[1.0, 3.0]], 2.0, 1.0)) == APPROX([-1.0, 1.0])
+def test_preprocessing_takes_log10_then_applies_the_fixed_affine_map():
+    assert flat(normalize_log_mel([[1.0, 1e-4]])) == APPROX([1.0, 0.0])
 
 
-def test_wrong_mean_shifts_the_whole_picture():
-    """Ловушка урока: статистика librosa вместо статистики Whisper.
-
-    Ошибка в mean не «немного портит» признаки, а сдвигает их все на одну и
-    ту же величину — сеть получает вход из области, где её не обучали.
-    """
-    log_mel = [[1.0, 2.0], [3.0, 4.0]]
-    right = flat(normalize_log_mel(log_mel, 2.0, 4.0))
-    wrong = flat(normalize_log_mel(log_mel, 6.0, 4.0))
-    assert [w - r for r, w in zip(right, wrong)] == APPROX([-1.0] * 4)
+def test_dynamic_range_is_clamped_to_eight_log10_units_per_clip():
+    """Whisper отрезает всё ниже пика клипа минус 8, а не использует mean/std."""
+    assert flat(normalize_log_mel([[1.0, 1e-8, 1e-10, 0.0]])) == APPROX(
+        [1.0, -1.0, -1.0, -1.0]
+    )
 
 
-def test_zero_std_does_not_divide_by_zero():
-    assert flat(normalize_log_mel([[7.0]], 7.0, 0.0)) == APPROX([0.0])
+def test_clamp_tracks_each_clip_peak_instead_of_corpus_statistics():
+    quiet = flat(normalize_log_mel([[1e-2, 1e-12]]))
+    loud = flat(normalize_log_mel([[1.0, 1e-12]]))
+    assert quiet == APPROX([0.5, -1.5])
+    assert loud == APPROX([1.0, -1.0])
+
+
+def test_empty_spectrogram_stays_empty():
+    assert normalize_log_mel([]) == []
 
 
 def test_normalize_does_not_mutate_the_input():
-    log_mel = [[1.0, 2.0]]
-    normalize_log_mel(log_mel, 0.0, 1.0)
-    assert flat(log_mel) == APPROX([1.0, 2.0])
+    mel_power = [[1.0, 1e-4]]
+    normalize_log_mel(mel_power)
+    assert flat(mel_power) == APPROX([1.0, 1e-4])
 
 
 # -------------------------------------------------------------- build_prompt

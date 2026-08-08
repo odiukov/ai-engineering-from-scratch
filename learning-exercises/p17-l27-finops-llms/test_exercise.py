@@ -141,9 +141,10 @@ def test_zscore_measures_distance_in_standard_deviations():
     assert zscore(100.0, [50.0, 52.0, 48.0, 50.0, 50.0]) == pytest.approx(35.355, abs=1e-3)
 
 
-def test_a_flat_baseline_never_produces_an_anomaly():
-    """`sd or 1` превращает ровный базлайн в детектор, который будит на шум."""
-    assert zscore(50.97, [50.0] * 5) == APPROX(0.0)
+def test_a_flat_baseline_detects_any_nonzero_deviation():
+    assert zscore(50.97, [50.0] * 5) == float("inf")
+    assert zscore(49.99, [50.0] * 5) == float("-inf")
+    assert zscore(50.0, [50.0] * 5) == APPROX(0.0)
 
 
 def test_a_history_shorter_than_two_points_is_not_a_baseline():
@@ -236,9 +237,8 @@ def test_a_twentyfold_blowup_pauses_the_tenant_instead_of_emailing_them():
     assert enforcement_action(900.0, history, POLICY) == "kill_switch"
 
 
-def test_a_quiet_tenant_with_a_flat_history_is_not_killed_by_noise():
-    """Ровный базлайн + копеечный рост — самая частая ложная тревога."""
-    assert enforcement_action(0.97, [0.60] * 6, POLICY) == "ok"
+def test_enforcement_detects_a_deviation_from_a_perfectly_flat_history():
+    assert enforcement_action(0.97, [0.60] * 6, POLICY) == "kill_switch"
 
 
 def test_a_short_history_does_not_arm_the_kill_switch():

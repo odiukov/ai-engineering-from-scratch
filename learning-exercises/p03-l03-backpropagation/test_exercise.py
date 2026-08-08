@@ -1,6 +1,7 @@
 """Тесты к уроку «Backpropagation с нуля». Правь exercise.py."""
 
 import copy
+import math
 
 import pytest
 
@@ -121,6 +122,13 @@ def test_init_params_scale_shrinks_with_more_inputs():
     wide = max(abs(w) for row in init_params(200, 4, seed=0)["w1"] for w in row)
     narrow = max(abs(w) for row in init_params(2, 4, seed=0)["w1"] for w in row)
     assert wide < narrow
+
+
+def test_output_weights_use_hidden_width_as_their_fan_in():
+    """w2 получает n_hidden входов, поэтому его масштаб не зависит от n_inputs."""
+    p = init_params(1, 200, seed=0)
+    output_bound = math.sqrt(2.0 / 200)
+    assert max(abs(w) for w in p["w2"]) <= output_bound
 
 
 # ---------------------------------------------------------------- forward

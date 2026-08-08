@@ -38,26 +38,24 @@ def canned_client(texts, stop_reasons=None):
 
 
 # --------------------------------------------------------- model_preferences
-def test_priorities_are_normalized_to_one():
-    prefs = model_preferences(3, 1, 1)
-    total = prefs["costPriority"] + prefs["speedPriority"] + prefs["intelligencePriority"]
-    assert total == APPROX(1.0)
+def test_priorities_are_independent_not_normalized_to_a_sum():
+    prefs = model_preferences(0.8, 0.7, 0.9)
+    assert prefs["costPriority"] == APPROX(0.8)
+    assert prefs["speedPriority"] == APPROX(0.7)
+    assert prefs["intelligencePriority"] == APPROX(0.9)
 
 
-def test_normalization_keeps_the_proportions():
-    prefs = model_preferences(3, 1, 1)
-    assert prefs["costPriority"] == APPROX(0.6)
-    assert prefs["speedPriority"] == APPROX(0.2)
+def test_all_zero_priorities_are_valid():
+    assert model_preferences(0, 0, 0) == {
+        "costPriority": 0, "speedPriority": 0, "intelligencePriority": 0
+    }
 
 
-def test_negative_priority_is_not_an_inverse_but_an_error():
+def test_priority_outside_zero_to_one_is_an_error():
     with pytest.raises(ValueError):
         model_preferences(-1, 1, 1)
-
-
-def test_all_zero_priorities_cannot_be_normalized():
     with pytest.raises(ValueError):
-        model_preferences(0, 0, 0)
+        model_preferences(0, 1.1, 0)
 
 
 def test_hints_are_objects_with_a_name_field():
@@ -119,15 +117,13 @@ def test_cost_priority_picks_the_cheapest_model():
     assert pick_model(CATALOG, model_preferences(1, 0, 0)) == "haiku"
 
 
-def test_hint_breaks_a_tie_between_equal_candidates():
-    tied = [{"name": "a", "cost": 1.0, "speed": 1.0, "intelligence": 1.0},
-            {"name": "b", "cost": 1.0, "speed": 1.0, "intelligence": 1.0}]
-    assert pick_model(tied, model_preferences(1, 1, 1, hints=["b"])) == "b"
+def test_hint_is_a_preference_not_only_a_tie_breaker():
+    assert pick_model(CATALOG, model_preferences(0, 0, 1, hints=["haiku"])) == "haiku"
 
 
-def test_hint_does_not_promote_a_strictly_worse_model():
-    """Пожелание сервера не весомее настроек пользователя."""
-    assert pick_model(CATALOG, model_preferences(0, 0, 1, hints=["haiku"])) == "opus"
+def test_hints_match_model_name_substrings_in_preference_order():
+    prefs = model_preferences(0, 0, 1, hints=["missing", "son"])
+    assert pick_model(CATALOG, prefs) == "sonnet"
 
 
 def test_empty_catalog_is_an_error():
@@ -151,10 +147,17 @@ def test_result_carries_the_request_id():
     assert sampling_result(7, "x", "haiku")["id"] == 7
 
 
-def test_foreign_stop_reason_is_refused():
-    """"length" и "stop" — это из чужих API, здесь их нет."""
+def test_provider_specific_stop_reason_is_allowed():
+    assert sampling_result(1, "x", "haiku", stop_reason="length")["result"]["stopReason"] == "length"
+
+
+def test_tool_use_is_a_standard_stop_reason():
+    assert sampling_result(1, "x", "haiku", stop_reason="toolUse")["result"]["stopReason"] == "toolUse"
+
+
+def test_empty_stop_reason_is_refused():
     with pytest.raises(ValueError):
-        sampling_result(1, "x", "haiku", stop_reason="length")
+        sampling_result(1, "x", "haiku", stop_reason="")
 
 
 # ------------------------------------------------------------- spend_sample

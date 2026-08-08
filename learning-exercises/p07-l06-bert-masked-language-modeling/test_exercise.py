@@ -99,6 +99,21 @@ def test_full_probability_labels_every_position_with_its_original_token():
     assert labels == tokens
 
 
+def test_special_tokens_are_never_selected_for_prediction():
+    """[CLS], [SEP] и [MASK] остаются контекстом, а не MLM-целями."""
+    tokens = [CLS, 5, SEP, MASK]
+    ids, labels = create_mlm_batch(
+        tokens,
+        VOCAB,
+        MASK,
+        random.Random(1),
+        mask_prob=1.0,
+        special_token_ids={CLS, SEP, MASK},
+    )
+    assert ids[0] == CLS and ids[2] == SEP and ids[3] == MASK
+    assert labels == [-100, 5, -100, -100]
+
+
 def test_unselected_positions_are_never_touched():
     """Ключевой инвариант: label = -100 означает «вход тут исходный»."""
     tokens = [i % 50 + 3 for i in range(300)]
@@ -136,15 +151,42 @@ def test_about_fifteen_percent_gets_selected_by_default():
 
 
 def test_the_eighty_ten_ten_rule_holds():
-    """Из выбранных: 80% [MASK], 10% случайный токен, 10% нетронутых."""
+    """Ветки считаются по решению RNG, а не по случайно совпавшим token id."""
     tokens = [5] * 4000
-    ids, _ = create_mlm_batch(tokens, VOCAB, MASK, random.Random(5), mask_prob=1.0)
-    masked = sum(1 for token in ids if token == MASK)
-    kept = sum(1 for token in ids if token == 5)
-    randomized = len(ids) - masked - kept
-    assert 0.75 < masked / len(ids) < 0.85
-    assert 0.05 < kept / len(ids) < 0.15
-    assert 0.05 < randomized / len(ids) < 0.15
+    decisions = []
+    create_mlm_batch(
+        tokens, VOCAB, MASK, random.Random(5), mask_prob=1.0, decisions=decisions
+    )
+    assert 0.75 < decisions.count("mask") / len(decisions) < 0.85
+    assert 0.05 < decisions.count("unchanged") / len(decisions) < 0.15
+    assert 0.05 < decisions.count("random") / len(decisions) < 0.15
+
+
+def test_random_branch_is_recorded_when_replacement_equals_the_original():
+    """По ids такой случай похож на unchanged, но фактически сработала ветка random."""
+
+    class OriginalCollisionRng:
+        rolls = iter((0.0, 0.85))
+
+        def random(self):
+            return next(self.rolls)
+
+        def randrange(self, stop):
+            # При special ids 1 и 2 список допустимых начинается [0, 3, 4, 5].
+            return 3
+
+    decisions = []
+    ids, labels = create_mlm_batch(
+        [5],
+        VOCAB,
+        MASK,
+        OriginalCollisionRng(),
+        mask_prob=1.0,
+        special_token_ids={CLS, SEP, MASK},
+        decisions=decisions,
+    )
+    assert ids == [5] and labels == [5]
+    assert decisions == ["random"]
 
 
 def test_some_selected_positions_keep_their_original_token():
@@ -159,6 +201,24 @@ def test_random_replacements_stay_inside_the_vocabulary():
     tokens = [5] * 500
     ids, _ = create_mlm_batch(tokens, VOCAB, MASK, random.Random(9), mask_prob=1.0)
     assert all(token == MASK or 0 <= token < VOCAB for token in ids)
+
+
+def test_random_replacements_exclude_special_tokens():
+    """Даже если special ids лежат внутри словаря, random-ветка их не выдаёт."""
+    tokens = [5] * 2000
+    decisions = []
+    ids, _ = create_mlm_batch(
+        tokens,
+        VOCAB,
+        MASK,
+        random.Random(10),
+        mask_prob=1.0,
+        special_token_ids={0, CLS, SEP, MASK},
+        decisions=decisions,
+    )
+    random_ids = [token for token, branch in zip(ids, decisions) if branch == "random"]
+    assert random_ids
+    assert all(token not in {0, CLS, SEP, MASK} for token in random_ids)
 
 
 # ---------------------------------------------------------------- mlm_loss

@@ -162,6 +162,11 @@ def test_parse_unwraps_openai_style_string_arguments():
     assert parse_tool_calls(raw) == [{"name": "get_weather", "arguments": {"city": "Tokyo"}}]
 
 
+def test_parse_preserves_the_call_identifier():
+    raw = '{"id": "call_weather", "name": "get_weather", "arguments": {"city": "Tokyo"}}'
+    assert parse_tool_calls(raw)[0]["call_id"] == "call_weather"
+
+
 def test_broken_json_raises_value_error():
     with pytest.raises(ValueError):
         parse_tool_calls('{"name": "get_weather"')
@@ -189,6 +194,15 @@ def test_execute_passes_optional_arguments_through(registry):
         registry, {"name": "get_weather", "arguments": {"city": "Tokyo", "units": "fahrenheit"}}
     )
     assert out["result"]["temp_f"] == pytest.approx(64.4)
+
+
+def test_execute_carries_the_call_identifier_to_the_result(registry):
+    call = {
+        "call_id": "call_tokyo",
+        "name": "get_weather",
+        "arguments": {"city": "Tokyo"},
+    }
+    assert execute_tool_call(registry, call)["call_id"] == "call_tokyo"
 
 
 def test_unknown_tool_is_refused_by_the_allowlist(registry):
@@ -300,6 +314,29 @@ def test_loop_collects_every_result(registry):
     out = agent_loop(registry, "Weather in Tokyo and London?", two_cities)
     assert out["iterations"] == 1
     assert len(out["results"]) == 2
+
+
+def test_parallel_tool_results_link_back_to_their_exact_calls(registry):
+    def two_cities(message, conversation):
+        if any(m["role"] == "tool" for m in conversation):
+            return []
+        return [
+            {
+                "call_id": "call_tokyo",
+                "name": "get_weather",
+                "arguments": {"city": "Tokyo"},
+            },
+            {
+                "call_id": "call_london",
+                "name": "get_weather",
+                "arguments": {"city": "London"},
+            },
+        ]
+
+    conversation = agent_loop(registry, "Weather in two cities?", two_cities)["conversation"]
+    assistant_ids = [c["call_id"] for c in conversation[1]["tool_calls"]]
+    result_ids = [m["tool_call_id"] for m in conversation[2:]]
+    assert result_ids == assistant_ids == ["call_tokyo", "call_london"]
 
 
 # ------------------------------------------------- tool_selection_accuracy

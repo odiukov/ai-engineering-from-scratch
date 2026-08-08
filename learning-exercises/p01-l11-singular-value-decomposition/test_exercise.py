@@ -148,6 +148,13 @@ def test_svd_does_not_mutate_the_input_matrix():
     assert flat(A) == [1.0, 2.0, 3.0, 4.0]
 
 
+def test_svd_keeps_a_tiny_but_well_conditioned_matrix():
+    """Ранг зависит от относительного масштаба, а не от абсолютного cutoff."""
+    triples = svd([[1e-12]])
+    assert len(triples) == 1
+    assert triples[0][0] == pytest.approx(1e-12, rel=1e-9, abs=0.0)
+
+
 # --------------------------------------------------------------- reconstruct
 def test_full_reconstruction_returns_the_original_matrix():
     A = [[1.0, 2.0], [3.0, 4.0]]

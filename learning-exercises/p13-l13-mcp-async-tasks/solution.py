@@ -1,39 +1,41 @@
 """
-Async Tasks в MCP (SEP-1686) — эталон.
+Async Tasks в MCP 2025-11-25 — эталон.
 
 Открывай ПОСЛЕ своих зелёных тестов.
+
+Упражнение хранит вместе две сущности: публичный Task и результат
+обёрнутого запроса. На провод выходит только Task; tasks/result
+возвращает ровно сохранённый результат исходного метода.
 """
 
-# Пять состояний задачи из SEP-1686.
+import copy
+from datetime import datetime, timezone
+
+
 STATES = ("working", "input_required", "completed", "failed", "cancelled")
-
-# Терминальные: после них задача не меняется никогда.
 TERMINAL_STATES = ("completed", "failed", "cancelled")
-
-# Разрешённые переходы. Ключей всего два — из терминальных состояний
-# переходов нет вообще, и это главное свойство машины состояний.
 ALLOWED_TRANSITIONS = {
     "working": ("input_required", "completed", "failed", "cancelled"),
-    "input_required": ("working", "failed", "cancelled"),
+    "input_required": ("working", "completed", "failed", "cancelled"),
 }
 
 
+class InvalidParams(ValueError):
+    """JSON-RPC -32602: параметры запроса недопустимы."""
+
+    code = -32602
+
+
 def choose_task_support(estimated_seconds):
-    """Какое значение taskSupport поставить инструменту, зная время его работы.
+    """Выбрать execution.taskSupport для описания tool в tools/list.
 
     choose_task_support(0.2)  ->  "forbidden"
     choose_task_support(12)   ->  "optional"
     choose_task_support(180)  ->  "required"
 
-    Правило урока: быстрее 5 секунд — только синхронный вызов ("forbidden"),
-    от 5 до 30 секунд включительно — клиент решает сам ("optional"),
-    дольше 30 секунд — task-augmentation обязательна ("required").
-
-    Отрицательное время — ValueError. Это не «мгновенный tool», это ошибка
-    в замерах, и молча возвращать "forbidden" тут опаснее, чем упасть.
-
-    Аннотация taskSupport едет в tools/list рядом с описанием инструмента,
-    и по ней клиент решает, ставить ли params._meta.task.required.
+    Быстрее 5 секунд — синхронно, 5..30 — клиент решает, дольше
+    30 — только Task. При вызове клиент добавляет params.task,
+    а не params._meta.task.
     """
     if estimated_seconds < 0:
         raise ValueError("estimated_seconds не может быть отрицательным")
@@ -44,174 +46,139 @@ def choose_task_support(estimated_seconds):
     return "required"
 
 
+def _parse_time(value):
+    if not isinstance(value, str):
+        raise TypeError("timestamps must be ISO 8601 strings")
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def new_task(task_id, ttl_ms, now):
-    """Свежая задача в состоянии working. Время везде в МИЛЛИСЕКУНДАХ.
+    """Создать durable record с каноничным Task внутри.
 
-    new_task("tsk_1", 900000, 1000)
-      ->  {"id": "tsk_1", "state": "working", "ttl": 900000,
-           "createdAt": 1000, "updatedAt": 1000,
-           "progress": 0.0, "result": None, "error": None}
+    now — ISO 8601, потому что createdAt и lastUpdatedAt на проводе
+    обязаны быть ISO-строками. ttl и pollInterval — миллисекунды.
 
-    ttl — обещание сервера хранить состояние. По истечении ttl результат
-    выбрасывается, и tasks/result отвечает 404.
-
-    now передаётся параметром, а не берётся из time.time(): иначе тест на
-    протухание задачи пришлось бы ждать 15 минут.
+    new_task("tsk_1", 900000, "2025-11-25T10:30:00Z")["task"]["status"]
+      ->  "working"
     """
+    _parse_time(now)
+    if ttl_ms is not None and (not isinstance(ttl_ms, int) or ttl_ms < 0):
+        raise ValueError("ttl must be a non-negative integer or None")
     return {
-        "id": task_id,
-        "state": "working",
-        "ttl": ttl_ms,
-        "createdAt": now,
-        "updatedAt": now,
-        "progress": 0.0,
+        "task": {
+            "taskId": task_id,
+            "status": "working",
+            "createdAt": now,
+            "lastUpdatedAt": now,
+            "ttl": ttl_ms,
+            "pollInterval": 1000,
+        },
         "result": None,
-        "error": None,
     }
 
 
+def create_task_result(record):
+    """Initial response на task-augmented request: {"task": <Task>}."""
+    return {"task": copy.deepcopy(record["task"])}
+
+
 def is_terminal(state):
-    """Терминально ли состояние: из него уже никуда не уйти.
-
-    is_terminal("working")    ->  False
-    is_terminal("completed")  ->  True
-    is_terminal("cancelled")  ->  True
-
-    input_required НЕ терминально: задача ждёт elicitation и вернётся
-    в working.
-    """
+    """Терминально ли состояние; input_required не терминально."""
     return state in TERMINAL_STATES
 
 
-def is_expired(task, now):
-    """Истёк ли ttl задачи к моменту now (всё в миллисекундах).
-
-    is_expired(new_task("t", 1000, 0), 999)   ->  False
-    is_expired(new_task("t", 1000, 0), 1000)  ->  True
-
-    Граница включительная: ровно в createdAt + ttl задача уже протухла.
-    ttl отсчитывается от СОЗДАНИЯ, а не от последнего обновления — иначе
-    вечно работающая задача жила бы вечно.
-    """
-    return now >= task["createdAt"] + task["ttl"]
+def is_expired(record, now):
+    """ttl идёт от createdAt; None означает бессрочно."""
+    task = record["task"]
+    if task["ttl"] is None:
+        return False
+    elapsed = (_parse_time(now) - _parse_time(task["createdAt"])).total_seconds() * 1000
+    return elapsed >= task["ttl"]
 
 
-def advance(task, new_state, now, progress=None, payload=None):
-    """Перевести задачу в new_state. Вернуть НОВЫЙ dict, вход не менять.
+def advance(record, new_state, now, status_message=None, result=None):
+    """Перевести Task и вернуть новую durable запись, не меняя вход.
 
-    advance(new_task("t", 1000, 0), "completed", 5, payload="report")["result"]
-      ->  "report"
-    advance(new_task("t", 1000, 0), "input_required", 5)["state"]
-      ->  "input_required"
-
-    payload уезжает в "result" при переходе в completed и в "error" при
-    переходе в failed; в остальных случаях он игнорируется.
-
-    Три отказа, все через ValueError:
-      * new_state вне STATES — опечатка в имени состояния;
-      * задача уже терминальна — машина append-only, воскрешать нельзя;
-      * переход не разрешён (working -> working, например).
-
-    Почему возвращается копия: состояние задачи лежит в durable store, и
-    мутация на месте прячет от тебя момент, когда запись надо сохранить.
+    result — точный result или JSON-RPC error исходного запроса.
+    tasks/result вернёт его без своей обёртки.
     """
     if new_state not in STATES:
         raise ValueError(f"неизвестное состояние: {new_state}")
-    current = task["state"]
+    current = record["task"]["status"]
     if is_terminal(current):
         raise ValueError(f"задача уже терминальна: {current}")
     if new_state not in ALLOWED_TRANSITIONS[current]:
         raise ValueError(f"переход {current} -> {new_state} запрещён")
-
-    updated = dict(task)
-    updated["state"] = new_state
-    updated["updatedAt"] = now
-    if progress is not None:
-        updated["progress"] = progress
-    if new_state == "completed":
-        updated["result"] = payload
-    elif new_state == "failed":
-        updated["error"] = payload
+    _parse_time(now)
+    updated = copy.deepcopy(record)
+    task = updated["task"]
+    task["status"] = new_state
+    task["lastUpdatedAt"] = now
+    if status_message is None:
+        task.pop("statusMessage", None)
+    else:
+        task["statusMessage"] = status_message
+    if is_terminal(new_state):
+        updated["result"] = copy.deepcopy(result)
     return updated
 
 
-def cancel_task(task, now):
-    """tasks/cancel: идемпотентная отмена. Вернуть НОВЫЙ dict.
+def tasks_get(store, task_id, now):
+    """tasks/get: вернуть полный Task с taskId/status/временами."""
+    record = store.get(task_id)
+    if record is None or is_expired(record, now):
+        raise KeyError(task_id)
+    return copy.deepcopy(record["task"])
 
-    cancel_task(new_task("t", 1000, 0), 5)["state"]  ->  "cancelled"
 
-    Терминальную задачу отмена не трогает и НЕ роняет — второй вызов
-    tasks/cancel обязан быть no-op, иначе клиент с ретраями получит
-    ошибку на пустом месте.
+def cancel_task(record, now):
+    """tasks/cancel: отменить нетерминальную задачу.
 
-    Именно этим cancel_task отличается от advance(task, "cancelled", now):
-    advance на терминальной задаче бросает ValueError.
+    Спецификация не делает этот метод идемпотентным: любое терминальное
+    состояние, включая cancelled, даёт JSON-RPC -32602 Invalid params.
     """
-    if is_terminal(task["state"]):
-        return dict(task)
-    return advance(task, "cancelled", now)
-
-
-def tasks_result(store, task_id, now):
-    """tasks/result: забрать результат. store — dict вида {id: task}.
-
-    Всегда возвращает dict с ключами status, state, result, error.
-
-    tasks_result({}, "нет", 0)
-      ->  {"status": 404, "state": None, "result": None, "error": "unknown_task"}
-    tasks_result({"t": new_task("t", 1000, 0)}, "t", 5)
-      ->  {"status": 404, "state": "working", "result": None, "error": "not_ready"}
-
-    Четыре случая: задачи нет (404 unknown_task), ttl истёк (404 expired,
-    состояние уже выброшено), задача ещё не терминальна (404 not_ready),
-    задача терминальна (200 с result или error).
-
-    404 на «ещё не готово» — это не баг, а контракт SEP-1686: клиент
-    поллит tasks/status и приходит за результатом только после
-    терминального состояния.
-    """
-    task = store.get(task_id)
-    if task is None:
-        return {"status": 404, "state": None, "result": None, "error": "unknown_task"}
-    if is_expired(task, now):
-        # После ttl сервер уже не обязан помнить даже состояние.
-        return {"status": 404, "state": None, "result": None, "error": "expired"}
-    if not is_terminal(task["state"]):
-        return {
-            "status": 404,
-            "state": task["state"],
-            "result": None,
-            "error": "not_ready",
-        }
-    return {
-        "status": 200,
-        "state": task["state"],
-        "result": task["result"],
-        "error": task["error"],
+    if is_terminal(record["task"]["status"]):
+        raise InvalidParams("cannot cancel a task in a terminal status")
+    cancelled_result = {
+        "isError": True,
+        "content": [{"type": "text", "text": "Task cancelled"}],
     }
+    return advance(record, "cancelled", now, "Cancelled by requestor", cancelled_result)
+
+
+def tasks_result(store, task_id, now, wait=None):
+    """tasks/result: блокироваться до терминального status и вернуть result.
+
+    В чистой учебной функции wait(store, task_id) имитирует ожидание
+    condition/event реального сервера. Без wait незавершённый вызов
+    поднимает BlockingIOError, а не притворяется HTTP 404.
+    """
+    while True:
+        record = store.get(task_id)
+        if record is None or is_expired(record, now):
+            raise KeyError(task_id)
+        if is_terminal(record["task"]["status"]):
+            return copy.deepcopy(record["result"])
+        if wait is None:
+            raise BlockingIOError("tasks/result blocks until the task is terminal")
+        wait(store, task_id)
 
 
 def recover_after_crash(store, now):
-    """Перезапуск сервера: починить store, поднятый с диска. Вернуть НОВЫЙ dict.
-
-    Три правила из урока:
-      * задачи с истёкшим ttl выбрасываются из store целиком;
-      * незавершённые (working / input_required) — их поток умер вместе
-        с процессом, помечаем failed с error "CRASH_RECOVERY";
-      * терминальные сохраняются как есть до конца ttl.
-
-    recover_after_crash({"t": new_task("t", 1000, 0)}, 5)["t"]["error"]
-      ->  "CRASH_RECOVERY"
-
-    Без этого шага клиент вечно поллит задачу в working, которую уже никто
-    не считает.
-    """
+    """После crash удалить expired, а in-flight закончить JSON-RPC error."""
     recovered = {}
-    for task_id, task in store.items():
-        if is_expired(task, now):
+    for task_id, record in store.items():
+        if is_expired(record, now):
             continue
-        if is_terminal(task["state"]):
-            recovered[task_id] = dict(task)
+        if is_terminal(record["task"]["status"]):
+            recovered[task_id] = copy.deepcopy(record)
         else:
-            recovered[task_id] = advance(task, "failed", now, payload="CRASH_RECOVERY")
+            error = {"code": -32000, "message": "CRASH_RECOVERY"}
+            recovered[task_id] = advance(
+                record, "failed", now, "Worker lost during restart", error
+            )
     return recovered

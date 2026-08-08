@@ -121,8 +121,21 @@ def test_bce_gradient_explodes_on_a_confident_mistake():
     assert bce_gradient([1e-6], [1.0])[0] < -100000.0
 
 
-def test_bce_gradient_stays_finite_at_zero():
-    assert math.isfinite(bce_gradient([0.0], [1.0])[0])
+def test_bce_gradient_is_zero_on_the_clipped_probability_plateau():
+    assert bce_gradient([0.0, 1.0], [1.0, 0.0]) == APPROX([0.0, 0.0])
+
+
+def test_bce_gradient_matches_finite_difference_at_probability_boundaries():
+    """Loss постоянен около 0 и 1 из-за clip, значит и производная нулевая."""
+    preds, targets = [0.0, 1.0], [1.0, 0.0]
+    assert bce_gradient(preds, targets, eps=1e-3) == pytest.approx(
+        numeric_gradient(
+            lambda v: binary_cross_entropy(v, targets, eps=1e-3),
+            preds,
+            h=1e-6,
+        ),
+        abs=1e-9,
+    )
 
 
 def test_bce_gradient_is_small_when_already_right():

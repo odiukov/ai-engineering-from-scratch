@@ -66,17 +66,28 @@ def tree_map(fn, *trees):
 
     pytree — это вложенные списки, кортежи и словари; листья — числа.
     Структура берётся из ПЕРВОГО дерева, остальные обходятся параллельно.
+    Все деревья обязаны иметь одинаковые типы контейнеров, длины и ключи;
+    несовпадение бросает ValueError вместо тихого отбрасывания листьев zip-ом.
 
     Ради этой одной функции JAX и обходится без метода .parameters():
     обновление всех весов сразу — это tree_map(lambda p, g: p - lr * g,
     params, grads), и работает оно с любой формой модели.
     """
+    if not trees:
+        raise ValueError("tree_map needs at least one pytree")
+
     first = trees[0]
     if isinstance(first, dict):
+        if any(not isinstance(t, dict) or t.keys() != first.keys() for t in trees[1:]):
+            raise ValueError("pytree structure mismatch: dictionary keys differ")
         return {k: tree_map(fn, *(t[k] for t in trees)) for k in first}
     if isinstance(first, (list, tuple)):
+        if any(type(t) is not type(first) or len(t) != len(first) for t in trees[1:]):
+            raise ValueError("pytree structure mismatch: sequence shape differs")
         mapped = [tree_map(fn, *items) for items in zip(*trees)]
         return type(first)(mapped)
+    if any(isinstance(t, (dict, list, tuple)) for t in trees[1:]):
+        raise ValueError("pytree structure mismatch: leaf and container differ")
     return fn(*trees)
 
 

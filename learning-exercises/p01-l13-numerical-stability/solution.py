@@ -82,10 +82,14 @@ def logsumexp(values):
 
     Пустой список — 0 слагаемых, разумного ответа нет; договоримся
     возвращать -inf (нейтральный элемент для сложения в log-пространстве).
+    Если хотя бы одно значение равно +inf, вся сумма и её логарифм равны
+    +inf: отдельно обработай этот случай, потому что inf - inf даёт nan.
     """
     if not values:
         return float("-inf")
     c = max(values)
+    if c == float("inf"):
+        return c
     if c == float("-inf"):
         return c
     return c + math.log(sum(math.exp(v - c) for v in values))
@@ -103,7 +107,15 @@ def log_softmax(logits):
     В log-пространстве живёт вся кросс-энтропия: брать log(softmax(x))
     в два приёма — значит сначала потерять точность на маленьких
     вероятностях, а потом усилить потерю логарифмом.
+
+    Особый случай +inf означает бесконечно доминирующий класс. Если таких
+    классов k, вероятность делится между ними поровну: их log(p) равен
+    -log(k), а у всех конечных логитов — -inf.
     """
+    positive_infinities = sum(z == float("inf") for z in logits)
+    if positive_infinities:
+        shared = -math.log(positive_infinities)
+        return [shared if z == float("inf") else float("-inf") for z in logits]
     total = logsumexp(logits)
     return [z - total for z in logits]
 

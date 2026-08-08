@@ -139,6 +139,10 @@ def test_logsumexp_shifts_exactly_with_its_input():
     )
 
 
+def test_logsumexp_with_positive_infinity_is_positive_infinity():
+    assert logsumexp([1.0, float("inf"), -3.0]) == float("inf")
+
+
 # --------------------------------------------------------------- log_softmax
 def test_log_softmax_of_equal_logits():
     assert log_softmax([0.0, 0.0]) == APPROX([-math.log(2), -math.log(2)])
@@ -159,6 +163,13 @@ def test_log_softmax_stays_finite_on_huge_logits():
 def test_log_softmax_values_are_never_positive():
     """Это логарифмы вероятностей — они не бывают больше нуля."""
     assert all(x <= 0.0 for x in log_softmax([5.0, -3.0, 0.0, 12.0]))
+
+
+def test_log_softmax_splits_mass_between_multiple_positive_infinities():
+    result = log_softmax([float("inf"), 3.0, float("inf")])
+    assert result[0] == APPROX(-math.log(2))
+    assert result[1] == float("-inf")
+    assert result[2] == APPROX(-math.log(2))
 
 
 # ------------------------------------------------------------------ softmax
@@ -193,6 +204,14 @@ def test_softmax_output_never_contains_nan_or_inf():
     probs = softmax([-800.0, 0.0, 800.0])
     assert all(math.isfinite(p) and p >= 0.0 for p in probs)
     assert sum(probs) == pytest.approx(1.0, abs=1e-12)
+
+
+def test_softmax_assigns_all_mass_to_a_single_positive_infinity():
+    assert softmax([1.0, float("inf"), -2.0]) == APPROX([0.0, 1.0, 0.0])
+
+
+def test_softmax_splits_mass_between_multiple_positive_infinities():
+    assert softmax([float("inf"), 1.0, float("inf")]) == APPROX([0.5, 0.0, 0.5])
 
 
 # ------------------------------------------------------------ cross_entropy

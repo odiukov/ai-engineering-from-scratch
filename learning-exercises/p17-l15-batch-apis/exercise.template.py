@@ -21,6 +21,10 @@ PRICE_CACHED_READ = 0.30
 PRICE_OUTPUT = 15.00
 WRITE_PREMIUM = 1.25
 BATCH_DISCOUNT = 0.50
+BATCH_CACHE_POLICY = {
+    "anthropic": "stack",
+    "vertex-gemini": "cache_precedence",
+}
 INTERACTIVE_MAX_S = 60
 SEMI_MAX_S = 3600
 BATCH_SLA_H = 24
@@ -66,16 +70,19 @@ def cached_cost(n, prefix_tokens, unique_tokens, output_tokens):
     raise NotImplementedError
 
 
-def batch_cost(n, prefix_tokens, unique_tokens, output_tokens, cached):
-    """Счёт по batch: половина от синхронного, кэш можно сложить сверху.
+def batch_cost(n, prefix_tokens, unique_tokens, output_tokens, cached,
+               provider="anthropic"):
+    """Счёт по batch с явной политикой провайдера для prompt cache.
 
     batch_cost(50_000, 4000, 2000, 200, False)  ->  525.0
     batch_cost(50_000, 4000, 2000, 200, True)   ->  примерно 255.0
 
-    Знаменитое «10% от синхронного» получается НЕ всегда: скидка режет
-    пополам всё, а кэш — только общий префикс. На длинном общем префиксе с
-    коротким выходом выходит около 10%; на тяжёлой уникальной части и
-    длинном ответе — около 40%. Оба режима проверены тестами.
+    У Anthropic скидки складываются. У Vertex Gemini cache price takes
+    precedence: cached prefix оплачивается по cache-тарифу без дополнительной
+    batch-скидки, а уникальный вход и выход всё ещё получают -50%.
+
+    Неизвестный provider — BatchError: молча выбрать финансовую политику
+    нельзя.
     """
     raise NotImplementedError
 
@@ -152,18 +159,20 @@ def triage(latency_budget_s):
     raise NotImplementedError
 
 
-def lane_decision(n, prefix_tokens, unique_tokens, output_tokens, latency_budget_s):
+def lane_decision(n, prefix_tokens, unique_tokens, output_tokens, latency_budget_s,
+                  provider="anthropic"):
     """Выбрать полосу и посчитать, сколько это стоит и сколько потеряно.
 
     Возвращает dict:
       lane            — из triage,
       cost            — счёт в выбранной полосе,
       baseline_cost   — синхронно и без кэша,
-      best_cost       — batch со сложенным кэшем, недостижимый минимум,
+      best_cost       — batch + кэш по политике provider, недостижимый минимум,
       saving_usd/pct  — экономия против baseline,
       forgone_usd     — сколько оставлено на столе из-за требования к задержке.
 
-    Кэш доступен во всех полосах, скидка batch — только в 'batch'.
+    Кэш доступен во всех полосах, скидка batch — только в 'batch'. У Vertex
+    Gemini cache-тариф на общий префикс имеет приоритет над batch-скидкой.
 
     lane_decision(50_000, 4000, 200, 100, 5)["lane"]       ->  'interactive'
     lane_decision(50_000, 4000, 200, 100, 86_400)["lane"]  ->  'batch'

@@ -4,7 +4,7 @@ import pytest
 
 from exercise import (
     accuracy,
-    is_linearly_separable,
+    perceptron_converged,
     perceptron_output,
     step,
     train_perceptron,
@@ -135,22 +135,30 @@ def test_accuracy_is_one_for_correct_weights():
     assert accuracy([1.0, 1.0], -1.5, AND_DATA) == APPROX(1.0)
 
 
-# ------------------------------------------------- is_linearly_separable
-def test_and_is_linearly_separable():
-    assert is_linearly_separable(AND_DATA) is True
+# ---------------------------------------------------- perceptron_converged
+def test_perceptron_converges_on_and():
+    assert perceptron_converged(AND_DATA) is True
 
 
-def test_or_is_linearly_separable():
-    assert is_linearly_separable(OR_DATA) is True
+def test_perceptron_converges_on_or():
+    assert perceptron_converged(OR_DATA) is True
 
 
-def test_xor_is_not_linearly_separable():
-    assert is_linearly_separable(XOR_DATA) is False
+def test_perceptron_does_not_converge_on_xor_within_the_budget():
+    assert perceptron_converged(XOR_DATA) is False
 
 
-def test_majority_of_three_is_linearly_separable():
+def test_perceptron_converges_on_majority_of_three():
     """«Хотя бы два из трёх» — это порог на сумме входов, значит прямая есть."""
-    assert is_linearly_separable(MAJORITY_DATA) is True
+    assert perceptron_converged(MAJORITY_DATA) is True
+
+
+def test_timeout_does_not_disprove_separability_for_a_tiny_margin():
+    """Близкие точки разделимы, но фиксированного малого бюджета не хватает."""
+    hard_pair = [([1.0], 0), ([1.01], 1)]
+    assert accuracy([1.0], -1.005, hard_pair) == APPROX(1.0)
+    assert perceptron_converged(hard_pair, epochs=200) is False
+    assert perceptron_converged(hard_pair, epochs=1000) is True
 
 
 # ------------------------------------------------------------ xor_network

@@ -232,3 +232,17 @@ def test_a_tighter_kv_budget_slows_the_whole_run_down():
 def test_a_request_that_cannot_fit_the_pool_at_all_is_refused():
     with pytest.raises(OutOfKVBlocks):
         schedule_continuous(MIXED_WORKLOAD, 100)
+
+
+def test_admitted_requests_reserve_the_full_kv_horizon():
+    """Три промпта не должны пройти admission, а затем словить OOM в decode."""
+    requests = [(0.0, 16, 2)] * 3
+    report = schedule_continuous(requests, total_blocks=4, block_size=16)
+    assert report["output_tokens"] == 6
+
+
+def test_static_and_continuous_ttft_end_at_the_first_generated_token():
+    request = [(0.0, 16, 2)]
+    static = schedule_static(request, batch_size=1)
+    continuous = schedule_continuous(request, total_blocks=2, block_size=16)
+    assert static["ttft_mean"] == APPROX(continuous["ttft_mean"])

@@ -55,7 +55,12 @@ def reshape(shape, new_shape):
     Ровно одна ось может быть -1: её размер выводится делением.
 
     Несовпадение числа элементов — ValueError, две минус-единицы — тоже.
+    Других отрицательных размеров у формы не бывает, они тоже дают ValueError.
     """
+    if any(d < 0 for d in shape):
+        raise ValueError("исходная форма не может содержать отрицательные размеры")
+    if any(d < -1 for d in new_shape):
+        raise ValueError("только -1 может обозначать выводимый размер")
     total = math.prod(shape)
     holes = [d for d in new_shape if d == -1]
     if len(holes) > 1:

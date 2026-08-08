@@ -258,17 +258,21 @@ def schedule_static(requests, batch_size):
         now = max(now, max(r[0] for r in group))
         pad_prompt = max(r[1] for r in group)
         now += pad_prompt * PREFILL_SEC_PER_TOKEN + STEP_OVERHEAD_SEC
-        for arrival, _prompt, _out in group:
-            ttfts.append(now - arrival)
         pad_output = max(r[2] for r in group)
         # len(group) в цене шага — платим и за уже закончившиеся последовательности
         step = DECODE_STEP_BASE_SEC + len(group) * DECODE_SEC_PER_SEQ + STEP_OVERHEAD_SEC
         for i in range(pad_output):
             now += step
-            for _arrival, _prompt, out_len in group:
+            for arrival, _prompt, out_len in group:
                 if i < out_len:
-                    itls.append(step)
                     output_tokens += 1
+                    if i == 0:
+                        # TTFT заканчивается первым сгенерированным токеном,
+                        # как и в continuous scheduler ниже.
+                        ttfts.append(now - arrival)
+                    else:
+                        # TPOT/ITL — только интервалы после первого токена.
+                        itls.append(step)
         for arrival, _prompt, _out in group:
             e2es.append(now - arrival)   # батч уходит целиком, вместе с медленным
     return {
@@ -333,7 +337,10 @@ def schedule_continuous(requests, total_blocks, chunk_size=None, block_size=KV_B
                 )
             if need > pool.free_blocks():
                 break
-            pool.allocate(r["rid"], r["prompt_len"])
+            # Admission уже проверил полный KV-горизонт, поэтому резервируем
+            # те же блоки. Иначе несколько промптов могли пройти проверку,
+            # а затем столкнуться с OutOfKVBlocks во время decode.
+            pool.allocate(r["rid"], r["prompt_len"] + r["output_len"])
             running.append(waiting.popleft())
         if not running:
             now = waiting[0]["arrival"]
@@ -361,7 +368,6 @@ def schedule_continuous(requests, total_blocks, chunk_size=None, block_size=KV_B
         for r in decoders:
             r["generated"] += 1
             output_tokens += 1
-            pool.append_token(r["rid"])
             if r["ttft"] is None:
                 ttfts.append(now - r["arrival"])
                 r["ttft"] = now

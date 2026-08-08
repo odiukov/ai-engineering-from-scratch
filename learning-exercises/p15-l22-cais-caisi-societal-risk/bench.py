@@ -12,6 +12,8 @@ _DEPLOYMENT = {
     "multi_layer_defense": False,
     "information_security": False,
     "agent_autonomy_hours": 48.0,
+    "training_compute_ops": 10**27,
+    "annual_gross_revenue_usd": 1_000_000_000.0,
 }
 
 # Портфель показателей: типичный вход агрегата — не четыре подрычага одного

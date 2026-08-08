@@ -109,7 +109,7 @@ def continuation_probability(sentences):
 
 
 def kneser_ney_bigram(sentences, discount=0.75):
-    """Интерполированный Кнесер-Ней для биграмм. Возвращает функцию prob(prev, w).
+    """Интерполированный Кнесер-Ней для биграмм. Возвращает prob(context, w).
 
     Три слагаемых механики:
       1. основной член — max(count(prev, w) - D, 0) / count(prev);
@@ -118,9 +118,9 @@ def kneser_ney_bigram(sentences, discount=0.75):
       3. эта масса раздаётся по continuation_probability.
 
     model = kneser_ney_bigram([["a", "b"], ["a", "c"]])
-    model("a", "b")     ->  положительное число меньше 0.5 (скидка съела часть)
-    model("a", "zzz")   ->  1e-9, слова нет в корпусе, но и не ноль
-    model("zzz", "b")   ->  P_cont("b"): контекст неизвестен, откатились вниз
+    model(("a",), "b")     ->  положительное число меньше 0.5 (скидка съела часть)
+    model(("a",), "zzz")   ->  1e-9, слова нет в корпусе, но и не ноль
+    model(("zzz",), "b")   ->  P_cont("b"): контекст неизвестен, откатились вниз
 
     Для известного prev сумма prob(prev, w) по всем словам корпуса равна 1:
     сколько скидка забрала, столько lambda и вернула.
@@ -142,7 +142,8 @@ def kneser_ney_bigram(sentences, discount=0.75):
 
     p_cont = continuation_probability(sentences)
 
-    def prob(prev, w):
+    def prob(context, w):
+        prev = context[-1]
         denom = context_totals.get(prev, 0)
         # контекст не виден ни разу: старший член посчитать не из чего,
         # откатываемся целиком на младшую модель
@@ -155,11 +156,12 @@ def kneser_ney_bigram(sentences, discount=0.75):
     return prob
 
 
-def bits_per_token(prob_fn, sentences):
+def bits_per_token(prob_fn, sentences, n=2):
     """Средняя кросс-энтропия в битах на токен: сколько модель не угадала.
 
-    Идёт по тем же биграммным парам, что и обучение: предложение
-    дополняется "<s>" и "</s>", считается среднее -log2 p(w | prev).
+    Идёт по тем же n-граммам, что и обучение: предложение дополняется n-1
+    токенами "<s>" и одним "</s>", затем считается среднее
+    -log2 p(w | context). context всегда кортеж длины n-1.
 
     Равномерная модель на 4 слова  ->  2.0 бита на токен
     Модель, знающая ответ точно    ->  0.0 бита
@@ -167,15 +169,22 @@ def bits_per_token(prob_fn, sentences):
     Это счёт в игре Шеннона в угадайку: 4.75 бита на букву при слепом
     переборе 27 символов, 0.6-1.3 у человека со 100 буквами контекста.
 
-    Ловушка: p может оказаться нулём (несглаженная модель), а log2(0) —
-    это ValueError. Подставляй пол вроде max(p, 1e-12).
+    n обязан совпадать с порядком обученной модели. Иначе триграммные
+    счётчики получают однословный контекст, не находят ни одной n-граммы и
+    оценка выглядит катастрофической без всякой причины.
+
+    Ловушка: p может оказаться нулём (несглаженная модель), а log2(0) — это
+    ValueError. Подставляй пол вроде max(p, 1e-12).
     """
+    if n < 1:
+        raise ValueError("n must be positive")
     total_bits = 0.0
     total_tokens = 0
     for sentence in sentences:
-        padded = ["<s>"] + list(sentence) + ["</s>"]
-        for i in range(1, len(padded)):
-            p = prob_fn(padded[i - 1], padded[i])
+        padded = ["<s>"] * (n - 1) + list(sentence) + ["</s>"]
+        for i in range(n - 1, len(padded)):
+            context = tuple(padded[i - n + 1 : i])
+            p = prob_fn(context, padded[i])
             total_bits -= math.log2(max(p, 1e-12))
             total_tokens += 1
     if total_tokens == 0:
@@ -183,7 +192,7 @@ def bits_per_token(prob_fn, sentences):
     return total_bits / total_tokens
 
 
-def perplexity(prob_fn, sentences):
+def perplexity(prob_fn, sentences, n=2):
     """exp от средней отрицательной логарифмической правдоподобности. Меньше — лучше.
 
     Равномерная модель на 4 слова  ->  4.0
@@ -196,22 +205,23 @@ def perplexity(prob_fn, sentences):
     Проверь себя: perplexity обязана совпасть с 2 ** bits_per_token. Одна и
     та же величина, натуральные логарифмы против двоичных.
     """
-    return 2.0 ** bits_per_token(prob_fn, sentences)
+    return 2.0 ** bits_per_token(prob_fn, sentences, n)
 
 
-def generate(prob_fn, vocab, prefix, rng, max_len=30):
+def generate(prob_fn, vocab, prefix, rng, max_len=30, n=2):
     """Сэмплирование продолжения пропорционально вероятностям. Возвращает токены.
 
-    На каждом шаге берётся последний токен как контекст, считаются веса
-    prob_fn(last, w) по всему vocab и вытягивается слово пропорционально
-    весу. Остановка — по "</s>" или после max_len шагов.
+    На каждом шаге берётся кортеж последних n-1 токенов как контекст,
+    считаются веса prob_fn(context, w) по всему vocab и вытягивается слово
+    пропорционально весу. Если prefix короче контекста, слева добавляются
+    "<s>". Остановка — по "</s>" или после max_len шагов.
 
     Ответ включает prefix целиком.
 
-    only_b = lambda prev, w: 1.0 if w == "b" else 0.0
+    only_b = lambda context, w: 1.0 if w == "b" else 0.0
     generate(only_b, ["a", "b", "</s>"], ["<s>"], random.Random(0), max_len=3)
         ->  ["<s>", "b", "b", "b"]
-    only_eos = lambda prev, w: 1.0 if w == "</s>" else 0.0
+    only_eos = lambda context, w: 1.0 if w == "</s>" else 0.0
     generate(only_eos, ["a", "</s>"], ["<s>"], random.Random(0), max_len=99)
         ->  ["<s>", "</s>"]
 
@@ -221,9 +231,14 @@ def generate(prob_fn, vocab, prefix, rng, max_len=30):
     Ловушка: сумма весов по vocab не обязана равняться единице — vocab может
     быть урезан. Умножай rng.random() на реальную сумму, а не на 1.0.
     """
+    if n < 1:
+        raise ValueError("n must be positive")
     tokens = list(prefix)
+    context_width = n - 1
     for _ in range(max_len):
-        weights = [prob_fn(tokens[-1], w) for w in vocab]
+        padded = ["<s>"] * context_width + tokens
+        context = tuple(padded[-context_width:]) if context_width else ()
+        weights = [prob_fn(context, w) for w in vocab]
         total = sum(weights)
         # один rng.random() на шаг: так порядок вызовов не зависит от того,
         # где остановился перебор, и seed действительно воспроизводим

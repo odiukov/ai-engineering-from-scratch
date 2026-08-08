@@ -1,5 +1,6 @@
 """Тесты к уроку «Tree of Thoughts и LATS: рассуждение как поиск». Правь exercise.py."""
 
+import itertools
 import random
 
 import pytest
@@ -48,8 +49,15 @@ def test_make_node_keeps_the_trace_that_led_to_the_state():
 
 
 # --------------------------------------------------------------------- expand
-def test_expand_makes_one_child_per_operation():
-    assert len(expand(make_node((6.0, 4.0)))) == 4
+def test_expand_includes_both_orders_for_non_commutative_operations():
+    children = expand(make_node((6.0, 4.0)))
+    assert len(children) == 6
+    assert {child["trace"][-1] for child in children} >= {
+        "6.0-4.0=2.0",
+        "4.0-6.0=-2.0",
+        "6.0/4.0=1.5",
+        "4.0/6.0=0.6666666666666666",
+    }
 
 
 def test_expand_of_a_finished_state_has_no_children():
@@ -58,7 +66,7 @@ def test_expand_of_a_finished_state_has_no_children():
 
 def test_expand_skips_division_by_zero_instead_of_crashing():
     states = [tuple(ch["state"]) for ch in expand(make_node((5.0, 0.0)))]
-    assert len(states) == 3
+    assert len(states) == 5
 
 
 def test_expand_records_the_step_in_the_child_trace():
@@ -83,8 +91,13 @@ def test_value_of_a_miss_is_negative_and_grows_with_the_gap():
     assert value(make_node((20.0,))) > value(make_node((10.0,)))
 
 
-def test_value_of_a_partial_state_uses_the_closest_number():
-    assert value(make_node((23.0, 5.0))) == APPROX(-0.01)
+def test_value_of_a_partial_state_uses_one_step_lookahead():
+    assert value(make_node((23.0, 5.0))) == APPROX(-0.04)
+
+
+def test_value_does_not_reward_an_unfinished_state_that_contains_target():
+    """В Game of 24 надо израсходовать все числа: (24, 4) — тупик."""
+    assert value(make_node((24.0, 4.0))) < 0.0
 
 
 def test_value_does_not_depend_on_the_order_inside_the_state():
@@ -185,6 +198,13 @@ def test_beam_search_result_does_not_depend_on_the_input_order():
     straight, _ = beam_search(make_node((8.0, 3.0, 1.0, 1.0)))
     shuffled, _ = beam_search(make_node((1.0, 1.0, 3.0, 8.0)))
     assert value(straight) == APPROX(value(shuffled))
+
+
+def test_beam_search_solves_reverse_division_case_in_every_input_order():
+    """6 / (1 - 3 / 4) = 24 требует обеих обратных операций."""
+    for numbers in itertools.permutations((1.0, 3.0, 4.0, 6.0)):
+        best, _ = beam_search(make_node(numbers), width=50)
+        assert value(best) == APPROX(1.0), numbers
 
 
 def test_beam_search_never_returns_something_worse_than_the_root():

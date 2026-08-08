@@ -234,6 +234,11 @@ def test_min_gpus_matches_the_numbers_from_the_lesson():
     assert min_gpus_for_fsdp(405) == 61
 
 
+def test_large_training_cluster_size_is_not_a_memory_capacity_minimum():
+    """Thousands of GPUs buy throughput; the simplified capacity floor is 61."""
+    assert min_gpus_for_fsdp(405) < 16384
+
+
 def test_min_gpus_returns_none_when_the_cluster_is_too_small():
     assert min_gpus_for_fsdp(405, max_gpus=8) is None
 

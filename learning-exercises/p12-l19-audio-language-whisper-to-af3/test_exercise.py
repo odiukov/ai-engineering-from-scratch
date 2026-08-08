@@ -124,14 +124,14 @@ def test_dft_magnitude_dc_bin_is_the_sum():
 
 
 def test_dft_magnitude_of_a_constant_has_only_dc():
-    mags = dft_magnitude([2.0] * 8, 8)
+    mags = dft_magnitude([2.0] * 8, 5)
     assert mags[0] == pytest.approx(16.0, abs=1e-9)
     assert all(m == pytest.approx(0.0, abs=1e-9) for m in mags[1:])
 
 
 def test_dft_magnitude_peaks_at_the_tone_bin():
     """Косинус с тремя периодами на кадр даёт всплеск ровно в третьем бине."""
-    mags = dft_magnitude(sine(16, 3), 8)
+    mags = dft_magnitude(sine(16, 3), 9)
     assert mags.index(max(mags)) == 3
     assert mags[3] == pytest.approx(8.0, abs=1e-9)
 
@@ -140,7 +140,14 @@ def test_dft_magnitude_ignores_a_time_shift():
     """Сдвиг во времени меняет фазу, но не модуль — спектрограмма на этом и стоит."""
     x = sine(16, 3)
     shifted = x[5:] + x[:5]
-    assert dft_magnitude(shifted, 8) == pytest.approx(dft_magnitude(x, 8), abs=1e-9)
+    assert dft_magnitude(shifted, 9) == pytest.approx(dft_magnitude(x, 9), abs=1e-9)
+
+
+def test_dft_bins_span_to_nyquist_instead_of_taking_the_low_prefix():
+    """With five outputs, a 3/8-rate tone belongs in bin 3, not outside the spectrum."""
+    mags = dft_magnitude(sine(16, 6), 5)
+    assert mags.index(max(mags)) == 3
+    assert mags[3] == pytest.approx(8.0, abs=1e-9)
 
 
 # ------------------------------------------------------ log_mel_spectrogram
@@ -168,6 +175,16 @@ def test_log_mel_spectrogram_compresses_dynamic_range():
     q, l = flat(quiet), flat(loud)
     assert max(l) > max(q)
     assert max(l) < 2 * max(q)
+
+
+def test_high_frequency_tone_reaches_the_highest_mel_band():
+    """The spectral grid must reach Nyquist or a 3.5 kHz tone is mapped as low audio."""
+    sr = 8000
+    low = [math.sin(2 * math.pi * 500 * i / sr) for i in range(200)]
+    high = [math.sin(2 * math.pi * 3500 * i / sr) for i in range(200)]
+    low_mel = log_mel_spectrogram(low, sr, n_mels=4, n_bins=16, hop_ms=25)[0]
+    high_mel = log_mel_spectrogram(high, sr, n_mels=4, n_bins=16, hop_ms=25)[0]
+    assert high_mel[-1] > low_mel[-1]
 
 
 # ---------------------------------------------------------- qformer_attend

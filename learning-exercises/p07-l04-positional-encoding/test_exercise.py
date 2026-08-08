@@ -186,7 +186,8 @@ def test_scaling_grows_the_base():
     assert scale_rope_base(10000, 32.0, 128) == pytest.approx(338098.0, rel=1e-3)
 
 
-def test_a_bigger_factor_gives_a_bigger_base():
+def test_ntk_factor_sixteen_grows_the_base_without_claiming_a_yarn_recipe():
+    """8K -> 128K задаёт factor=16, но одна эта формула ещё не является YaRN."""
     assert scale_rope_base(10000, 4.0, 128) < scale_rope_base(10000, 16.0, 128)
 
 

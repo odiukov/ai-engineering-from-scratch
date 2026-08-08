@@ -134,7 +134,8 @@ def agent_loop(user_message, tools, llm, max_steps=5):
       * arguments не словарь — туда же уходит
         f"error: arguments must be a dict, got {тип}";
       * иначе инструмент вызывается как fn(**arguments), результат уходит в
-        history сообщением роли "tool";
+        history сообщением роли "tool"; если он бросил исключение, вместо
+        падения туда уходит "error: tool ... failed: Тип: сообщение";
       * бюджет исчерпан — вернуть ровно
         "I could not complete the task in the step budget."
 

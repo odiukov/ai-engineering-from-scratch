@@ -35,7 +35,9 @@ def init_params(n_inputs, n_hidden, seed=0):
     len(p["w1"]), len(p["w1"][0]), len(p["w2"])  ->  (4, 2, 4)
     init_params(2, 4, seed=0) == init_params(2, 4, seed=0)  ->  True
 
-    Веса: random.uniform(-scale, scale), где scale = sqrt(2 / n_inputs).
+    Веса каждого слоя используют свой fan-in:
+      W1: random.uniform(-scale1, scale1), scale1 = sqrt(2 / n_inputs)
+      w2: random.uniform(-scale2, scale2), scale2 = sqrt(2 / n_hidden)
     Смещения: нули.
 
     Масштаб не выдуман: он держит z в районе нуля, где у сигмоиды есть
@@ -43,11 +45,12 @@ def init_params(n_inputs, n_hidden, seed=0):
     производная станет нулевой, и обучение не начнётся.
     """
     rng = random.Random(seed)
-    scale = (2.0 / n_inputs) ** 0.5
+    scale1 = (2.0 / n_inputs) ** 0.5
+    scale2 = (2.0 / n_hidden) ** 0.5
     return {
-        "w1": [[rng.uniform(-scale, scale) for _ in range(n_inputs)] for _ in range(n_hidden)],
+        "w1": [[rng.uniform(-scale1, scale1) for _ in range(n_inputs)] for _ in range(n_hidden)],
         "b1": [0.0] * n_hidden,
-        "w2": [rng.uniform(-scale, scale) for _ in range(n_hidden)],
+        "w2": [rng.uniform(-scale2, scale2) for _ in range(n_hidden)],
         "b2": 0.0,
     }
 

@@ -4,9 +4,10 @@ Native Sparse Attention (DeepSeek NSA) — эталон.
 Открывай ПОСЛЕ своих зелёных тестов.
 
 NSA прогоняет внимание трижды, по трём разным взглядам на KV-кэш:
-  1. сжатая ветка   — блоки по l токенов, усреднённые в один «конспект»;
-  2. выбранная ветка — top-k блоков по оценкам сжатой ветки, но токены
-     берутся исходные, несжатые;
+  1. сжатая ветка   — блоки по compression_block_size токенов,
+     усреднённые в один «конспект»;
+  2. выбранная ветка — top-k блоков по selection_block_size токенов,
+     из которых берутся исходные, несжатые токены;
   3. оконная ветка  — последние w токенов, локальный контекст.
 Три выхода складываются с обучаемыми гейтами.
 
@@ -99,32 +100,37 @@ def top_k_blocks(weights, k):
     return sorted(ranked[:k])
 
 
-def selected_branch(q, K, V, l, k):
-    """Выбранная ветка: top-k блоков по сжатым оценкам, токены — исходные.
+def selected_branch(q, K, V, selection_block_size, k):
+    """Выбранная ветка: top-k блоков selection_block_size, токены — исходные.
 
     Порядок: сжали K -> посчитали веса по сжатым ключам -> взяли top-k
     блоков -> собрали ИСХОДНЫЕ токены этих блоков -> обычное внимание.
 
-    Свойство для проверки: при l = 1 и k >= числа токенов ответ совпадает
+    Размер блока выбора не связан с размером блока отдельной сжатой
+    ветки. Свойство для проверки: при selection_block_size = 1 и
+    k >= числа токенов ответ совпадает
     с плотным вниманием по всей последовательности. Так и должно быть —
     разреженность с полным окном обязана вырождаться в плотную.
 
     Веса пересчитываются по несжатым ключам: сжатые оценки нужны только
     чтобы выбрать блоки, а не чтобы взвешивать токены внутри них.
     """
-    block_weights = attention_weights(q, compress_blocks(K, l))
+    block_weights = attention_weights(q, compress_blocks(K, selection_block_size))
     chosen = top_k_blocks(block_weights, k)
 
     ids = []
     for b in chosen:
-        ids.extend(range(b * l, min((b + 1) * l, len(K))))
+        start = b * selection_block_size
+        ids.extend(range(start, min(start + selection_block_size, len(K))))
 
     sub_K = [K[i] for i in ids]
     sub_V = [V[i] for i in ids]
     return attend(attention_weights(q, sub_K), sub_V)
 
 
-def nsa_attention(q, K, V, l, k, w, gates):
+def nsa_attention(
+    q, K, V, compression_block_size, k, selection_block_size, w, gates
+):
     """Три ветки NSA, сложенные с гейтами (g_cmp, g_sel, g_win).
 
     Модуль модели: NSA-блок целиком.
@@ -136,14 +142,17 @@ def nsa_attention(q, K, V, l, k, w, gates):
 
     Три полезные проверки:
       gates = (0, 0, 1), w >= len(K)  ->  обычное плотное внимание;
-      gates = (0, 1, 0), l = 1, k >= len(K)  ->  тоже плотное внимание;
+      gates = (0, 1, 0), selection_block_size = 1, k >= len(K)
+          ->  тоже плотное внимание;
       gates = (0, 0, 0)  ->  нулевой вектор.
     """
     g_cmp, g_sel, g_win = gates
 
     # сжатая ветка: и ключи, и значения усредняются по одним и тем же блокам
-    out_cmp = attend(attention_weights(q, compress_blocks(K, l)), compress_blocks(V, l))
-    out_sel = selected_branch(q, K, V, l, k)
+    compressed_K = compress_blocks(K, compression_block_size)
+    compressed_V = compress_blocks(V, compression_block_size)
+    out_cmp = attend(attention_weights(q, compressed_K), compressed_V)
+    out_sel = selected_branch(q, K, V, selection_block_size, k)
 
     # оконная ветка: последние w токенов; w больше длины — берём всё
     window = max(1, min(w, len(K)))
@@ -154,7 +163,7 @@ def nsa_attention(q, K, V, l, k, w, gates):
     ]
 
 
-def keys_per_query(n, l, k, b, w):
+def keys_per_query(n, compression_block_size, k, selection_block_size, w):
     """Бюджет вычислений: сколько ключей видит один запрос в каждой ветке.
 
     Возвращает словарь с ключами compressed, selected, window, total,
@@ -163,14 +172,15 @@ def keys_per_query(n, l, k, b, w):
     keys_per_query(64000, 64, 16, 64, 512)["total"]  ->  2536
     keys_per_query(64000, 64, 16, 64, 512)["full"]   ->  64000
 
-    compressed = ceil(n / l), selected = min(k * b, n), window = min(w, n).
+    compressed = ceil(n / compression_block_size),
+    selected = min(k * selection_block_size, n), window = min(w, n).
     Ограничение по n обязательно: нельзя прочитать больше ключей, чем есть.
 
     Ради чего всё: на 64k выигрыш 25x, на 128k уже 36x. Экономия растёт
     вместе с длиной контекста — в этом и весь смысл.
     """
-    compressed = -(-n // l)  # ceil без импорта
-    selected = min(k * b, n)
+    compressed = -(-n // compression_block_size)  # ceil без импорта
+    selected = min(k * selection_block_size, n)
     window = min(w, n)
     total = compressed + selected + window
     return {

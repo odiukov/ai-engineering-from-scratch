@@ -108,6 +108,21 @@ def test_stationary_matches_the_long_run_power_iteration():
     assert stationary_distribution(WEATHER) == pytest.approx(long_run, abs=1e-9)
 
 
+def test_stationary_distribution_converges_for_a_periodic_chain():
+    """Ленивая итерация гасит цикл между долями двудольной цепи."""
+    periodic = [[0.0, 0.5, 0.5], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]
+    assert stationary_distribution(periodic) == pytest.approx([0.5, 0.25, 0.25], abs=1e-9)
+
+
+def test_stationary_distribution_reports_an_exhausted_iteration_budget():
+    # Контраст не даёт NotImplementedError из заготовки притвориться ожидаемым
+    # RuntimeError: рабочий вызов обязан сначала вернуть настоящий ответ.
+    pi = stationary_distribution(WEATHER)
+    assert step_distribution(pi, WEATHER) == pytest.approx(pi, abs=1e-9)
+    with pytest.raises(RuntimeError, match="не сошлось"):
+        stationary_distribution(WEATHER, tol=1e-15, max_steps=1)
+
+
 # ---------------------------------------------------- empirical_distribution
 def test_empirical_distribution_counts_shares():
     assert empirical_distribution([0, 1, 1, 1], 2) == APPROX([0.25, 0.75])

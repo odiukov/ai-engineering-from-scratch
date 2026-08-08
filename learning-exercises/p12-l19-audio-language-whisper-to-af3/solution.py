@@ -129,25 +129,31 @@ def frame_signal(x, sr, win_ms=25, hop_ms=10):
 
 
 def dft_magnitude(frame, n_bins):
-    """Модули первых n_bins коэффициентов дискретного преобразования Фурье.
+    """Модули n_bins отсчётов спектра от DC до частоты Найквиста.
 
-    dft_magnitude([1.0, 1.0, 1.0, 1.0], 4)  ->  [4.0, 0.0, 0.0, 0.0]
+    dft_magnitude([1.0, 1.0, 1.0, 1.0], 3)  ->  [4.0, 0.0, 0.0]
 
-    X_k = sum_n frame[n] * exp(-2i*pi*k*n/N), возвращаем |X_k| для
-    k = 0..n_bins-1. Это ровно abs(numpy.fft.fft(frame))[:n_bins], только
-    руками и за O(n_bins * N) вместо O(N log N).
+    Отсчёт k соответствует нормализованной частоте k / (2 * (n_bins - 1))
+    цикла на отсчёт. Так n_bins точек равномерно покрывают весь односторонний
+    rfft-спектр, включая Найквист, а не берут первые n_bins точек полного DFT.
+    Когда n_bins = len(frame) // 2 + 1, это обычные бины rfft. Считаем их руками
+    за O(n_bins * N) вместо O(N log N).
 
     Ловушка: модуль, а не действительная часть. Сдвиг сигнала во времени
     меняет фазу, но не модуль — на этом и держится вся спектрограмма.
     """
     n = len(frame)
+    if n_bins <= 0:
+        raise ValueError(f"n_bins должно быть положительным, получено {n_bins}")
+    if n == 0:
+        raise ValueError("кадр не может быть пустым")
     out = []
     for k in range(n_bins):
         re = 0.0
         im = 0.0
         # шаг угла на отсчёт постоянен: считаем его один раз, а не зовём
         # умножение внутри cos/sin для каждого n заново
-        step = -2.0 * math.pi * k / n
+        step = 0.0 if n_bins == 1 else -math.pi * k / (n_bins - 1)
         for i, v in enumerate(frame):
             angle = step * i
             re += v * math.cos(angle)

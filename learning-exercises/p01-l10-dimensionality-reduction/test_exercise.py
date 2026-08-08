@@ -150,6 +150,13 @@ def test_power_iteration_on_a_zero_matrix_does_not_divide_by_zero():
     assert vector == APPROX([0.0, 0.0])
 
 
+def test_power_iteration_finds_the_eigenvalue_with_largest_magnitude():
+    """Отрицательная доминанта больше по модулю, хотя меньше алгебраически."""
+    value, vector = power_iteration([[-5.0, 0.0], [0.0, 2.0]])
+    assert value == pytest.approx(-5.0, abs=1e-6)
+    assert [abs(x) for x in vector] == pytest.approx([1.0, 0.0], abs=1e-6)
+
+
 # ---------------------------------------------------------- top_components
 def test_top_components_returns_eigenvalues_in_descending_order():
     values = [value for value, _ in top_components([[2, 0], [0, 3]], 2)]

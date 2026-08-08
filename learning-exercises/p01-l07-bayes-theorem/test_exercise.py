@@ -191,6 +191,17 @@ def test_beta_map_differs_from_beta_mean():
     assert beta_map(params) != pytest.approx(beta_mean(params), abs=1e-6)
 
 
+def test_beta_map_uses_the_boundary_when_only_one_shape_parameter_exceeds_one():
+    assert beta_map((1, 3)) == APPROX(0.0)
+    assert beta_map((3, 1)) == APPROX(1.0)
+
+
+def test_beta_map_rejects_a_u_shaped_distribution_with_two_modes():
+    """Beta(a<1,b<1) максимальна и в 0, и в 1: одного MAP-числа нет."""
+    with pytest.raises(ValueError, match="две моды"):
+        beta_map((0.5, 0.5))
+
+
 # ---------------------------------------------------- naive_bayes_predict
 def test_naive_bayes_recognises_spam():
     assert naive_bayes_predict(TRAIN_DOCS, TRAIN_LABELS, "free money waiting for you") == "spam"

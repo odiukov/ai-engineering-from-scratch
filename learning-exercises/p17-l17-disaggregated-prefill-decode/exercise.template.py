@@ -14,7 +14,7 @@
 Разбор:  /check-code p17-l17-disaggregated-prefill-decode
 """
 
-KV_BYTES_PER_TOKEN = 125_000
+KV_BYTES_PER_TOKEN = 163_840
 TRANSFER_SETUP_MS = 20.0
 PREFILL_TPS = 8_000.0    # один forward по всему промпту, упор в вычисления
 DECODE_TPS = 40.0        # по токену за шаг на один запрос, упор в память
@@ -36,7 +36,7 @@ class DisaggError(Exception):
 def kv_bytes(prompt_tokens, bytes_per_token=KV_BYTES_PER_TOKEN):
     """Сколько байт KV-кэша накопил prefill на промпте такой длины.
 
-    kv_bytes(4000)  ->  500_000_000    (500 МБ — цифра из урока)
+    kv_bytes(4000)  ->  655_360_000    (80 * 2 * 8 * 128 * 4000)
     kv_bytes(0)     ->  0
 
     Это то, что придётся физически перевезти из prefill-пула в decode-пул.
@@ -50,11 +50,11 @@ def kv_bytes(prompt_tokens, bytes_per_token=KV_BYTES_PER_TOKEN):
 def transfer_ms(prompt_tokens, link_gbps, bytes_per_token=KV_BYTES_PER_TOKEN):
     """Время передачи KV между пулами: рукопожатие плюс байты по линку.
 
-    transfer_ms(4000, LINK_RDMA_GBPS)  ->  25.0   (20 рукопожатие + 5 передача)
-    transfer_ms(4000, LINK_TCP_GBPS)   ->  70.0   (20 рукопожатие + 50 передача)
+    transfer_ms(4000, LINK_RDMA_GBPS)  ->  26.5536 (20 + 6.5536 передачи)
+    transfer_ms(4000, LINK_TCP_GBPS)   ->  85.536  (20 + 65.536 передачи)
     transfer_ms(0, LINK_RDMA_GBPS)     ->  20.0   (везти нечего, а хоп есть)
 
-    Разбор: 500 МБ по 100 ГБ/с = 5 мс, по 10 ГБ/с = 50 мс.
+    Разбор: 655.36 МБ по 100 ГБ/с = 6.5536 мс, по 10 ГБ/с = 65.536 мс.
 
     Ловушка: слагаемое TRANSFER_SETUP_MS постоянное. Именно оно, а не байты,
     решает судьбу коротких промптов: на 100 токенах везти почти нечего, а
@@ -110,10 +110,10 @@ def disaggregated_ms(prompt_tokens, output_tokens, link_gbps,
                      bytes_per_token=KV_BYTES_PER_TOKEN):
     """Время запроса на двух пулах: чистый prefill, передача KV, чистый decode.
 
-    disaggregated_ms(4000, 300, LINK_TCP_GBPS)   ->  8070.0
-    disaggregated_ms(4000, 300, LINK_RDMA_GBPS)  ->  8025.0
+    disaggregated_ms(4000, 300, LINK_TCP_GBPS)   ->  8085.536
+    disaggregated_ms(4000, 300, LINK_RDMA_GBPS)  ->  8026.5536
 
-    Разбор первого: 500 prefill + 70 передача + 7500 decode.
+    Разбор первого: 500 prefill + 85.536 передача + 7500 decode.
 
     Штрафа колокации здесь нет — в этом весь смысл разделения. Зато появился
     налог на передачу, которого в колокации нет вообще: там KV уже лежит в
@@ -127,13 +127,13 @@ def disagg_gain_ms(prompt_tokens, output_tokens, link_gbps,
                    decode_tps=DECODE_TPS, bytes_per_token=KV_BYTES_PER_TOKEN):
     """Выигрыш разделения в миллисекундах. Отрицательный — разделять не надо.
 
-    disagg_gain_ms(4000, 300, LINK_TCP_GBPS)  ->  примерно 144.29
-    disagg_gain_ms(200, 300, LINK_TCP_GBPS)   ->  примерно -11.79
+    disagg_gain_ms(4000, 300, LINK_TCP_GBPS)  ->  примерно 128.75
+    disagg_gain_ms(200, 300, LINK_TCP_GBPS)   ->  примерно -12.56
     disagg_gain_ms(4000, 999, LINK_TCP_GBPS)  ->  ровно столько же, сколько
                                                   с 300 — decode сократился
 
     Разбор второго: на 200 токенах штраф колокации отбирает всего 8.57 мс, а
-    рукопожатие и передача стоят 22.5. Это и есть «Prompts < 512 tokens:
+    рукопожатие и передача стоят 23.28. Это и есть «Prompts < 512 tokens:
     transfer tax dominates gain» из урока.
 
     Свойство, которое стоит понять раньше формулы: длина ОТВЕТА в выигрыш не
@@ -149,18 +149,19 @@ def crossover_prompt_tokens(link_gbps, penalty=COLOCATION_PENALTY,
                             max_tokens=1 << 20):
     """Самый короткий промпт, на котором разделение уже выигрывает. Или None.
 
-    crossover_prompt_tokens(LINK_TCP_GBPS)   ->  487
-    crossover_prompt_tokens(LINK_RDMA_GBPS)  ->  383
+    crossover_prompt_tokens(LINK_TCP_GBPS)   ->  538
+    crossover_prompt_tokens(LINK_RDMA_GBPS)  ->  386
     crossover_prompt_tokens(2.0)             ->  None
 
-    Урок называет порог «>512 токенов» — вот он, посчитанный: 487 на TCP.
+    Урок называет порог около 512 токенов — вот он, посчитанный: 538 на TCP.
     На RDMA порог ниже: линк быстрее, налог на байт меньше, окупается раньше.
 
     None означает, что порога нет вообще. Выигрыш растёт с длиной промпта со
     скоростью (penalty/(1-penalty))/prefill_tps на токен, а налог — со
-    скоростью bytes_per_token/link. Если линк медленнее примерно 2.33 ГБ/с,
+    скоростью bytes_per_token/link. Если линк медленнее примерно 3.06 ГБ/с,
     вторая скорость больше первой, и удлинение промпта делает только хуже: чем
-    длиннее промпт, тем больше проигрыш. Это и есть строчка урока «No RDMA
+    длиннее промпт, тем больше проигрыш. При этой геометрии граница — около
+    3.06 ГБ/с. Это и есть строчка урока «No RDMA
     fabric: TCP transfer tax is heavier» в предельном виде.
 
     Ловушка: не ищи порог линейным перебором до миллиона — выигрыш монотонен

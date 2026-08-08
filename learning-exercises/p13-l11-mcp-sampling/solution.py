@@ -28,8 +28,8 @@ SAMPLING_METHOD = "sampling/createMessage"
 # переписку ЧУЖИХ серверов — с 2025-11-25 это мягко депрекейтнуто.
 CONTEXT_MODES = ("none", "thisServer", "allServers")
 
-# Почему генерация остановилась.
-STOP_REASONS = ("endTurn", "stopSequence", "maxTokens")
+# Стандартные причины; само поле остаётся открытой строкой.
+STANDARD_STOP_REASONS = ("endTurn", "stopSequence", "maxTokens", "toolUse")
 
 
 class SamplingBudgetExceeded(Exception):
@@ -37,32 +37,27 @@ class SamplingBudgetExceeded(Exception):
 
 
 def model_preferences(cost, speed, intelligence, hints=()):
-    """Приоритеты выбора модели, нормированные в сумму 1.0.
+    """Приоритеты выбора модели: три независимых числа 0..1.
 
-    model_preferences(3, 1, 1)
-        ->  {"costPriority": 0.6, "speedPriority": 0.2,
-             "intelligencePriority": 0.2}
+    model_preferences(0.8, 0.2, 0.6)
+        ->  {"costPriority": 0.8, "speedPriority": 0.2,
+             "intelligencePriority": 0.6}
     model_preferences(0, 0, 1, hints=["claude-3-5-sonnet"])
         ->  {..., "hints": [{"name": "claude-3-5-sonnet"}]}
 
-    Принимаем любые неотрицательные веса и нормируем сами: «3 к 1 к 1» —
-    честное намерение сервера, и заставлять его считать доли вручную незачем.
-
-    Ловушки:
-      * отрицательный вес — не «наоборот», а бессмыслица: ValueError;
-      * все три нуля нормировать не на что: тоже ValueError;
-      * hints — это список ОБЪЕКТОВ {"name": ...}, а не голых строк.
+    Поля не обязаны суммироваться в 1.0: 0.9/0.9/0.9 валидно и значит,
+    что все три характеристики важны. Каждое значение должно лежать в 0..1;
+    hints на проводе становятся объектами {"name": ...}.
     """
-    weights = (cost, speed, intelligence)
-    if any(w < 0 for w in weights):
-        raise ValueError("Priorities must be non-negative")
-    total = sum(weights)
-    if total == 0:
-        raise ValueError("At least one priority must be positive")
+    priorities = (cost, speed, intelligence)
+    if any(not isinstance(value, (int, float)) or isinstance(value, bool) for value in priorities):
+        raise TypeError("Priorities must be numbers")
+    if any(value < 0 or value > 1 for value in priorities):
+        raise ValueError("Priorities must be between 0 and 1")
     prefs = {
-        "costPriority": cost / total,
-        "speedPriority": speed / total,
-        "intelligencePriority": intelligence / total,
+        "costPriority": cost,
+        "speedPriority": speed,
+        "intelligencePriority": intelligence,
     }
     # пустой hints не шлём вовсе: пустой список — это обещание, которого нет
     if hints:
@@ -130,15 +125,14 @@ def pick_model(catalog, preferences):
 
     Оценка — скалярное произведение приоритетов на характеристики модели.
 
-    hints — это ПОДСКАЗКА, а не приказ: они разрывают ничью между равными
-    кандидатами, но не поднимают явно худшую модель над лучшей. Настройки
-    пользователя всегда весомее пожеланий сервера — иначе сервер сможет
-    загонять чужой кошелёк в дорогую модель.
+    hints — это упорядоченные ПРЕДПОЧТЕНИЯ, а не приказ и не только
+    tie-breaker. Имя хинта сопоставляется как подстрока; первый хинт, для
+    которого есть кандидаты, задаёт предпочтительную группу. Внутри неё
+    побеждает оценка по трём приоритетам. Клиент всё равно делает финальный
+    выбор и может сопоставить хинт с эквивалентом другого провайдера.
     """
     if not catalog:
         raise ValueError("Model catalog is empty")
-    hinted = {h["name"] for h in preferences.get("hints", [])}
-
     def score(model):
         return (
             preferences["costPriority"] * model["cost"]
@@ -146,13 +140,13 @@ def pick_model(catalog, preferences):
             + preferences["intelligencePriority"] * model["intelligence"]
         )
 
-    best = max(score(m) for m in catalog)
-    # ничья с допуском: веса дробные, точное сравнение float здесь врёт
-    tied = [m for m in catalog if abs(score(m) - best) < 1e-12]
-    for model in tied:
-        if model["name"] in hinted:
-            return model["name"]
-    return tied[0]["name"]
+    candidates = catalog
+    for hint in preferences.get("hints", []):
+        matched = [m for m in catalog if hint["name"].lower() in m["name"].lower()]
+        if matched:
+            candidates = matched
+            break
+    return max(candidates, key=score)["name"]
 
 
 def sampling_result(request_id, text, model, stop_reason="endTurn"):
@@ -170,11 +164,12 @@ def sampling_result(request_id, text, model, stop_reason="endTurn"):
     Поле model — та модель, которую клиент РЕАЛЬНО взял. Она вполне может
     не совпасть с hints сервера, и сервер обязан это пережить.
 
-    Ловушка: stopReason — одно из трёх значений спецификации. "stop" и
-    "length" из чужих API сюда не годятся.
+    stopReason — открытая строка: кроме стандартных endTurn,
+    stopSequence, maxTokens и toolUse клиент может вернуть
+    причину своего провайдера. Пустая строка всё ещё ошибка.
     """
-    if stop_reason not in STOP_REASONS:
-        raise ValueError(f"stopReason must be one of {STOP_REASONS}")
+    if not isinstance(stop_reason, str) or not stop_reason:
+        raise ValueError("stopReason must be a non-empty string")
     return {
         "jsonrpc": JSONRPC,
         "id": request_id,

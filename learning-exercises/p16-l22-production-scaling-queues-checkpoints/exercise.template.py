@@ -14,6 +14,8 @@
 Разбор:  /check-code p16-l22-production-scaling-queues-checkpoints
 """
 
+import copy
+
 TRANSITIONS = {
     ("idle", "take"): "processing",
     ("processing", "finish"): "response",
@@ -49,9 +51,9 @@ def append_checkpoint(log, thread_id, step, state):
     Журнал append-only: старые записи не переписываются. Именно поэтому по
     нему можно и восстанавливаться, и проводить аудит постфактум.
 
-    Ловушка: state надо КОПИРОВАТЬ. Иначе следующий супершаг, меняющий тот
-    же словарь, задним числом испортит уже записанный чекпоинт, и
-    восстановление приведёт не туда.
+    Ловушка: нужен copy.deepcopy, не dict(state). Иначе вложенный список или
+    словарь останется общим, следующий супершаг задним числом испортит уже
+    записанный чекпоинт, и восстановление приведёт не туда.
     """
     raise NotImplementedError
 
@@ -145,21 +147,40 @@ def claim_task(tasks, worker, now, ttl):
     raise NotImplementedError
 
 
-def dedup_effect(seen, key, effects, payload):
-    """Выполнить побочный эффект не более одного раза на ключ.
+class TransactionalEffectSink:
+    """Учебный sink, атомарно связывающий idempotency key и эффект.
+
+    В продакшене это одна транзакция с UNIQUE(key) либо внешний API,
+    который сам принимает idempotency key. Один словарь здесь изображает
+    эту границу: отдельно сохраняемых seen и effects нет.
+    """
+
+    def __init__(self):
+        raise NotImplementedError
+
+    def effects(self):
+        raise NotImplementedError
+
+    def apply(self, key, payload, crash_after_commit=False):
+        raise NotImplementedError
+
+
+def dedup_effect(sink, key, payload, crash_after_commit=False):
+    """Выполнить эффект через атомарный идемпотентный sink.
 
     Вернуть True, если эффект выполнен сейчас, и False, если это повтор.
 
-    seen, effects = set(), []
-    dedup_effect(seen, "pay-1", effects, {"amount": 10})  ->  True
-    dedup_effect(seen, "pay-1", effects, {"amount": 10})  ->  False
-    len(effects)  ->  1
+    sink = TransactionalEffectSink()
+    dedup_effect(sink, "pay-1", {"amount": 10})  ->  True
+    dedup_effect(sink, "pay-1", {"amount": 10})  ->  False
+    len(sink.effects())  ->  1
 
-    At-least-once доставка плюс идемпотентный потребитель даёт
-    exactly-once effective — большего распределённая система не обещает.
+    At-least-once доставка плюс атомарный/idempotent sink даёт
+    exactly-once effective. Два независимых хранилища seen и effects не
+    дают этой гарантии: падение между эффектом и записью seen оставляет окно.
 
-    Ловушка: ключ должен быть у КАЖДОГО вызова, а не только у платежей.
-    После восстановления из чекпоинта повторяется весь супершаг целиком.
+    crash_after_commit моделирует смерть уже после успешного commit. Повтор
+    обязан увидеть ключ и не добавить второй эффект.
     """
     raise NotImplementedError
 

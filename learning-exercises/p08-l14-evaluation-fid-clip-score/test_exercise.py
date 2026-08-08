@@ -91,6 +91,18 @@ def test_matrix_sqrt_is_symmetric_for_a_symmetric_input():
     assert S[0][1] == pytest.approx(S[1][0], abs=1e-9)
 
 
+def test_matrix_sqrt_handles_a_singular_psd_matrix_without_inverse():
+    """Нулевая дисперсия — допустимое собственное значение, не авария."""
+    S = matrix_sqrt([[4.0, 0.0], [0.0, 0.0]])
+    assert flat(S) == pytest.approx([2.0, 0.0, 0.0, 0.0], abs=1e-9)
+
+
+def test_matrix_sqrt_handles_a_rank_one_psd_matrix():
+    M = [[1.0, 1.0], [1.0, 1.0]]
+    S = matrix_sqrt(M)
+    assert flat(matmul(S, S)) == pytest.approx(flat(M), abs=1e-9)
+
+
 # ------------------------------------------------------------ mean_vector
 def test_mean_vector_averages_each_coordinate():
     assert mean_vector([[1.0, 2.0], [3.0, 4.0]]) == APPROX([2.0, 3.0])
@@ -135,6 +147,21 @@ def test_fid_is_zero_on_identical_sets():
     rng = random.Random(21)
     vs = features(200, 3, 0.0, rng)
     assert fid(vs, vs) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_fid_handles_identical_constant_one_sample_clouds():
+    """Обе ковариации нулевые: FID равен нулю и inverse не нужен."""
+    assert fid([[3.0, -2.0]], [[3.0, -2.0]]) == APPROX(0.0)
+
+
+def test_fid_of_constant_one_sample_clouds_is_the_squared_mean_gap():
+    """При нулевых ковариациях остаётся только квадрат расстояния средних."""
+    assert fid([[1.0, 2.0]], [[4.0, 6.0]]) == APPROX(25.0)
+
+
+def test_fid_handles_singular_line_clouds():
+    line = [[-1.0, 0.0], [0.0, 0.0], [1.0, 0.0]]
+    assert fid(line, line) == pytest.approx(0.0, abs=1e-9)
 
 
 def test_fid_is_never_negative():

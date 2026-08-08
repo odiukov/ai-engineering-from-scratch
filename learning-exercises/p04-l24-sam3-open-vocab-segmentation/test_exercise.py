@@ -52,9 +52,9 @@ def test_rle_encode_merges_runs_across_row_boundaries():
     assert rle_encode([[1, 1], [1, 1]]) == "1x4"
 
 
-def test_rle_encode_rejects_an_empty_mask():
-    with pytest.raises(ValueError):
-        rle_encode([])
+def test_rle_encode_serializes_an_empty_mask_as_an_empty_string():
+    assert rle_encode([]) == ""
+    assert rle_encode([[]]) == ""
 
 
 def test_rle_encode_rejects_non_binary_values():

@@ -96,6 +96,16 @@ def test_validate_catches_a_value_outside_the_enum():
     assert len(errors) == 1 and "available" in errors[0]
 
 
+def test_validate_applies_enum_to_integer_values():
+    schema = {"type": "integer", "enum": [1, 2, 3]}
+    assert validate(4, schema) == ["$: 4 not in enum [1, 2, 3]"]
+
+
+def test_validate_applies_enum_to_boolean_values():
+    schema = {"type": "boolean", "enum": [True]}
+    assert validate(False, schema) == ["$: False not in enum [True]"]
+
+
 def test_validate_does_not_accept_a_boolean_as_a_number():
     """Ловушка: isinstance(True, int) истинно, значит True пролезет в integer."""
     errors = validate({**VALID_PRODUCT, "price": True}, PRODUCT_SCHEMA)

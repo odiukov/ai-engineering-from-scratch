@@ -44,6 +44,15 @@ def test_decision_function_is_zero_exactly_on_the_boundary():
     assert decision_function([[1.0, -1.0]], [1.0, 1.0], 0.0) == APPROX([0.0])
 
 
+def test_decision_score_is_not_geometric_distance_until_normalised():
+    """Масштабирование (w, b) меняет score, но не расстояние до границы."""
+    point = [[3.0, 4.0]]
+    score = decision_function(point, [3.0, 4.0], -5.0)[0]
+    scaled = decision_function(point, [30.0, 40.0], -50.0)[0]
+    assert scaled == APPROX(10.0 * score)
+    assert score / 5.0 == APPROX(scaled / 50.0)
+
+
 # -------------------------------------------------------------- hinge_loss
 def test_hinge_loss_is_zero_beyond_the_margin():
     assert hinge_loss([[2.0]], [1], [1.0], 0.0) == APPROX(0.0)
@@ -83,6 +92,14 @@ def test_hinge_gradient_pushes_a_violating_point_out():
     assert hinge_gradients([[1.0]], [1], [0.0], 0.0, 0.0) == (
         APPROX([-1.0]),
         APPROX(-1.0),
+    )
+
+
+def test_hinge_gradient_chooses_zero_at_exactly_margin_one():
+    """В изломе допустимы разные субградиенты; здесь выбран нулевой."""
+    assert hinge_gradients([[1.0]], [1], [1.0], 0.0, 0.0) == (
+        APPROX([0.0]),
+        APPROX(0.0),
     )
 
 
