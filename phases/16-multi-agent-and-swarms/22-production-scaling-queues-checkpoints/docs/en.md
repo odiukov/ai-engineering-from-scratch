@@ -14,7 +14,7 @@ A prototype multi-agent system works on one laptop with three agents in an in-me
 - Agents sometimes run for hours (long research, human-in-the-loop waits).
 - Worker processes crash. Restarting loses state.
 - Peak load is 10x average; you need horizontal scaling.
-- Users pay per agent-run; you need exactly-once semantics for charging.
+- Users pay per agent-run; you need an effective-once charge even when delivery retries.
 
 The in-memory event loop does none of these. You need a durable execution layer underneath. The 2026 canonical options are:
 
@@ -43,7 +43,7 @@ Requirements for this to work:
 
 - **Serializable state.** All agent state has to be persistable. Function closures with live database connections do not survive.
 - **Deterministic resume.** Given the same state and same inputs, the agent produces the same actions (or defers to an external deterministic oracle for LLM calls).
-- **Idempotent side effects.** External calls (tool calls, payments) must be idempotent or use a deduplication key.
+- **Idempotent side effects.** External calls (tool calls, payments) must use a downstream idempotency key or commit the dedupe record and effect in one transaction. A separate in-memory `seen` set does not close the crash window.
 
 LangGraph writes a checkpoint after each super-step; Temporal writes after each activity; Restate uses event-sourced journals. All three implement the same pattern.
 
@@ -93,9 +93,9 @@ The rule: adopt durable-execution frameworks when you hit a concrete problem tha
 
 ### Exactly-once semantics
 
-For paid agent runs, you need "exactly-once effective" (at-least-once delivery + idempotent consumer). The engineering moves:
+For paid agent runs, you need "exactly-once effective": at-least-once delivery plus an idempotent sink. The key check and effect must share one atomic boundary (for example a database transaction with a unique key), or the downstream service itself must apply the idempotency key. If the charge succeeds and the worker crashes before persisting a separate `seen` marker, replay can charge twice.
 
-- **Dedup key per run.** Include it in every side-effect call.
+- **Dedup key per run.** Include it in every side-effect call, and let the transactional/downstream sink enforce it atomically.
 - **Outbox pattern.** Side effects write to a table first, then a separate process executes them. Both steps idempotent.
 - **Compensating transactions.** When a side effect succeeds but its tracking write fails, schedule a compensate.
 
@@ -155,7 +155,7 @@ Canonical production hardening:
 ## Exercises
 
 1. Run `code/main.py`. Confirm checkpoint resume works; measure async vs thread concurrency difference.
-2. Implement an **outbox** table: every tool call writes to outbox first, then a separate goroutine/task executes. Verify idempotency by running the tool call twice.
+2. Implement an **outbox** table: every tool call writes to outbox first, then a separate goroutine/task executes through a sink with a unique idempotency key. Crash after the sink commits but before the worker acknowledges it; verify replay does not execute the effect twice.
 3. Simulate a **rainbow deploy**: two concurrent runtime versions; route half of new thread_ids to each; confirm that in-flight threads on the old version are not interrupted.
 4. Read LangGraph's runtime doc (linked below). Identify which features of the runtime would take the longest to replicate in a hand-rolled FastAPI + Postgres version. Is that a reason to adopt, or can you defer?
 5. Read MegaAgent (arXiv:2408.09955) Section 3. The two-layer coordination (intra-group + inter-group admin chat) is explicit. Sketch how you would map this to a message queue with two queue families.

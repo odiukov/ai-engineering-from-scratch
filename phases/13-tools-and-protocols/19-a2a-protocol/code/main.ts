@@ -1,210 +1,199 @@
-// Phase 13 Lesson 19 — A2A agent-to-agent protocol, in TypeScript.
+// Phase 13 Lesson 19 — A2A v1.0 wire-shape harness in TypeScript.
 //
-// Research agent calls writer agent via A2A:
-//   1. Research agent fetches writer's Agent Card
-//   2. Submits a Task with text + file + data parts
-//   3. Writer transitions working -> input_required -> working -> completed
-//   4. Research agent receives an Artifact
+// Builds current AgentCard, Message, Part, TaskStatus, Task, and Artifact
+// shapes by hand, then simulates JSON-RPC SendMessage in memory.
 //
-// Stdlib only; in-process transport stands in for JSON-RPC over HTTP.
-//
-// Spec references:
-//   A2A protocol         https://a2aproject.github.io/A2A/specification
-//   Agent Card schema    https://a2aproject.github.io/A2A/specification/#agent-card
-//
+// Spec: https://a2a-protocol.org/latest/specification/
 // Run: npx tsx code/main.ts
 
 import { randomUUID } from "node:crypto";
 
-type Capabilities = { streaming: boolean; pushNotifications: boolean };
-
-type Skill = {
-  id: string;
-  name: string;
-  description: string;
-  inputModes: string[];
-  outputModes: string[];
-};
-
 type AgentCard = {
-  schemaVersion: string;
   name: string;
   description: string;
-  url: string;
+  supportedInterfaces: Array<{
+    url: string;
+    protocolBinding: "JSONRPC" | "GRPC" | "HTTP+JSON";
+    protocolVersion: string;
+  }>;
   version: string;
-  skills: Skill[];
-  capabilities: Capabilities;
+  capabilities: { streaming: boolean; pushNotifications: boolean };
+  defaultInputModes: string[];
+  defaultOutputModes: string[];
+  skills: Array<{
+    id: string;
+    name: string;
+    description: string;
+    tags: string[];
+    inputModes: string[];
+    outputModes: string[];
+  }>;
 };
 
+type TextPart = { text: string; mediaType?: string };
+type RawPart = { raw: string; filename?: string; mediaType?: string };
+type DataPart = { data: unknown; mediaType?: string };
+type UrlPart = { url: string; filename?: string; mediaType?: string };
+type Part = TextPart | RawPart | DataPart | UrlPart;
+
+type Message = {
+  messageId: string;
+  role: "ROLE_USER" | "ROLE_AGENT";
+  parts: Part[];
+  taskId?: string;
+  contextId?: string;
+};
+
+type TaskState =
+  | "TASK_STATE_WORKING"
+  | "TASK_STATE_INPUT_REQUIRED"
+  | "TASK_STATE_COMPLETED";
+
+type TaskStatus = { state: TaskState; message?: Message };
+type Artifact = { artifactId: string; name?: string; parts: Part[] };
+type Task = {
+  id: string;
+  contextId: string;
+  status: TaskStatus;
+  history: Message[];
+  artifacts: Artifact[];
+};
+
+const AGENT_CARD_PATH = "/.well-known/agent-card.json";
 const WRITER_AGENT_CARD: AgentCard = {
-  schemaVersion: "1.0",
   name: "writer-agent",
   description: "Drafts technical summaries and reports from source material.",
-  url: "https://writer.example.com/a2a",
+  supportedInterfaces: [
+    {
+      url: "https://writer.example.com/a2a",
+      protocolBinding: "JSONRPC",
+      protocolVersion: "1.0",
+    },
+  ],
   version: "1.0.0",
+  capabilities: { streaming: true, pushNotifications: false },
+  defaultInputModes: ["text/plain", "application/pdf", "application/json"],
+  defaultOutputModes: ["text/markdown"],
   skills: [
     {
       id: "draft_report",
       name: "Draft report",
-      description: "Given source material and a target length, produce a report.",
-      inputModes: ["text", "file", "data"],
-      outputModes: ["text", "artifact"],
+      description: "Produce a report from source material.",
+      tags: ["writing", "summarization"],
+      inputModes: ["text/plain", "application/pdf", "application/json"],
+      outputModes: ["text/markdown"],
     },
   ],
-  capabilities: { streaming: true, pushNotifications: false },
-};
-
-type TextPart = { kind: "text"; payload: { text: string } };
-type FilePart = {
-  kind: "file";
-  payload: { file: { name: string; mimeType: string; bytes: string } };
-};
-type DataPart = { kind: "data"; payload: Record<string, unknown> };
-type Part = TextPart | FilePart | DataPart;
-
-type Message = { role: "user" | "agent"; parts: Part[] };
-
-type Artifact = { name: string; mimeType: string; parts: Part[] };
-
-type TaskState =
-  | "submitted"
-  | "working"
-  | "input_required"
-  | "completed"
-  | "failed"
-  | "canceled";
-
-type Task = {
-  id: string;
-  state: TaskState;
-  messages: Message[];
-  artifact: Artifact | null;
 };
 
 const TASK_STORE = new Map<string, Task>();
 
-function newTask(): Task {
-  const id = `task_${randomUUID().replace(/-/g, "").slice(0, 10)}`;
-  const task: Task = { id, state: "submitted", messages: [], artifact: null };
-  TASK_STORE.set(id, task);
-  return task;
+function newId(prefix: string): string {
+  return `${prefix}_${randomUUID().replaceAll("-", "").slice(0, 10)}`;
 }
 
-function findDataPart(message: Message): DataPart | undefined {
-  return message.parts.find((p): p is DataPart => p.kind === "data");
+function textPart(text: string, mediaType = "text/plain"): TextPart {
+  return { text, mediaType };
+}
+
+function message(
+  role: Message["role"],
+  parts: Part[],
+  links: Pick<Message, "taskId" | "contextId"> = {},
+): Message {
+  return { messageId: newId("msg"), role, parts, ...links };
 }
 
 function finish(task: Task, length: string): void {
-  const text =
-    `[writer agent] ${length} summary of provided source: ` +
-    `topic identified, key points extracted, conclusion drafted.`;
-  task.artifact = {
-    name: "summary",
-    mimeType: "text/markdown",
-    parts: [{ kind: "text", payload: { text } }],
-  };
-  task.state = "completed";
+  task.artifacts = [
+    {
+      artifactId: newId("artifact"),
+      name: "summary",
+      parts: [
+        textPart(
+          `[writer agent] ${length} summary: topic identified, key points extracted, conclusion drafted.`,
+          "text/markdown",
+        ),
+      ],
+    },
+  ];
+  task.status = { state: "TASK_STATE_COMPLETED" };
   console.log(`    WRITER  : completed task ${task.id}`);
 }
 
-function writerTasksSend(skillId: string, message: Message): Task {
-  const task = newTask();
-  task.state = "working";
-  task.messages.push(message);
-  console.log(`    WRITER  : started task ${task.id} skill=${skillId}`);
-
-  const data = findDataPart(message);
-  if (!data || !("targetLength" in data.payload)) {
-    task.state = "input_required";
-    task.messages.push({
-      role: "agent",
-      parts: [
-        {
-          kind: "text",
-          payload: { text: "Please specify targetLength as a data part." },
-        },
-      ],
-    });
-    console.log(`    WRITER  : paused input_required`);
-  } else {
-    finish(task, String(data.payload.targetLength));
-  }
-  return task;
-}
-
-function writerTasksReply(taskId: string, message: Message): Task {
-  const task = TASK_STORE.get(taskId);
-  if (!task) throw new Error(`unknown task ${taskId}`);
-  task.messages.push(message);
-  const data = findDataPart(message);
-  if (task.state === "input_required" && data) {
-    task.state = "working";
-    finish(task, String(data.payload.targetLength ?? "short"));
-  }
-  return task;
-}
-
-function researchAgentFlow(): void {
-  console.log("=".repeat(72));
-  console.log("PHASE 13 LESSON 19 - A2A CALL FROM RESEARCH TO WRITER (TypeScript port)");
-  console.log("=".repeat(72));
-
-  console.log("\n--- research agent fetches writer Agent Card ---");
-  console.log(
-    JSON.stringify(
-      {
-        name: WRITER_AGENT_CARD.name,
-        url: WRITER_AGENT_CARD.url,
-        skills: WRITER_AGENT_CARD.skills,
-      },
-      null,
-      2,
-    ),
-  );
-
-  const skill = WRITER_AGENT_CARD.skills[0];
-  const skillId = skill.id;
-  console.log(`\n  research agent will invoke skill: ${skillId}`);
-
-  const fakePdfBytes = Buffer.from("fake-pdf").toString("base64");
-  const initialMessage: Message = {
-    role: "user",
-    parts: [
-      { kind: "text", payload: { text: "Summarize the attached paper." } },
-      {
-        kind: "file",
-        payload: {
-          file: { name: "paper.pdf", mimeType: "application/pdf", bytes: fakePdfBytes },
-        },
-      },
-    ],
-  };
-  let task = writerTasksSend(skillId, initialMessage);
-  console.log(`  research : task state = ${task.state}`);
-
-  if (task.state === "input_required") {
-    console.log("\n--- research agent supplies the missing data ---");
-    const followup: Message = {
-      role: "user",
-      parts: [{ kind: "data", payload: { targetLength: "3 paragraphs" } }],
+function sendMessage(request: { message: Message }): Task {
+  const incoming = request.message;
+  let task: Task;
+  if (incoming.taskId === undefined) {
+    const id = newId("task");
+    task = {
+      id,
+      contextId: incoming.contextId ?? newId("context"),
+      status: { state: "TASK_STATE_WORKING" },
+      history: [incoming],
+      artifacts: [],
     };
-    task = writerTasksReply(task.id, followup);
-    console.log(`  research : task state = ${task.state}`);
+    TASK_STORE.set(id, task);
+  } else {
+    const stored = TASK_STORE.get(incoming.taskId);
+    if (stored === undefined) throw new Error(`unknown task ${incoming.taskId}`);
+    task = stored;
+    task.history.push(incoming);
+    task.status = { state: "TASK_STATE_WORKING" };
   }
 
-  console.log("\n--- research agent reads artifact ---");
-  if (task.artifact) {
-    const firstPart = task.artifact.parts[0];
-    console.log(`  name     : ${task.artifact.name}`);
-    console.log(`  mimeType : ${task.artifact.mimeType}`);
-    if (firstPart.kind === "text") {
-      console.log(`  content  : ${firstPart.payload.text}`);
-    }
+  const data = incoming.parts.find((part): part is DataPart => "data" in part)?.data;
+  if (typeof data !== "object" || data === null || !("targetLength" in data)) {
+    task.status = {
+      state: "TASK_STATE_INPUT_REQUIRED",
+      message: message(
+        "ROLE_AGENT",
+        [textPart("Please provide targetLength as a data Part.")],
+        { taskId: task.id, contextId: task.contextId },
+      ),
+    };
+  } else {
+    finish(task, String((data as { targetLength: unknown }).targetLength));
   }
-
-  console.log("\n--- lifecycle observation ---");
-  console.log(`  final state : ${task.state}`);
-  console.log(`  messages    : ${task.messages.length}`);
+  return task;
 }
 
-researchAgentFlow();
+console.log("=".repeat(72));
+console.log("PHASE 13 LESSON 19 - A2A V1 SENDMESSAGE (TYPESCRIPT)");
+console.log("=".repeat(72));
+console.log(`\nGET ${AGENT_CARD_PATH}`);
+console.log(
+  JSON.stringify(
+    {
+      name: WRITER_AGENT_CARD.name,
+      supportedInterfaces: WRITER_AGENT_CARD.supportedInterfaces,
+      skills: WRITER_AGENT_CARD.skills,
+    },
+    null,
+    2,
+  ),
+);
+
+const initial = message("ROLE_USER", [
+  textPart("Summarize the attached paper."),
+  {
+    raw: Buffer.from("fake-pdf").toString("base64"),
+    filename: "paper.pdf",
+    mediaType: "application/pdf",
+  },
+]);
+let task = sendMessage({ message: initial });
+console.log(`\nSendMessage -> ${task.status.state}`);
+
+if (task.status.state === "TASK_STATE_INPUT_REQUIRED") {
+  const followup = message(
+    "ROLE_USER",
+    [{ data: { targetLength: "3 paragraphs" }, mediaType: "application/json" }],
+    { taskId: task.id, contextId: task.contextId },
+  );
+  task = sendMessage({ message: followup });
+}
+
+console.log("\nTask response:");
+console.log(JSON.stringify(task, null, 2));
+console.log(`\nartifactId: ${task.artifacts[0].artifactId}`);

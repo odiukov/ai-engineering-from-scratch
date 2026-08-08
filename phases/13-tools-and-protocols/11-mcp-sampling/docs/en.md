@@ -65,13 +65,13 @@ Client runs its LLM, returns:
 
 ### `modelPreferences`
 
-Three floats summing to 1.0:
+Three independent floats from 0 to 1 (they do not need to sum to 1):
 
 - `costPriority`: favor cheaper models.
 - `speedPriority`: favor faster models.
 - `intelligencePriority`: favor more capable models.
 
-Plus `hints`: named models the server prefers. Client may or may not honor hints; the client's user config always wins.
+Plus ordered `hints`: preferred model names or families matched as substrings. Clients should respect these preferences where possible, can map them to equivalent models, and still make the final selection under the user's configuration.
 
 ### `includeContext`
 
@@ -96,7 +96,7 @@ New in 2025-11-25: the sampling request can include a `tools` array. The client 
 }
 ```
 
-The client loops: sample, execute tool if called, sample again, return final assistant message. This is experimental through Q1 2026; SDK signatures may still drift. Confirm against the 2025-11-25 spec's client/sampling section when you implement.
+The server drives the loop: it receives `ToolUseContent` from the sampled assistant, executes every requested tool, sends a user message containing only the matching `ToolResultContent` blocks, and samples again. A tool-use response carries the standard `stopReason: "toolUse"`; every `toolUseId` must be resolved before the conversation continues.
 
 ### Human-in-the-loop
 
@@ -171,7 +171,7 @@ This lesson produces `outputs/skill-sampling-loop-designer.md`. Given a server-s
 | Loop bomb | "Runaway sampling" | Server-side infinite sampling loop; client must rate-limit |
 | Covert sampling | "Hidden reasoning" | Malicious server hides intent in sampling prompts |
 | Resource theft | "Using user's LLM budget" | Server forces client to spend on sampling it does not want |
-| `stopReason` | "Why generation halted" | `endTurn`, `stopSequence`, or `maxTokens` |
+| `stopReason` | "Why generation halted" | Open string; standard values are `endTurn`, `stopSequence`, `maxTokens`, and `toolUse` |
 
 ## Further Reading
 

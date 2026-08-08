@@ -17,22 +17,34 @@ A2A is the universal wire protocol for that call. Standard discovery, standard t
 
 ### The four elements
 
-**Agent Card.** A JSON document at `/.well-known/agent.json` describing the agent: name, skills, endpoints, supported modalities, auth requirements. Discovery happens by reading the card.
+**Agent Card.** A JSON document at `/.well-known/agent-card.json` describing the agent: name, skills, supported interfaces, media types, capabilities, and security requirements. Discovery happens by reading the card.
 
-```
-GET https://agent.example.com/.well-known/agent.json
+```text
+GET https://agent.example.com/.well-known/agent-card.json
 → {
     "name": "code-review-agent",
-    "skills": ["review-python", "review-typescript"],
-    "endpoints": {
-      "tasks": "https://agent.example.com/tasks"
-    },
-    "auth": {"type": "bearer"},
-    "modalities": ["text", "structured"]
+    "description": "Reviews Python and TypeScript code",
+    "supportedInterfaces": [{
+      "url": "https://agent.example.com/a2a/v1",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    }],
+    "version": "1.2.0",
+    "capabilities": {"streaming": true, "pushNotifications": false},
+    "defaultInputModes": ["application/json"],
+    "defaultOutputModes": ["text/plain", "application/json"],
+    "skills": [{
+      "id": "review-python",
+      "name": "Review Python",
+      "description": "Finds defects in Python code",
+      "tags": ["review", "python"]
+    }]
   }
 ```
 
-**Task.** The unit of work. An async, stateful object with a lifecycle: `submitted → working → completed / failed / canceled`. A client sends a task, polls or subscribes for updates.
+In v1, endpoint and protocol-version selection live in `supportedInterfaces`; the removed v0.3 root fields `url`, `protocolVersion`, `preferredTransport`, and `additionalInterfaces` must not be mixed into this shape.
+
+**Message and Task.** A client sends a `Message` to `POST /message:send`. The message creator assigns `messageId`; if the server creates a stateful `Task`, the server assigns the new task ID. A client-provided `taskId` can only reference an existing task. The task lifecycle includes `submitted`, `working`, interrupted states such as `input-required`, and terminal states such as `completed`, `failed`, `canceled`, and `rejected`.
 
 **Artifact.** The result type produced by a task. Text, structured JSON, image, video, audio. Artifacts are typed so different modalities are first-class.
 
@@ -47,27 +59,27 @@ Production multi-agent systems use both. An A2A peer calls MCP tools on its side
 
 ### Discovery flow
 
-```
+```text
 Client                     Agent server
-  ├──GET /.well-known/agent.json──>
+  ├──GET /.well-known/agent-card.json──>
   <──Agent Card JSON─────────────
-  ├──POST /tasks {skill, input}──>
-  <──201 task_id, state=submitted
+  ├──POST /message:send {message}──>
+  <──200 Task{id=server-generated, status}
   ├──GET /tasks/{id}──────────────>
   <──state=working, 42% done──────
   ├──GET /tasks/{id}──────────────>
   <──state=completed, artifacts──
 ```
 
-Or with streaming: SSE subscription to `/tasks/{id}/events` for push updates.
+Or send the message to `POST /message:stream` for an SSE response. Reconnecting to an existing non-terminal task uses `POST /tasks/{id}:subscribe`.
 
 ### Auth
 
-A2A supports three common patterns:
+A2A Agent Cards declare standard security schemes and requirements. Common deployments use:
 
 - **Bearer token** — OAuth2 or opaque.
 - **mTLS** — mutual TLS; organizations prove identity to each other.
-- **Signed requests** — HMAC over the payload.
+- **API keys or OpenID Connect** — represented in the card's `securitySchemes` and `securityRequirements` fields.
 
 Auth is declared in the Agent Card; clients discover and comply.
 
@@ -104,12 +116,12 @@ sw-agent-card-discovery
 
 ## Build It
 
-`code/main.py` implements an A2A-minimal server and client using `http.server` and JSON. The server:
+`code/main.py` implements an A2A v1 educational HTTP+JSON server and client using `http.server` and JSON. The server:
 
-- exposes `/.well-known/agent.json`,
-- accepts `POST /tasks`,
-- manages task state,
-- returns artifacts on `GET /tasks/{id}`.
+- exposes `/.well-known/agent-card.json` with camelCase v1 fields,
+- accepts `POST /message:send`,
+- assigns new task IDs on the server,
+- returns current Task snapshots on `GET /tasks/{id}`.
 
 The client:
 
@@ -120,7 +132,7 @@ The client:
 
 Run:
 
-```
+```bash
 python3 code/main.py
 ```
 
@@ -135,7 +147,7 @@ The script starts the server in a background thread, then runs the client agains
 Checklist:
 
 - **Pin the spec version.** A2A is still evolving; the Agent Card should declare the protocol version.
-- **Idempotent task creation.** Duplicate submissions (network retries) should produce one task.
+- **Idempotent message handling.** Use the client-created `messageId` to detect a retried `message/send`; never let a client choose the ID of a new task.
 - **Artifact schemas.** Declare what shapes the agent returns; consumers should validate.
 - **Rate limits + auth.** A2A is public-facing; apply standard web security.
 - **Dead-letter for failed tasks.** Inspect patterns over time for recurring failure types.
@@ -144,7 +156,7 @@ Checklist:
 
 1. Run `code/main.py`. Confirm the client discovers the server and receives the correct artifact.
 2. Add a second skill to the server (e.g., "summarize"). Update the Agent Card. Write a client that picks the skill based on task type.
-3. Implement an SSE streaming endpoint: `/tasks/{id}/events` that emits state changes. What does the client need to do differently?
+3. Implement `POST /message:stream` with SSE task updates. What does the client need to do differently?
 4. Read the A2A spec (https://a2a-protocol.org/latest/specification/). Identify three things the spec mandates that this demo does not implement.
 5. Compare A2A (Agent Card discovery) to MCP (server-side capability listing via `listTools`). What is the tradeoff between self-describing agents and capability-probing?
 
@@ -153,11 +165,11 @@ Checklist:
 | Term | What people say | What it actually means |
 |------|----------------|------------------------|
 | A2A | "Agent-to-agent" | Peer protocol for agents to call other agents across systems. Google 2025. |
-| Agent Card | "The agent's business card" | JSON at `/.well-known/agent.json` describing skills, endpoints, auth. |
-| Task | "The unit of work" | Async stateful object with a lifecycle; artifacts produced on completion. |
+| Agent Card | "The agent's business card" | JSON at `/.well-known/agent-card.json` describing skills, interfaces, capabilities, and security. |
+| Task | "The unit of work" | Server-ID'd stateful object with a lifecycle; artifacts produced during work. |
 | Artifact | "The result" | Typed output: text, structured JSON, image, video, audio. First-class media. |
 | Opaque lifecycle | "How it's solved is the agent's business" | Client sees state transitions; server is free to choose framework/tools. |
-| Discovery | "Finding the agent" | `GET /.well-known/agent.json` returns the card. |
+| Discovery | "Finding the agent" | `GET /.well-known/agent-card.json` returns the card. |
 | MCP vs A2A | "Tools vs peers" | MCP: vertical agent ↔ tool. A2A: horizontal agent ↔ agent. |
 | ACP / ANP / NLIP | "Sibling protocols" | Adjacent specs; A2A is the most-adopted 2026. |
 

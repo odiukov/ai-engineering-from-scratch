@@ -1,14 +1,10 @@
-"""Phase 13 Lesson 19 - A2A agent-to-agent protocol.
+"""Phase 13 Lesson 19 - A2A v1.0 wire-shape harness.
 
-Research agent calls writer agent via A2A:
-  1. Research agent fetches writer's Agent Card
-  2. Submits a Task with text + file + data parts
-  3. Writer transitions working -> input_required -> working -> completed
-  4. Research agent receives an Artifact
+Builds current AgentCard, Message, Part, TaskStatus, Task, and Artifact shapes
+by hand, then simulates the JSON-RPC SendMessage operation in memory.
 
-Stdlib only; in-process transport stands in for JSON-RPC over HTTP.
-
-Run: python code/main.py
+Spec: https://a2a-protocol.org/latest/specification/
+Run: python3 main.py
 """
 
 from __future__ import annotations
@@ -16,139 +12,153 @@ from __future__ import annotations
 import base64
 import json
 import uuid
-from dataclasses import dataclass, field
 
 
+AGENT_CARD_PATH = "/.well-known/agent-card.json"
 WRITER_AGENT_CARD = {
-    "schemaVersion": "1.0",
     "name": "writer-agent",
     "description": "Drafts technical summaries and reports from source material.",
-    "url": "https://writer.example.com/a2a",
+    "supportedInterfaces": [
+        {
+            "url": "https://writer.example.com/a2a",
+            "protocolBinding": "JSONRPC",
+            "protocolVersion": "1.0",
+        }
+    ],
     "version": "1.0.0",
+    "capabilities": {"streaming": True, "pushNotifications": False},
+    "defaultInputModes": ["text/plain", "application/pdf", "application/json"],
+    "defaultOutputModes": ["text/markdown"],
     "skills": [
         {
             "id": "draft_report",
             "name": "Draft report",
-            "description": "Given source material and a target length, produce a report.",
-            "inputModes": ["text", "file", "data"],
-            "outputModes": ["text", "artifact"],
+            "description": "Produce a report from source material.",
+            "tags": ["writing", "summarization"],
+            "inputModes": ["text/plain", "application/pdf", "application/json"],
+            "outputModes": ["text/markdown"],
         }
     ],
-    "capabilities": {"streaming": True, "pushNotifications": False},
 }
 
-
-@dataclass
-class Part:
-    kind: str
-    payload: dict
+TASK_STORE: dict[str, dict] = {}
 
 
-@dataclass
-class Message:
-    role: str
-    parts: list[Part] = field(default_factory=list)
+def new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:10]}"
 
 
-@dataclass
-class Artifact:
-    name: str
-    mimeType: str
-    parts: list[Part]
+def text_part(text: str, media_type: str = "text/plain") -> dict:
+    return {"text": text, "mediaType": media_type}
 
 
-@dataclass
-class Task:
-    id: str
-    state: str = "submitted"
-    messages: list[Message] = field(default_factory=list)
-    artifact: Artifact | None = None
-
-    def append(self, m: Message) -> None:
-        self.messages.append(m)
+def data_part(data: object) -> dict:
+    return {"data": data, "mediaType": "application/json"}
 
 
-TASK_STORE: dict[str, Task] = {}
+def message(role: str, parts: list[dict], **links: str) -> dict:
+    value = {"messageId": new_id("msg"), "role": role, "parts": parts}
+    value.update(links)
+    return value
 
 
-def writer_tasks_send(skill_id: str, message: Message) -> Task:
-    task = Task(id=f"task_{uuid.uuid4().hex[:10]}")
-    TASK_STORE[task.id] = task
-    task.state = "working"
-    task.append(message)
-    print(f"    WRITER  : started task {task.id} skill={skill_id}")
-    # needs target_length
-    data_parts = [p for p in message.parts if p.kind == "data"]
-    if not data_parts or "targetLength" not in data_parts[0].payload:
-        task.state = "input_required"
-        task.append(Message(role="agent", parts=[
-            Part("text", {"text": "Please specify target_length as a data part."})
-        ]))
-        print(f"    WRITER  : paused input_required")
-    else:
-        finish(task, data_parts[0].payload["targetLength"])
-    return task
+def artifact(artifact_id: str, name: str, text: str) -> dict:
+    return {
+        "artifactId": artifact_id,
+        "name": name,
+        "parts": [text_part(text, "text/markdown")],
+    }
 
 
-def writer_tasks_reply(task_id: str, message: Message) -> Task:
-    task = TASK_STORE[task_id]
-    task.append(message)
-    data_parts = [p for p in message.parts if p.kind == "data"]
-    if task.state == "input_required" and data_parts:
-        task.state = "working"
-        finish(task, data_parts[0].payload.get("targetLength", "short"))
-    return task
-
-
-def finish(task: Task, length: str) -> None:
-    text = f"[writer agent] {length} summary of provided source: "\
-           f"topic identified, key points extracted, conclusion drafted."
-    task.artifact = Artifact(
-        name="summary",
-        mimeType="text/markdown",
-        parts=[Part("text", {"text": text})],
+def finish(task: dict, length: str) -> None:
+    text = (
+        f"[writer agent] {length} summary: topic identified, key points "
+        "extracted, conclusion drafted."
     )
-    task.state = "completed"
-    print(f"    WRITER  : completed task {task.id}")
+    task["artifacts"] = [artifact(new_id("artifact"), "summary", text)]
+    task["status"] = {"state": "TASK_STATE_COMPLETED"}
+    print(f"    WRITER  : completed task {task['id']}")
+
+
+def send_message(request: dict) -> dict:
+    """Simulate the A2A v1 JSON-RPC SendMessage operation."""
+    incoming = request["message"]
+    task_id = incoming.get("taskId")
+    if task_id is None:
+        task_id = new_id("task")
+        context_id = incoming.get("contextId", new_id("context"))
+        task = {
+            "id": task_id,
+            "contextId": context_id,
+            "status": {"state": "TASK_STATE_WORKING"},
+            "history": [incoming],
+            "artifacts": [],
+        }
+        TASK_STORE[task_id] = task
+    else:
+        task = TASK_STORE[task_id]
+        task["history"].append(incoming)
+        task["status"] = {"state": "TASK_STATE_WORKING"}
+
+    supplied = [part["data"] for part in incoming["parts"] if "data" in part]
+    if not supplied or "targetLength" not in supplied[0]:
+        task["status"] = {
+            "state": "TASK_STATE_INPUT_REQUIRED",
+            "message": message(
+                "ROLE_AGENT",
+                [text_part("Please provide targetLength as a data Part.")],
+                taskId=task["id"],
+                contextId=task["contextId"],
+            ),
+        }
+    else:
+        finish(task, str(supplied[0]["targetLength"]))
+    return task
 
 
 def research_agent_flow() -> None:
     print("=" * 72)
-    print("PHASE 13 LESSON 19 - A2A CALL FROM RESEARCH TO WRITER")
+    print("PHASE 13 LESSON 19 - A2A V1 SENDMESSAGE")
     print("=" * 72)
+    print(f"\nGET {AGENT_CARD_PATH}")
+    print(
+        json.dumps(
+            {
+                "name": WRITER_AGENT_CARD["name"],
+                "supportedInterfaces": WRITER_AGENT_CARD["supportedInterfaces"],
+                "skills": WRITER_AGENT_CARD["skills"],
+            },
+            indent=2,
+        )
+    )
 
-    print("\n--- research agent fetches writer Agent Card ---")
-    print(json.dumps({k: WRITER_AGENT_CARD[k] for k in ("name", "url", "skills")}, indent=2))
+    fake_pdf = base64.b64encode(b"fake-pdf").decode()
+    initial = message(
+        "ROLE_USER",
+        [
+            text_part("Summarize the attached paper."),
+            {
+                "raw": fake_pdf,
+                "filename": "paper.pdf",
+                "mediaType": "application/pdf",
+            },
+        ],
+    )
+    task = send_message({"message": initial})
+    print(f"\nSendMessage -> {task['status']['state']}")
 
-    skill = WRITER_AGENT_CARD["skills"][0]
-    skill_id = skill["id"]
-    print(f"\n  research agent will invoke skill: {skill_id}")
+    if task["status"]["state"] == "TASK_STATE_INPUT_REQUIRED":
+        followup = message(
+            "ROLE_USER",
+            [data_part({"targetLength": "3 paragraphs"})],
+            taskId=task["id"],
+            contextId=task["contextId"],
+        )
+        task = send_message({"message": followup})
 
-    msg = Message(role="user", parts=[
-        Part("text", {"text": "Summarize the attached paper."}),
-        Part("file", {"file": {"name": "paper.pdf", "mimeType": "application/pdf",
-                                "bytes": base64.b64encode(b"fake-pdf").decode()}}),
-    ])
-    task = writer_tasks_send(skill_id, msg)
-    print(f"  research : task state = {task.state}")
-
-    if task.state == "input_required":
-        print("\n--- research agent supplies the missing data ---")
-        followup = Message(role="user", parts=[
-            Part("data", {"targetLength": "3 paragraphs"}),
-        ])
-        task = writer_tasks_reply(task.id, followup)
-        print(f"  research : task state = {task.state}")
-
-    print("\n--- research agent reads artifact ---")
-    if task.artifact:
-        print(f"  name     : {task.artifact.name}")
-        print(f"  mimeType : {task.artifact.mimeType}")
-        print(f"  content  : {task.artifact.parts[0].payload['text']}")
-
-    print("\n--- lifecycle observation ---")
-    print(f"  final state : {task.state}")
-    print(f"  messages    : {len(task.messages)}")
+    print("\nTask response:")
+    print(json.dumps(task, indent=2))
+    print(f"\nartifactId: {task['artifacts'][0]['artifactId']}")
 
 
 if __name__ == "__main__":

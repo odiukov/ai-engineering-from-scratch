@@ -29,16 +29,16 @@
   <text x="770" y="124" text-anchor="middle" class="small">opaque implementation</text>
 
   <line x1="220" y1="160" x2="680" y2="160" class="edge" marker-end="url(#arrow)"/>
-  <text x="450" y="152" text-anchor="middle" class="small">GET /.well-known/agent.json</text>
+  <text x="450" y="152" text-anchor="middle" class="small">GET /.well-known/agent-card.json</text>
 
   <line x1="680" y1="200" x2="220" y2="200" class="edge" marker-end="url(#arrow)"/>
-  <text x="450" y="192" text-anchor="middle" class="small">Agent Card: skills, endpoints, auth, modalities</text>
+  <text x="450" y="192" text-anchor="middle" class="small">Agent Card: skills, supportedInterfaces, security</text>
 
   <line x1="220" y1="240" x2="680" y2="240" class="edge" marker-end="url(#arrow)"/>
-  <text x="450" y="232" text-anchor="middle" class="small">POST /tasks {skill: review-python, payload: {...}}</text>
+  <text x="450" y="232" text-anchor="middle" class="small">POST /message:send {message: {...}}</text>
 
   <line x1="680" y1="280" x2="220" y2="280" class="edge" marker-end="url(#arrow)"/>
-  <text x="450" y="272" text-anchor="middle" class="small">201 task_id=baf1fc13, state=submitted</text>
+  <text x="450" y="272" text-anchor="middle" class="small">200 Task id=server-generated, status=submitted</text>
 
   <line x1="220" y1="320" x2="680" y2="320" class="edge" marker-end="url(#arrow)"/>
   <text x="450" y="312" text-anchor="middle" class="small">GET /tasks/baf1fc13 (poll)</text>

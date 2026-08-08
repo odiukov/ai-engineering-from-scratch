@@ -98,9 +98,10 @@ Ball-park every ViT this way before you load the checkpoint. The backbone size s
 
 The encoder most open VLMs ship with in 2026 is SigLIP 2 SO400m/14 at native resolution (NaFlex). It has:
 - 400M parameters.
-- Patch size 14, default resolution 384 → 729 patch tokens per image. Note 384
-  is not divisible by 14: the grid is 27x27 = 729, computed as (384 // 14)^2,
-  so the last few pixels on each edge are dropped.
+- Patch size 14, default resolution 384 → 729 patch tokens per image, i.e.
+  a 27x27 patch grid. Do not compute this by rounding `384 / 14`; use the
+  model's emitted grid/token count, because edge handling belongs to the
+  concrete image processor and patch embedding implementation.
 - Mean pool for image-level tasks; all 729 patches flow into the LLM for VQA.
 - 4 register tokens, discarded before LLM handoff.
 - 2D-RoPE with image-level scaling for native aspect ratio.

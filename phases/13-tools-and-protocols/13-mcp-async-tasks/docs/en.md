@@ -12,7 +12,7 @@
 - Identify when to promote a tool from synchronous to task-augmented (>30 seconds of server-side work).
 - Walk the task lifecycle: `working` → `input_required` → `completed` / `failed` / `cancelled`.
 - Persist task state so crashes do not lose in-flight work.
-- Poll `tasks/status` and fetch `tasks/result` correctly.
+- Poll `tasks/get` and fetch the underlying result through blocking `tasks/result`.
 
 ## The Problem
 
@@ -22,45 +22,61 @@ A `generate_report` tool runs a multi-minute extraction pipeline. Options under 
 2. Return immediately with a placeholder; require the client to poll a custom endpoint. Breaks the MCP uniformity.
 3. Fire-and-forget; no result.
 
-None are good. SEP-1686 adds a fourth: task augmentation. Any request (typically `tools/call`) can be tagged as a task. The server returns a task id immediately. The client polls `tasks/status` and fetches `tasks/result` when done. Server-side state survives restarts.
+None are good. SEP-1686 adds a fourth: task augmentation. A supported request (typically `tools/call`) can carry `params.task`. The receiver immediately returns a `CreateTaskResult`; the requestor polls `tasks/get` and retrieves the original operation's result through `tasks/result`.
 
 ## The Concept
 
 ### Task augmentation
 
-A request becomes a task by setting `params._meta.task.required: true` (or `optional: true`, server decides). The server responds immediately with:
+A request becomes a task by including `task` directly in its params:
 
 ```json
 {
-  "jsonrpc": "2.0", "id": 1,
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "generate_report",
+    "arguments": {"size": "large"},
+    "task": {"ttl": 900000}
+  }
+}
+```
+
+The receiver responds immediately with a `CreateTaskResult` whose only required member is the Task:
+
+```json
+{
   "result": {
-    "_meta": {
-      "task": {
-        "id": "tsk_9f7b...",
-        "state": "working",
-        "ttl": 900000
-      }
+    "task": {
+      "taskId": "tsk_9f7b...",
+      "status": "working",
+      "createdAt": "2025-11-25T10:30:00Z",
+      "lastUpdatedAt": "2025-11-25T10:30:00Z",
+      "ttl": 900000,
+      "pollInterval": 1000
     }
   }
 }
 ```
 
-`ttl` is the server's promise to retain state; after ttl the task result is discarded.
+`createdAt` and `lastUpdatedAt` are ISO 8601 timestamps. `ttl` is the actual retention duration accepted by the receiver; `null` means unlimited retention.
 
 ### Per-tool opt-in
 
 Tool annotations can declare task support:
 
-- `taskSupport: "forbidden"` — this tool always runs synchronously. Safe for fast tools.
-- `taskSupport: "optional"` — client may request task-augmentation.
-- `taskSupport: "required"` — client MUST use task augmentation.
+- `execution.taskSupport: "forbidden"` (or absent) — do not augment this tool call.
+- `execution.taskSupport: "optional"` — the client may request task augmentation.
+- `execution.taskSupport: "required"` — the client must use task augmentation.
 
 A `generate_report` tool would be `required`. A `notes_search` tool would be `forbidden`.
 
 ### States
 
-```
+```text
 working  -> input_required -> working  (loop via elicitation)
+input_required -> completed / failed / cancelled
 working  -> completed
 working  -> failed
 working  -> cancelled
@@ -70,17 +86,17 @@ State machine is append-only: once `completed`, `failed`, or `cancelled`, the ta
 
 ### Methods
 
-- `tasks/status {taskId}` — returns current state and a progress hint.
-- `tasks/result {taskId}` — blocks or returns 404 if not yet done.
-- `tasks/cancel {taskId}` — idempotent; terminal states ignore.
+- `tasks/get {taskId}` — returns the full Task, including `status` and timestamps.
+- `tasks/result {taskId}` — blocks until terminal, then returns exactly the underlying operation result or JSON-RPC error.
+- `tasks/cancel {taskId}` — cancels a non-terminal task; terminal tasks fail with `-32602` Invalid params.
 - `tasks/list` — optional; enumerates active and recently-completed tasks.
 
 ### Streaming state changes
 
 When the server supports it, the client can subscribe to state notifications:
 
-```
-server -> notifications/tasks/updated {taskId, state, progress?}
+```text
+receiver -> notifications/tasks/status {taskId, status, createdAt, lastUpdatedAt, ttl}
 ```
 
 Clients that stream rather than poll get better UX. Polling is always supported as the minimal surface.
@@ -91,7 +107,7 @@ The spec requires servers that declare task support to persist state. A crash sh
 
 ### Cancellation semantics
 
-`tasks/cancel` is idempotent. If the task is mid-execution, the server attempts to stop (check executor-cooperative cancellation). If already terminal, the request is a no-op.
+For a non-terminal task, `tasks/cancel` attempts to stop execution and transitions the Task to `cancelled` before replying. Cancelling `completed`, `failed`, or already `cancelled` Tasks is invalid and returns JSON-RPC `-32602`; retrying cancellation is therefore not an idempotent no-op.
 
 ### Crash recovery
 
@@ -115,7 +131,7 @@ tp-task-lifecycle
 
 ## Use It
 
-`code/main.py` implements a durable task store (filesystem-backed) and a `generate_report` tool that runs in a background thread. Clients call the tool, get a task id immediately, poll `tasks/status` while the worker updates progress, and fetch `tasks/result` when done. Cancellation works; crash recovery is simulated by killing the worker thread and reloading state.
+`code/main.py` implements a durable task store (filesystem-backed) and a `generate_report` tool that runs in a background thread. Clients send `params.task`, receive a `CreateTaskResult`, poll `tasks/get`, and call blocking `tasks/result` for the underlying `CallToolResult`. The cancellation demo also shows the required `-32602` response on a repeated terminal cancellation.
 
 What to look at:
 
@@ -144,19 +160,20 @@ This lesson produces `outputs/skill-task-store-designer.md`. Given a long-runnin
 
 | Term | What people say | What it actually means |
 |------|----------------|------------------------|
-| Task | "Long-running tool call" | Request augmented with `_meta.task` for async execution |
+| Task | "Long-running request" | Durable state machine wrapping a supported MCP request |
 | SEP-1686 | "Tasks spec" | Spec Evolution Proposal that added Tasks in 2025-11-25 |
-| `_meta.task` | "Task envelope" | Per-request metadata containing id, state, ttl |
-| taskSupport | "Tool flag" | `forbidden` / `optional` / `required` per tool |
-| `tasks/status` | "Poll method" | Fetch current state and optional progress hint |
-| `tasks/result` | "Fetch result" | Returns the completed payload or 404 if not yet done |
-| `tasks/cancel` | "Stop it" | Idempotent cancellation request |
+| `params.task` | "Task augmentation" | Per-request task metadata, currently an optional requested `ttl` |
+| `execution.taskSupport` | "Tool flag" | `forbidden` / `optional` / `required` per tool |
+| `tasks/get` | "Poll method" | Fetch the full Task with `taskId`, `status`, and ISO timestamps |
+| `tasks/result` | "Fetch result" | Blocks until terminal and returns the underlying result or error |
+| `tasks/cancel` | "Stop it" | Cancels non-terminal Tasks; terminal cancellation is `-32602` |
 | ttl | "Retention budget" | Milliseconds the server promises to keep the task state |
-| `notifications/tasks/updated` | "State push" | Server-initiated state-change event |
+| `notifications/tasks/status` | "State push" | Optional receiver-initiated full Task status event |
 | Durable store | "Crash-safe state" | Filesystem / SQLite / Redis persistence layer |
 
 ## Further Reading
 
+- [MCP — Tasks specification 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks) — canonical wire shapes and behavior requirements
 - [MCP — GitHub SEP-1686 issue](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1686) — the originating proposal and full discussion
 - [WorkOS — MCP async tasks for AI agent workflows](https://workos.com/blog/mcp-async-tasks-ai-agent-workflows) — design walkthrough with rationale
 - [DeepWiki — MCP task system and async operations](https://deepwiki.com/modelcontextprotocol/modelcontextprotocol/2.7-task-system-and-async-operations) — mechanics and state machine
