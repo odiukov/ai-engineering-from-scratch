@@ -1,19 +1,19 @@
 <!-- i18n:manual -->
 # A2A — протокол «агент — агент»
 
-> MCP — это связка «агент — инструмент». A2A (Agent2Agent) — связка «агент — агент»: открытый протокол, который позволяет непрозрачным агентам на разных фреймворках работать вместе. Google выпустила его в апреле 2025-го, в июне 2025-го передала Linux Foundation, в апреле 2026-го протокол дошёл до v1.0 при 150+ поддержавших организациях, среди которых AWS, Cisco, Microsoft, Salesforce, SAP и ServiceNow. Он вобрал в себя ACP от IBM и получил платёжное расширение AP2. В этом уроке разбираем Agent Card, жизненный цикл Task и две транспортные привязки.
+> MCP — это связка «агент — инструмент». A2A (Agent2Agent) — связка «агент — агент»: открытый протокол, который позволяет непрозрачным агентам на разных фреймворках работать вместе. Google выпустила его в апреле 2025-го, в июне 2025-го передала Linux Foundation, в апреле 2026-го протокол дошёл до v1.0 при 150+ поддержавших организациях, среди которых AWS, Cisco, Microsoft, Salesforce, SAP и ServiceNow. Он вобрал в себя ACP от IBM и получил платёжное расширение AP2. В этом уроке разбираем Agent Card, жизненный цикл Task и привязки протокола v1.
 
 **Type:** Build
-**Languages:** Python (stdlib, Agent Card + Task harness)
+**Languages:** Python, TypeScript (stdlib, Agent Card + Task harness)
 **Prerequisites:** Phase 13 · 06 (MCP fundamentals), Phase 13 · 08 (MCP client)
 **Time:** ~75 minutes
 
 ## Learning Objectives
 
 - Различать сценарии «агент — инструмент» (MCP) и «агент — агент» (A2A).
-- Публиковать Agent Card по адресу `/.well-known/agent.json` — со списком skills и метаданными эндпоинта.
-- Проходить жизненный цикл Task (submitted → working → input-required → completed / failed / canceled / rejected).
-- Использовать Messages с Parts (text, file, data) и Artifacts как результат работы.
+- Публиковать Agent Card по адресу `/.well-known/agent-card.json` — со skills и версионированными интерфейсами.
+- Проходить жизненный цикл v1 `TASK_STATE_*` через работу, прерывание и терминальные состояния.
+- Использовать Messages с Parts (`text`, `raw`, `url`, `data`) и Artifacts как результат работы.
 
 ## The Problem
 
@@ -33,71 +33,78 @@ A2A — это протокол «пусть агенты с разных фре
 
 ### Agent Card
 
-Каждый агент, совместимый с A2A, публикует карточку по адресу `/.well-known/agent.json`:
+Каждый агент, совместимый с A2A, публикует карточку по адресу `/.well-known/agent-card.json`:
 
 ```json
 {
-  "schemaVersion": "1.0",
   "name": "research-agent",
   "description": "Summarizes academic papers and drafts citations.",
-  "url": "https://research.example.com/a2a",
+  "supportedInterfaces": [
+    {"url": "https://research.example.com/a2a", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+  ],
   "version": "1.2.0",
+  "defaultInputModes": ["text/plain", "application/pdf", "application/json"],
+  "defaultOutputModes": ["text/markdown"],
   "skills": [
     {
       "id": "summarize_paper",
       "name": "Summarize a paper",
       "description": "Read a paper PDF and produce a 3-paragraph summary.",
-      "inputModes": ["text", "file"],
-      "outputModes": ["text", "artifact"]
+      "tags": ["research", "summarization"],
+      "inputModes": ["text/plain", "application/pdf"],
+      "outputModes": ["text/markdown"]
     }
   ],
   "capabilities": {"streaming": true, "pushNotifications": true}
 }
 ```
 
-Обнаружение работает через URL: забираете карточку, узнаёте URL A2A-эндпоинта, перечисляете skills.
+Обнаружение работает через URL: забираете карточку, выбираете первый подходящий элемент из упорядоченного `supportedInterfaces`, перечисляете skills. Версия самого агента в `version` и версия A2A в `protocolVersion` — разные поля.
 
-> 🎒 **На пальцах.** Agent Card — это визитка на двери офиса: имя, что умеем, куда стучаться. В примере выше skill ровно один — `summarize_paper`, он принимает `text` и `file`, а отдаёт `text` и `artifact`. Значит PDF ему прислать можно, а картинку уже нет: `inputModes` этого не обещает, и вызывающий узнаёт это до первого запроса.
+> 🎒 **На пальцах.** Agent Card — это визитка на двери офиса: имя, что умеем, куда стучаться. В примере skill ровно один — `summarize_paper`; он принимает `text/plain` и `application/pdf`, а выдаёт `text/markdown`. Куда стучаться, клиент узнаёт из первого подходящего элемента `supportedInterfaces`.
 
-### Signed Agent Cards (AP2)
+### Signed Agent Cards
 
-Расширение AP2 (сентябрь 2025) добавляет к Agent Card криптографические подписи. Издатель подписывает свою карточку через JWT, а потребители проверяют подпись. Это закрывает подмену агента чужим именем.
+Agent Card в A2A v1 может нести массив `signatures` с подписями JWS. Потребитель проверяет происхождение и целостность карточки до того, как доверить её эндпоинтам и skills. AP2 — отдельный платёжный протокол, а не источник этой возможности.
 
-> 🎒 **На пальцах.** Подпись — как голограмма на паспорте. Без AP2 кто угодно поднимает сервер, отдаёт карточку с именем `payments-agent`, и ваш агент отправляет ему задачу с реквизитами. С подписью JWT вы сверяете издателя карточки с известным ключом, и подделка отваливается на этапе проверки, а не после списания денег.
+> 🎒 **На пальцах.** Подпись — как голограмма на паспорте. Без проверки кто угодно может отдать карточку с именем `payments-agent`. JWS в `signatures` позволяет сверить издателя с известным ключом до отправки задачи; это часть A2A v1, а не AP2.
 
 ### Task lifecycle
 
-```
-submitted -> working -> completed | failed | canceled | rejected
-             -> input_required -> working (loop via message)
+```text
+TASK_STATE_SUBMITTED -> TASK_STATE_WORKING -> TASK_STATE_COMPLETED | TASK_STATE_FAILED
+                         |                    TASK_STATE_CANCELED | TASK_STATE_REJECTED
+                         -> TASK_STATE_INPUT_REQUIRED -> TASK_STATE_WORKING
 ```
 
-Клиенты стартуют вызовом `tasks/send`. Вызванный агент переходит по состояниям; клиенты подписываются на обновления через SSE или опрашивают сами.
+Абстрактная операция называется `SendMessage`. В JSON-RPC-привязке v1 метод так и пишется — `SendMessage`; в HTTP+JSON ему соответствует `POST /message:send`. Устаревший `tasks/send` не является методом v1.
 
 > 🎒 **На пальцах.** Схема выше — это заказ в мастерской: приняли, работаем, «а какой цвет вам нужен?», готово. Посчитайте состояния: их семь, из них четыре финальных (completed, failed, canceled, rejected) — то есть задача всегда заканчивается ровно в одном из четырёх исходов, и цикл через input_required — единственный способ вернуться в working.
 
 ### Messages and Parts
 
-Сообщение несёт одну или несколько Parts:
+Сообщение имеет обязательный `messageId`, роль `ROLE_USER` или `ROLE_AGENT` и одну или несколько Parts. У Part в v1 нет дискриминатора `kind`: внутри ровно одно из `text`, `raw`, `url` или `data`, плюс необязательные `filename`, `mediaType` и metadata:
 
 - `text` — обычный текст.
-- `file` — blob в base64 с указанным mimeType.
-- `data` — типизированный JSON (структурированный вход для вызываемого агента).
+- `raw` — байты в base64 в JSON.
+- `url` — URL с файловым содержимым.
+- `data` — любое структурированное JSON-значение.
 
 Пример:
 
 ```json
 {
-  "role": "user",
+  "messageId": "msg-123",
+  "role": "ROLE_USER",
   "parts": [
-    {"type": "text", "text": "Summarize this paper."},
-    {"type": "file", "file": {"name": "paper.pdf", "mimeType": "application/pdf", "bytes": "..."}},
-    {"type": "data", "data": {"targetLength": "3 paragraphs"}}
+    {"text": "Summarize this paper."},
+    {"raw": "...base64...", "filename": "paper.pdf", "mediaType": "application/pdf"},
+    {"data": {"targetLength": "3 paragraphs"}, "mediaType": "application/json"}
   ]
 }
 ```
 
-> 🎒 **На пальцах.** Одно сообщение — три вида груза, как посылка с описью. В примере частей ровно три: текст «Summarize this paper.», файл `paper.pdf` и данные `{"targetLength": "3 paragraphs"}`. Обратите внимание, зачем нужен `data`: длину саммари можно было впихнуть в текст, но тогда агенту пришлось бы её выпарсивать из фразы вместо чтения поля.
+> 🎒 **На пальцах.** Одно сообщение — три вида груза: текст лежит прямо в `text`, PDF передаётся байтами в `raw` с `filename` и `mediaType`, а параметры — структурой в `data`. Поля `type` или `kind` не нужны: тип определяется тем, какое из четырёх полей присутствует.
 
 ### Artifacts
 
@@ -105,24 +112,25 @@ submitted -> working -> completed | failed | canceled | rejected
 
 ```json
 {
+  "artifactId": "artifact-123",
   "name": "summary",
-  "parts": [{"type": "text", "text": "..."}],
-  "mimeType": "text/markdown"
+  "parts": [{"text": "...", "mediaType": "text/markdown"}]
 }
 ```
 
-Artifacts можно стримить кусками. Вызывающая сторона накапливает их у себя.
+`Task.artifacts` всегда имеет множественное число, а каждому Artifact нужен уникальный внутри Task `artifactId`. Текущее состояние Task лежит в `status.state`, обменённые Messages — в `history`. Artifacts можно стримить кусками с тем же `artifactId`.
 
-> 🎒 **На пальцах.** Разница между Artifact и обычной строкой — как между файлом с именем и запиской на салфетке. У артефакта из примера есть `name: "summary"` и `mimeType: "text/markdown"`, поэтому вызывающий сразу знает: это markdown, его можно отрендерить. Сырая строка заставила бы угадывать формат.
+> 🎒 **На пальцах.** Разница между Artifact и обычной строкой — как между файлом с именем и запиской на салфетке. У артефакта есть `artifactId`, а формат каждой части задаёт `mediaType`; это позволяет накапливать стриминговые куски нужного артефакта без угадывания.
 
-### Two transport bindings
+### Protocol bindings
 
-1. **JSON-RPC over HTTP.** Эндпоинт `/a2a`, POST для запросов, опциональный SSE для стриминга. Привязка по умолчанию.
-2. **gRPC.** Для корпоративных окружений, где gRPC и так родной.
+1. **JSON-RPC over HTTP.** Методы PascalCase, например `SendMessage`, и SSE для стриминга.
+2. **gRPC.** RPC-операции с канонической protobuf-моделью данных.
+3. **HTTP+JSON.** Ресурсные маршруты, например `POST /message:send` и `GET /tasks/{id}`.
 
 Обе привязки несут одну и ту же логическую форму сообщения.
 
-> 🎒 **На пальцах.** Две привязки — два способа доставить одно и то же письмо: курьером или по пневмопочте. Содержимое конверта не меняется. JSON-RPC over HTTP берут по умолчанию, потому что он работает из браузера и любого языка; gRPC берут там, где вся внутренняя сеть уже на gRPC и переучиваться дороже, чем добавить вторую привязку.
+> 🎒 **На пальцах.** Три привязки — три способа доставить одно и то же письмо. JSON-RPC удобен методами вроде `SendMessage`, gRPC подходит сетям с protobuf, а HTTP+JSON даёт обычные ресурсные URL. Логическая модель Task, Message и Artifact остаётся одной.
 
 ### Opacity preservation
 
@@ -150,8 +158,8 @@ Artifacts можно стримить кусками. Вызывающая ст�
 | Opacity | Прозрачные вызовы инструментов | Непрозрачные внутренние рассуждения |
 | Typical caller | Рантайм агента | Другой агент |
 | State | Результат вызова инструмента | Task с жизненным циклом |
-| Authorization | OAuth 2.1 (Phase 13 · 16) | Agent Card, подписанная JWT (AP2) |
-| Transport | Stdio / Streamable HTTP | JSON-RPC over HTTP / gRPC |
+| Authorization | OAuth 2.1 (Phase 13 · 16) | Схемы безопасности Agent Card и учётные данные каждого запроса |
+| Transport | Stdio / Streamable HTTP | JSON-RPC / gRPC / HTTP+JSON |
 
 Берите MCP, когда нужно вызвать конкретный инструмент. Берите A2A, когда нужно передать другому агенту целую задачу. Многие продакшен-системы используют оба: MCP — для слоя инструментов, A2A — для слоя сотрудничества.
 
@@ -163,7 +171,7 @@ a2a-task-lifecycle
 
 ## Use It
 
-`code/main.py` реализует минимальную обвязку A2A: агент-исследователь публикует свою карточку, агент-писатель получает `tasks/send` с частями, среди которых PDF и текстовая инструкция, проходит переходы working → input_required → working → completed и возвращает текстовый артефакт. Всё на stdlib; транспорт в памяти, чтобы сосредоточиться на форме сообщений.
+`code/main.py` и `code/main.ts` реализуют минимальную обвязку A2A v1: агент-исследователь публикует карточку, агент-писатель обрабатывает `SendMessage` с текстовыми и PDF-Parts, проходит `TASK_STATE_WORKING` → `TASK_STATE_INPUT_REQUIRED` → `TASK_STATE_WORKING` → `TASK_STATE_COMPLETED` и возвращает Artifact в `Task.artifacts`. Обе версии используют транспорт в памяти, чтобы сосредоточиться на форме сообщений.
 
 На что смотреть:
 
@@ -200,13 +208,13 @@ a2a-task-lifecycle
 | Term | What people say | What it actually means |
 |------|----------------|------------------------|
 | A2A | «Протокол агент — агент» | Открытый протокол для сотрудничества непрозрачных агентов |
-| Agent Card | «`.well-known/agent.json`» | Опубликованные метаданные с описанием skills агента и его эндпоинта |
+| Agent Card | «`.well-known/agent-card.json`» | Опубликованные метаданные с skills и упорядоченными `supportedInterfaces` |
 | Skill | «Вызываемая единица» | Именованная операция, которую поддерживает агент (аналог инструмента в MCP) |
-| Task | «Единица делегирования» | Рабочий элемент с жизненным циклом и итоговым артефактом |
-| Message | «Вход задачи» | Несёт в себе Parts (text, file, data) |
-| Part | «Типизированный кусок» | Элемент сообщения типа `text` / `file` / `data` |
-| Artifact | «Выход задачи» | Именованный типизированный результат, возвращаемый при завершении |
-| AP2 | «Agent Payments Protocol» | Расширение с подписанными Agent Card для доверия и платежей |
+| Task | «Единица делегирования» | Элемент `{id, contextId?, status, history?, artifacts?}` |
+| Message | «Вход задачи» | Идентифицированное сообщение с `ROLE_USER`/`ROLE_AGENT` и Parts |
+| Part | «Типизированный кусок» | Ровно одно из `text` / `raw` / `url` / `data`; без дискриминатора `kind` |
+| Artifact | «Выход задачи» | Результат с обязательным `artifactId` внутри массива `Task.artifacts` |
+| Подпись Agent Card | «Подписанное обнаружение» | JWS-элемент в `AgentCard.signatures` для проверки происхождения и целостности |
 | Opacity | «Сотрудничество вслепую» | Внутренности вызванного агента скрыты от вызывающего |
 | Input-required | «Пауза задачи» | Состояние цикла, когда агенту нужны дополнительные данные |
 

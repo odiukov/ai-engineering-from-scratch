@@ -164,7 +164,7 @@ sequenceDiagram
       }
     }
   },
-  "security": [{ "bearer": [] }]
+  "securityRequirements": [{ "bearer": [] }]
 }
 ```
 
@@ -703,7 +703,11 @@ type AgentCard = {
   name: string;
   description: string;
   version: string;
-  url: string;
+  supportedInterfaces: {
+    url: string;
+    protocolBinding: "JSONRPC" | "HTTP+JSON" | "GRPC";
+    protocolVersion: string;
+  }[];
   capabilities: {
     streaming: boolean;
     pushNotifications: boolean;
@@ -1157,6 +1161,22 @@ function signPayload(identity: AgentIdentity, payload: string): string {
     .sign(null, Buffer.from(payload), identity.privateKey)
     .toString("hex");
 }
+
+function canonicalMessagePayload(message: AgentMessage): string {
+  const canonicalize = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (value !== null && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .filter(([, item]) => item !== undefined)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, item]) => [key, canonicalize(item)])
+      );
+    }
+    return value;
+  };
+  return JSON.stringify(canonicalize(message));
+}
 ```
 
 Это повторяет настоящую модель идентичности ANP: у агентов есть DID-документы с раздельными ключами для аутентификации, согласования ключей и подтверждения человеком. `IdentityRegistry` имитирует разрешение DID (в продакшене это были бы HTTP-запросы к домену агента).
@@ -1207,7 +1227,11 @@ class ProtocolGateway {
     message: AgentMessage,
     sessionId?: string
   ): Promise<{ task: Task; audit: AuditEntry } | { error: string }> {
-    if (!this.identityRegistry.verify(fromDid, signature, message.id)) {
+    if (!this.identityRegistry.verify(
+      fromDid,
+      signature,
+      canonicalMessagePayload(message)
+    )) {
       return { error: "Identity verification failed" };
     }
 
@@ -1263,7 +1287,11 @@ async function protocolDemo() {
     name: "researcher",
     description: "Searches and summarizes findings",
     version: "1.0.0",
-    url: "https://researcher.local/a2a/v1",
+    supportedInterfaces: [{
+      url: "https://researcher.local/a2a/v1",
+      protocolBinding: "HTTP+JSON",
+      protocolVersion: "1.0",
+    }],
     capabilities: { streaming: true, pushNotifications: false },
     defaultInputModes: ["text/plain"],
     defaultOutputModes: ["text/plain", "application/json"],
@@ -1282,7 +1310,11 @@ async function protocolDemo() {
     name: "coder",
     description: "Writes code from specs",
     version: "1.0.0",
-    url: "https://coder.local/a2a/v1",
+    supportedInterfaces: [{
+      url: "https://coder.local/a2a/v1",
+      protocolBinding: "HTTP+JSON",
+      protocolVersion: "1.0",
+    }],
     capabilities: { streaming: false, pushNotifications: false },
     defaultInputModes: ["text/plain", "application/json"],
     defaultOutputModes: ["text/plain"],
@@ -1399,11 +1431,12 @@ async function protocolDemo() {
 
   console.log("\n2. Identity Verification (ANP)");
   const message = textMessage("user", "Research React 19 compiler features");
-  const signature = signPayload(coderIdentity, message.id);
+  const signedPayload = canonicalMessagePayload(message);
+  const signature = signPayload(coderIdentity, signedPayload);
   const verified = identityRegistry.verify(
     coderIdentity.did,
     signature,
-    message.id
+    signedPayload
   );
   console.log(`   Coder DID: ${coderIdentity.did}`);
   console.log(`   Signature verified: ${verified}`);
